@@ -27,7 +27,7 @@ mcp>=1.28,<2
 #   para no saltar a una major con cambios de API. El contenedor Kali vivo y la verificación
 #   corren httpx 0.28.1 (dentro del rango). El SDK `mcp` ya depende de httpx; aquí se declara
 #   explícito porque este módulo lo importa y lo usa directamente.
-httpx>=0.27,<1
+httpx>=0.28.1,<1
 
 # anyio: dependencia del transporte asíncrono del SDK mcp (streamable-HTTP), igual que en
 #   la imagen Kali. Se fija >=4 por el mismo motivo (API async de esa era).
