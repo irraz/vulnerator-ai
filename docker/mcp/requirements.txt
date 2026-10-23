@@ -31,7 +31,7 @@ httpx>=0.27,<1
 
 # anyio: dependencia del transporte asíncrono del SDK mcp (streamable-HTTP), igual que en
 #   la imagen Kali. Se fija >=4 por el mismo motivo (API async de esa era).
-anyio>=4
+anyio>=4.15.1
 
 # uvicorn: servidor ASGI con el que se sirve la app streamable-http de FastMCP CUANDO la
 #   envolvemos con el middleware Bearer de auth de entrada (no podemos usar
