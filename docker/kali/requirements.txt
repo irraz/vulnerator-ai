@@ -17,7 +17,7 @@ prowler==5.44.0
 mcp>=1.28,<2
 
 # anyio: dependencia del transporte asíncrono del SDK mcp (streamable-HTTP).
-anyio>=4
+anyio>=4.15.1
 
 # BloodHound.py — ingestor de Active Directory (dirkjanm/fox-it, basado en Impacket).
 #   Se instala por PIP (Python 3 puro, sin postinst de dpkg) en lugar del paquete apt
