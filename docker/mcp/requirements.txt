@@ -42,4 +42,4 @@ anyio>=4
 #   Se acota con un límite inferior (disciplina de pin del repo): >=0.30 por `uvicorn.run`
 #   sobre una app ASGI con Starlette moderno y <1 para no saltar a una major. La verificación
 #   corre uvicorn 0.54.0 (dentro del rango).
-uvicorn>=0.30,<1
+uvicorn>=0.54.0,<1
