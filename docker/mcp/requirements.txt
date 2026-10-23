@@ -13,7 +13,7 @@
 #   clientes en la misma era de protocolo evita un desajuste cliente/servidor. El
 #   contenedor Kali vivo corre mcp==1.30.0 (dentro de este rango): prueba de que la línea
 #   soporta `FastMCP.run(transport="streamable-http")` y `streamable_http_app()`.
-mcp>=1.28,<2
+mcp>=2.3.0,<3
 
 # httpx: cliente HTTP del hop a :8642. Justificado (no es stdlib pura por un motivo
 #   concreto): GET /v1/runs/{id}/events es un stream SSE de larga vida que
