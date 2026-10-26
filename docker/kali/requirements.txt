@@ -14,7 +14,7 @@ prowler==5.44.0
 #   Se fija a la línea 1.x (<2) a propósito: el servidor usa la API 1.x de FastMCP,
 #   que v2 renombra/elimina. Mantener el servidor y sus clientes en la misma era de
 #   protocolo evita un desajuste cliente/servidor.
-mcp>=1.28,<2
+mcp>=2.3.0,<3
 
 # anyio: dependencia del transporte asíncrono del SDK mcp (streamable-HTTP).
 anyio>=4.15.1
