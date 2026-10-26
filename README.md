@@ -31,24 +31,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/irraz/vulnerator-ai/actions/workflows/security.yml">
-    <img src="https://github.com/irraz/vulnerator-ai/workflows/Security%20Pipeline/badge.svg" alt="Security Pipeline">
-  </a>
-  &nbsp;
-  <a href="https://github.com/irraz/vulnerator-ai/actions/workflows/pr-checks.yml">
-    <img src="https://github.com/irraz/vulnerator-ai/workflows/PR%20Quality%20Checks/badge.svg" alt="PR Checks">
-  </a>
-  &nbsp;
-  <a href="https://github.com/irraz/vulnerator-ai/security/code-scanning">
-    <img src="https://img.shields.io/badge/CodeQL-enabled-success?style=flat-square&logo=github" alt="CodeQL">
-  </a>
-  &nbsp;
-  <a href=".github/SECURITY-PIPELINE.md">
-    <img src="https://img.shields.io/badge/security-TruffleHog%20|%20Trivy%20|%20Bandit-blue?style=flat-square&logo=security" alt="Security Tools">
-  </a>
-</p>
-
-<p align="center">
   <sub><b>Built with</b></sub>
 </p>
 
