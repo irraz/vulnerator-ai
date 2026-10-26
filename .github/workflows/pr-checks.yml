@@ -114,13 +114,13 @@ jobs:
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: docker/kali/Dockerfile
-          failure-threshold: warning
+          failure-threshold: error
 
       - name: Lint MCP Dockerfile
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: docker/mcp/Dockerfile
-          failure-threshold: warning
+          failure-threshold: error
 
   # ============================================================================
   # COMENTARIO AUTOMÁTICO EN PR
