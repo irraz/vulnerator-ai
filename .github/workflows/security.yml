@@ -28,7 +28,7 @@ jobs:
         with:
           path: ./
           # Solo archivos versionados, ignorar .env y archivos locales
-          extra_args: --only-verified --no-update
+          extra_args: --only-verified
 
   # ============================================================================
   # ANÁLISIS DE SEGURIDAD CON CODEQL (SAST)
@@ -155,9 +155,14 @@ jobs:
   docker-scan:
     name: 🐳 Trivy - Escaneo de Imágenes Docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     # Solo ejecutar en schedule, workflow_dispatch, o PRs (no en push directo)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     strategy:
+      fail-fast: false
       matrix:
         image: [kali, mcp]
     steps:
