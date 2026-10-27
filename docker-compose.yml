@@ -51,6 +51,12 @@ services:
       PROWLER_REGIONS: "${PROWLER_REGIONS-${AWS_REGION:-us-east-1}}"
       PROWLER_SERVICES: "${PROWLER_SERVICES-iam s3}"
       PROWLER_TIMEOUT: "${PROWLER_TIMEOUT:-1800}"
+      # --- Recon / fingerprint APIs (optional) ---
+      # DNSDumpster API key for the `dns_recon` tool; WPScan token for `webtech_scan`
+      # (optional: enables CVE data). Both empty = those tools run without them
+      # (dns_recon fails fail-closed without a key; webtech_scan still enumerates).
+      DNSDUMPSTER_API_KEY: "${DNSDUMPSTER_API_KEY:-}"
+      WPSCAN_API_TOKEN: "${WPSCAN_API_TOKEN:-}"
       # --- Scope-guard (OPT-IN, off by default) ---
       # The scope-guard validates the DESTINATION of kali_run/kali_exec BEFORE executing,
       # deterministically (code, not prompt). It activates ONLY if a scope file exists at

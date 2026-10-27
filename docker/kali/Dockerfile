@@ -75,7 +75,38 @@ RUN apt-get update \
       sqlmap \
       gobuster \
       impacket-scripts \
+      wpscan \
  && rm -rf /var/lib/apt/lists/*
+
+# webanalyze: motor de fingerprints de Wappalyzer (port en Go; el CLI oficial de Wappalyzer
+# está descontinuado). Se usa junto a whatweb + wpscan en la tool `webtech_scan` para cruzar
+# tecnologías/versiones. No está en apt: se baja el binario de release y sus fingerprints
+# (`technologies.json`) a una ruta FIJA (`/opt/webanalyze`), que `webtech_scan` pasa con
+# `-apps`. Versión fijada; checksum verificado contra el `checksums.txt` de la release.
+ARG WEBANALYZE_VERSION=v0.4.6
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) wa_arch="x86_64" ;; \
+      arm64) wa_arch="arm64" ;; \
+      *) echo "[kali-mcp] webanalyze: arch $arch no soportada; se reportará ausente." && exit 0 ;; \
+    esac; \
+    base="https://github.com/rverton/webanalyze/releases/download/${WEBANALYZE_VERSION}"; \
+    ver="${WEBANALYZE_VERSION#v}"; \
+    tarball="webanalyze_Linux_${wa_arch}.tar.gz"; \
+    cd /tmp; \
+    curl -fsSL -o "$tarball" "${base}/${tarball}"; \
+    curl -fsSL -o checksums.txt "${base}/webanalyze_${ver}_checksums.txt"; \
+    grep " ${tarball}\$" checksums.txt | sha256sum -c -; \
+    tar -xzf "$tarball" webanalyze; \
+    install -m 0755 webanalyze /usr/local/bin/webanalyze; \
+    mkdir -p /opt/webanalyze; \
+    ( cd /opt/webanalyze && webanalyze -update ); \
+    test -f /opt/webanalyze/technologies.json; \
+    rm -f /tmp/"$tarball" /tmp/checksums.txt /tmp/webanalyze
+
+# Ruta fija de los fingerprints de webanalyze que lee `webtech_scan` (tool `webtech_scan`).
+ENV WEBANALYZE_APPS=/opt/webanalyze/technologies.json
 
 WORKDIR /opt/kali-mcp
 
@@ -138,6 +169,15 @@ COPY docker/kali/aws_iam_simulate.py ./aws_iam_simulate.py
 # Runner de SHELL CRUDA (tool `kali_exec`): ejecuta un comando arbitrario de la Kali vía
 # `sh -c` reutilizando tool_streaming (STDLIB PURA). Lo importa kali_mcp_server.
 COPY docker/kali/shell_exec.py ./shell_exec.py
+# Cliente de la API de DNSDumpster (tool `dns_recon`): recon DNS + superficie de ataque de
+# un dominio (hosts/IPs/ASN/PTR/banners) con rate limit y paginación. STDLIB PURA (urllib).
+# Lo importa kali_mcp_server (import dnsdumpster_client); sin este COPY el servidor aborta
+# al arrancar con ModuleNotFoundError.
+COPY docker/kali/dnsdumpster_client.py ./dnsdumpster_client.py
+# Fingerprint web por cruce whatweb+webanalyze+wpscan (tool `webtech_scan`): fusiona las
+# versiones que ve cada herramienta y marca conflictos. STDLIB PURA. Lo importa
+# kali_mcp_server (import webtech_scan as webtech); DEBE estar en la imagen.
+COPY docker/kali/webtech_scan.py ./webtech_scan.py
 # Store de hallazgos por engagement (tools `record_finding`/`read_findings`): append
 # estructurado a un JSONL sobre el plano de artefactos (STDLIB PURA, reutiliza
 # artifact_store para confinar la ruta). Lo importa kali_mcp_server.

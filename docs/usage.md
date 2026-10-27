@@ -82,6 +82,48 @@ For CI scripts or plain `curl`, Hermes exposes an OpenAI-compatible API server d
 (the same endpoints `vulnerator-mcp` wraps). Full reference — access modes, the runs flow,
 `chat/completions`, and the request/response contract — in [`http-api.md`](http-api.md).
 
+# Recon & fingerprint tools
+
+The Kali MCP server (`kali-mcp`) ships two dedicated recon tools alongside the raw shell
+(`kali_run`/`kali_exec`). They are **blocking** tools: one call in, structured result out — no
+`started → poll` dance. `server_info` reports which binaries are present (`recon_tools`) and
+whether the DNSDumpster key is set (`dnsdumpster_key_present`).
+
+## `dns_recon` — DNS + attack surface (DNSDumpster API)
+
+Given a domain, enumerates its attack surface in one call: subdomains/hosts, **unique IPs**,
+ASN/PTR and HTTP/HTTPS banners, plus TXT records. It is the usual first recon step — its IPs and
+hosts feed the downstream fan-out (e.g. `webtech_scan` per live host).
+
+- **Key:** set `DNSDUMPSTER_API_KEY` in `.env` (free key at <https://dnsdumpster.com/>; the
+  installer offers to store it). Without a key the tool fails fail-closed and says so.
+- **Rate limit:** the API allows 1 request / 2 s; the client throttles internally and retries once
+  on HTTP 429, so paginating (`max_pages`) or fetching banners (`with_banners`) needs no manual
+  sleeps. Free tier returns up to 50 records/domain; pagination beyond 200 needs a Plus plan.
+- **Returns:** `{status, domain, pages, surface:{hosts, ips, cidrs, txt, counts}, banners?, warnings?}`.
+  The API response is untrusted data — it is normalized in shape, never interpreted.
+
+## `webtech_scan` — technology/version fingerprint by cross-reference
+
+Runs **whatweb + webanalyze + wpscan** against a URL and **merges** what each one sees into a single
+`technology → {versions per source, sources, best_version, version_conflict}` table. Cross-checking
+three detectors raises confidence in a component's version and flags disagreements
+(`version_conflict`) — a useful signal before choosing a version-dependent exploit.
+
+- **Optional binaries, no faking:** any tool missing from the image is skipped and listed under
+  `skipped` (the image installs all three). `wpscan` only contributes on WordPress; on a non-WP
+  site it reports `wpscan.is_wordpress=false` **as a normal result, not an error**.
+- **WPScan token (optional):** set `WPSCAN_API_TOKEN` in `.env` to add known-vulnerability (CVE)
+  data; wpscan still enumerates core/plugin/theme versions without it.
+- **Wappalyzer note:** the official Wappalyzer CLI is discontinued, so the Wappalyzer *fingerprint
+  engine* is provided via [`webanalyze`](https://github.com/rverton/webanalyze) (Go port). Its
+  fingerprint DB lives at `/opt/webanalyze/technologies.json` in the image.
+- **Cross-reference caveat:** merging is by (normalized) technology name. whatweb and webanalyze use
+  different naming vocabularies for some techs (e.g. whatweb encodes a CMS inside `MetaGenerator`'s
+  value while webanalyze names the app directly), so not every detection auto-merges between those
+  two. The cross-reference is most valuable where tools share a name (jQuery, nginx, PHP, WordPress,
+  …) and for surfacing version conflicts.
+
 # Practice against a lab target (Juice Shop)
 
 To practice the `web-pentest` skill without going out to the internet or touching real systems,
