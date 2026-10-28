@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-28
+
 ### Added
 
+- **`dns_recon` tool (DNSDumpster API)** — New `kali-mcp` tool for DNS + attack-surface recon. Given a domain, enumerates hosts/subdomains, unique IPs, ASN/PTR, CIDRs and HTTP/HTTPS banners in a single blocking call, normalizing the response into a consumable attack surface for downstream scanning. Honors the API rate limit (1 req/2s) internally with pagination and a single 429 retry; fails closed without `DNSDUMPSTER_API_KEY`. Pure-stdlib module (`dnsdumpster_client.py`) with a thin `@mcp.tool` wrapper.
+- **`webtech_scan` tool (whatweb + webanalyze + wpscan cross-reference)** — New `kali-mcp` tool that runs three fingerprinters and merges their output into a single `technology → {versions per source, best_version, version_conflict}` table, raising version confidence and surfacing discrepancies. Each binary is optional (skipped and reported, never faked); `wpscan` reports "not WordPress" as a normal result and uses `WPSCAN_API_TOKEN` for CVE data when present. Pure-stdlib module (`webtech_scan.py`) with a thin `@mcp.tool` wrapper.
+- **Recon tooling wiring** — `kali_mcp_server` exposes both tools and reports real binary availability (`recon_tools`) and `dnsdumpster_key_present` in `server_info`. Dockerfile installs `wpscan` (apt) and `webanalyze` (pinned release, checksum-verified) with its fingerprint DB at `/opt/webanalyze/technologies.json`. `.env.example`, `docker-compose.yml` and `install.sh` wire the two optional API keys; `docs/usage.md` documents the tools. Backed by 37 new tests (204 total).
 - **Automatic LLM fallback with GLM-5.3 Flash** — Configured native Hermes `fallback_providers` chain with `z-ai/glm-5.3-flash` as automatic fallback. When Mistral Large 4 fails (rate-limit 429, server error 500/502/503, auth failure 401/403), Hermes automatically switches mid-session without losing context. Per-turn failover: each message attempts primary first. Same Cyber Index as Mistral (50%) but 20x cheaper ($0.07/$0.21 vs $1.36/$4.18). Proven in production for end-to-end exploits and 0-day discovery. Top CyberGym score (84.5%). Manual override via `OPENROUTER_MODEL` env var or `hermes config set model.default`. See `docs/modelos-cyberseguridad-openrouter-CORRECTED.md` for full analysis.
 - **Enhanced model documentation** — Updated `agent-ooda/profile/config.yaml` with detailed `fallback_providers` configuration and prompt cache cost warnings, `.env.example` with automatic fallback behavior, and README section on native Hermes fallback mechanism.
 
