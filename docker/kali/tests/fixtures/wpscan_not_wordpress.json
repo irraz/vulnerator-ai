@@ -1,0 +1,7 @@
+{
+  "db_files_updated": [],
+  "db_update_started": true,
+  "db_update_finished": true,
+  "target_url": "https://www.example.com/",
+  "scan_aborted": "The remote website is up, but does not seem to be running WordPress."
+}

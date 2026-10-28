@@ -1,0 +1,34 @@
+{
+  "target_url": "https://blog.example.com/",
+  "effective_url": "https://blog.example.com/",
+  "version": {
+    "number": "6.4.8",
+    "status": "insecure",
+    "confidence": 100,
+    "interesting_entries": ["https://blog.example.com/, Match: 'WordPress 6.4.8'"]
+  },
+  "main_theme": {
+    "slug": "twentytwentyfour",
+    "style_name": "Twenty Twenty-Four",
+    "version": {"number": "1.2", "confidence": 80}
+  },
+  "plugins": {
+    "contact-form-7": {
+      "slug": "contact-form-7",
+      "version": {"number": "5.9.3", "confidence": 100}
+    },
+    "revslider": {
+      "slug": "revslider",
+      "version": {"number": "6.6.0", "confidence": 90}
+    },
+    "wordpress-seo": {
+      "slug": "wordpress-seo",
+      "version": {"number": "22.6", "confidence": 100}
+    }
+  },
+  "interesting_findings": [
+    {"url": "https://blog.example.com/xmlrpc.php", "type": "xmlrpc", "to_s": "XML-RPC seems to be enabled"},
+    {"url": "https://blog.example.com/readme.html", "type": "readme", "to_s": "WordPress readme found"}
+  ],
+  "scan_aborted": null
+}

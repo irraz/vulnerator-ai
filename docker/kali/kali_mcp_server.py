@@ -56,6 +56,18 @@ import aws_simulate
 # no hay gate de autorización (es responsabilidad del operador).
 import shell_exec
 
+# Cliente de la API de DNSDumpster (STDLIB PURA, sin `mcp`/`requests`): recon DNS +
+# superficie de ataque (hosts, IPs, ASN, PTR, banners) de un dominio, con rate limit
+# (1 req/2s) y paginación. La tool `dns_recon` es una capa fina sobre `recon_domain`.
+import dnsdumpster_client
+
+# Fingerprinting web por CRUCE de whatweb + webanalyze + wpscan (STDLIB PURA): fusiona las
+# versiones que ven las tres herramientas y marca conflictos. La tool `webtech_scan`
+# delega en `run_webtech`. Cada binario es opcional: si no está, se omite (no se finge).
+# Se importa con alias para que la tool `@mcp.tool def webtech_scan(...)` no sombree al
+# módulo (ambos se llamarían igual en el espacio de nombres global).
+import webtech_scan as webtech
+
 # Store de hallazgos por engagement (STDLIB PURA): append estructurado a un JSONL sobre
 # el plano de artefactos (``/artifacts``). Las tools `record_finding`/`read_findings` son
 # una capa fina sobre ``finding_store.append``/``read``. Es el registro durable del que
@@ -159,6 +171,19 @@ KALI_RUN_TOOL_NAME = "kali_run"
 RECORD_FINDING_TOOL_NAME = "record_finding"
 READ_FINDINGS_STORE_TOOL_NAME = "read_findings"
 
+# Tool de recon DNS + superficie de ataque vía la API de DNSDumpster (BLOQUEANTE como
+# `kali_run`): dado un dominio, enumera hosts/subdominios, IPs únicas, ASN/PTR y banners
+# HTTP/HTTPS de un tiro, respetando el rate limit de la API (1 req/2s). Pensada para
+# alimentar el abanico de escaneos aguas abajo (p. ej. `webtech_scan` por cada host/IP).
+# Requiere `DNSDUMPSTER_API_KEY` en el entorno (o pasada como argumento).
+DNS_RECON_TOOL_NAME = "dns_recon"
+
+# Tool de fingerprint web por CRUCE de 3 herramientas (BLOQUEANTE): corre whatweb +
+# webanalyze + wpscan contra una URL y fusiona qué tecnologías/versiones ve cada una,
+# marcando conflictos de versión. wpscan sólo aplica a WordPress (si no lo es, lo reporta
+# sin error). Cada binario es opcional: el que no esté se omite y se anota en `skipped`.
+WEBTECH_SCAN_TOOL_NAME = "webtech_scan"
+
 # El endpoint MCP se monta en la raíz para que KALI_MCP_URL=http://kali:8900
 # (sin path) funcione tal cual con el cliente (streamable-HTTP del SDK oficial).
 mcp = FastMCP("kali-mcp", host=HOST, port=PORT, streamable_http_path="/")
@@ -197,12 +222,23 @@ def server_info() -> dict[str, Any]:
     # Disponibilidad REAL por collector (which de prowler/scout/cloudsplaining); no se
     # finge en arm64: lo que no esté se reporta ausente y su collection falla claro.
     collectors = collector_runner.available_collectors()
+    # Disponibilidad REAL de los binarios de recon/fingerprint (no se finge en arm64 ni en
+    # imágenes recortadas): lo que no esté se reporta ausente y su tool lo omite/avisa.
+    recon_tools = {
+        "whatweb": shutil.which(webtech.WHATWEB_BIN) is not None,
+        "webanalyze": shutil.which(webtech.WEBANALYZE_BIN) is not None,
+        "wpscan": shutil.which(webtech.WPSCAN_BIN) is not None,
+    }
     return {
         "server": "kali-mcp",
         "machine": os.uname().machine,
         "prowler_available": prowler_path is not None,
         "prowler_version": version,
         "collectors": collectors,
+        "recon_tools": recon_tools,
+        "dnsdumpster_key_present": bool(
+            os.environ.get(dnsdumpster_client.API_KEY_ENV, "")
+        ),
         "tools": [
             PROWLER_TOOL_NAME,
             START_COLLECTION_TOOL_NAME,
@@ -216,6 +252,8 @@ def server_info() -> dict[str, Any]:
             KALI_RUN_TOOL_NAME,
             RECORD_FINDING_TOOL_NAME,
             READ_FINDINGS_STORE_TOOL_NAME,
+            DNS_RECON_TOOL_NAME,
+            WEBTECH_SCAN_TOOL_NAME,
             "server_info",
         ],
     }
@@ -766,6 +804,99 @@ def read_findings(
         y ``total=0`` (no revienta).
     """
     return finding_store.read(engagement_id, cursor, limit)
+
+
+@mcp.tool(name=DNS_RECON_TOOL_NAME)
+def dns_recon(
+    domain: str,
+    api_key: str = "",
+    max_pages: int = 1,
+    with_banners: bool = False,
+) -> dict[str, Any]:
+    """Recon DNS + superficie de ataque de un dominio vía la API de DNSDumpster.
+
+    Variante BLOQUEANTE (como ``kali_run``): consulta la API y DEVUELVE en una sola llamada
+    la superficie normalizada del dominio — subdominios/hosts, IPs ÚNICAS, ASN/PTR, CIDRs y
+    banners HTTP/HTTPS, más los TXT. Es el primer paso típico del recon: de sus IPs/hosts
+    sale el abanico de escaneos aguas abajo (p. ej. ``webtech_scan`` por cada host vivo).
+
+    Respeta el rate limit de la API (1 req/2s) internamente, así que paginar
+    (``max_pages``) o pedir banners (``with_banners``) no requiere que el cliente duerma.
+    Delega en ``dnsdumpster_client.recon_domain``; NO interpreta la respuesta (DATO NO
+    CONFIABLE: se transporta verbatim en ``surface``/``banners``).
+
+    Args:
+        domain: dominio a consultar (p. ej. ``example.com``; se acepta con o sin esquema).
+        api_key: API key de DNSDumpster; si está vacía se usa ``DNSDUMPSTER_API_KEY`` del
+            entorno. Sin ninguna de las dos la tool falla fail-closed.
+        max_pages: nº máximo de páginas a recorrer (``?page=N``; >200 registros/>1 página
+            requiere plan Plus). Para al dejar de aportar hosts nuevos.
+        with_banners: si True, además consulta ``/banners/{CIDR}`` por cada CIDR único
+            hallado (más llamadas a la API; respeta el rate limit).
+
+    Returns:
+        ``{'status':'done','domain':...,'pages':n,'surface':{hosts,ips,cidrs,txt,counts},
+        'banners':[...]?,'warnings':[...]?}`` en éxito; o el dict de error del cliente
+        (``unauthorized``/``rate_limited``/``failed``) si la primera consulta falla; o
+        ``{'status':'failed','error':...}`` si ``domain``/key son inválidos (fail-closed).
+    """
+    try:
+        return dnsdumpster_client.recon_domain(
+            domain,
+            api_key=api_key or None,
+            max_pages=max_pages,
+            with_banners=with_banners,
+        )
+    except dnsdumpster_client.DnsDumpsterError as exc:
+        return {"status": "failed", "error": str(exc)}
+
+
+@mcp.tool(name=WEBTECH_SCAN_TOOL_NAME)
+def webtech_scan(
+    url: str,
+    run_wpscan: bool = True,
+    aggression: int = 3,
+    timeout: int = 0,
+) -> dict[str, Any]:
+    """Fingerprint web de una URL por CRUCE de whatweb + webanalyze + wpscan.
+
+    Variante BLOQUEANTE (como ``kali_run``): corre las tres herramientas contra ``url`` y
+    DEVUELVE en una sola llamada una tabla fusionada ``tecnología -> {versiones por fuente,
+    fuentes, best_version, version_conflict}``. Cruzar tres detectores sube la confianza en
+    la VERSIÓN de cada componente y destapa discrepancias (``version_conflict``), señal útil
+    para el bucle OODA al elegir exploits dependientes de versión.
+
+    Cada binario es OPCIONAL (disciplina "no se finge"): el que no esté en la imagen se
+    omite y se anota en ``skipped``. ``wpscan`` sólo aporta si el objetivo es WordPress; si
+    no lo es, se reporta como tal (``wpscan.is_wordpress=False``) SIN tratarlo como error.
+    Si hay ``WPSCAN_API_TOKEN`` en el entorno, wpscan añade datos de vulnerabilidades.
+
+    Delega en ``run_webtech`` del módulo ``webtech_scan`` (importado aquí con alias
+    ``webtech`` para no sombrear a esta tool homónima). La salida de las herramientas es
+    DATO NO CONFIABLE: se PARSEA su forma conocida, nunca se interpreta su contenido.
+
+    Args:
+        url: URL del objetivo (con o sin esquema; sin esquema se asume ``https://``).
+        run_wpscan: si False, omite wpscan (útil cuando ya se sabe que no es WordPress).
+        aggression: nivel de agresividad de whatweb (``-a``, 1..4; 3 por defecto).
+        timeout: timeout por herramienta en segundos; 0 usa el default
+            (``DEFAULT_TOOL_TIMEOUT_S`` del módulo webtech).
+
+    Returns:
+        ``{'status':'done','url':...,'ran':[...],'cross_reference':{technologies,conflicts,
+        sources},'wpscan':{...}?,'skipped':[...]?,'errors':[...]?}`` si al menos una
+        herramienta corrió; ``{'status':'failed',...}`` si la URL es inválida o ninguna
+        herramienta está disponible.
+    """
+    effective_timeout = (
+        timeout if timeout and timeout > 0 else webtech.DEFAULT_TOOL_TIMEOUT_S
+    )
+    return webtech.run_webtech(
+        url,
+        run_wpscan=run_wpscan,
+        aggression=aggression,
+        timeout=effective_timeout,
+    )
 
 
 def _start_artifacts_http() -> None:

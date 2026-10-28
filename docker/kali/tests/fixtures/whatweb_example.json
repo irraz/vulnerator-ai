@@ -1,0 +1,24 @@
+[
+  {
+    "target": "https://example.com",
+    "http_status": 301,
+    "request_config": {"headers": {"User-Agent": "WhatWeb/0.6.4"}},
+    "plugins": {
+      "HTTPServer": {"string": ["nginx"]},
+      "RedirectLocation": {"string": ["https://www.example.com/"]}
+    }
+  },
+  {
+    "target": "https://www.example.com/",
+    "http_status": 200,
+    "request_config": {"headers": {"User-Agent": "WhatWeb/0.6.4"}},
+    "plugins": {
+      "HTTPServer": {"string": ["nginx"]},
+      "MetaGenerator": {"string": ["WordPress 6.4.8"]},
+      "jQuery": {"version": ["3.6.0"]},
+      "PHP": {"version": ["8.1.2"]},
+      "HTML5": {},
+      "Title": {"string": ["Example Domain"]}
+    }
+  }
+]

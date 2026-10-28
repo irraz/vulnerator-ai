@@ -1,0 +1,93 @@
+{
+  "a": [
+    {
+      "host": "www.example.com",
+      "ips": [
+        {
+          "ip": "192.0.2.10",
+          "asn": "64500",
+          "asn_name": "EXAMPLE-AS",
+          "asn_range": "192.0.2.0/24",
+          "country": "United States",
+          "country_code": "US",
+          "ptr": "www.example.com",
+          "banners": {
+            "ip": "192.0.2.10",
+            "http": {"apps": ["nginx"], "server": "nginx", "title": "Example Domain"},
+            "https": {
+              "alt_n": ["example.com", "www.example.com"],
+              "apps": ["nginx", "PHP"],
+              "cn": "example.com",
+              "server": "nginx",
+              "title": "Example Domain"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "host": "blog.example.com",
+      "ips": [
+        {
+          "ip": "192.0.2.11",
+          "asn": "64500",
+          "asn_name": "EXAMPLE-AS",
+          "asn_range": "192.0.2.0/24",
+          "country": "United States",
+          "country_code": "US",
+          "ptr": "",
+          "banners": {}
+        }
+      ]
+    }
+  ],
+  "cname": [],
+  "mx": [
+    {
+      "host": "mail.example.com",
+      "ips": [
+        {
+          "ip": "198.51.100.20",
+          "asn": "64501",
+          "asn_name": "MAIL-AS",
+          "asn_range": "198.51.100.0/24",
+          "country": "United States",
+          "country_code": "US",
+          "ptr": "mail.example.com"
+        }
+      ]
+    }
+  ],
+  "ns": [
+    {
+      "host": "ns1.example.net",
+      "ips": [
+        {
+          "ip": "203.0.113.30",
+          "asn": "64502",
+          "asn_name": "NS-AS",
+          "asn_range": "203.0.113.0/24",
+          "country": "United States",
+          "country_code": "US",
+          "ptr": "ns1.example.net"
+        }
+      ]
+    },
+    {
+      "host": "ns2.example.net",
+      "ips": [
+        {
+          "ip": "203.0.113.31",
+          "asn": "64502",
+          "asn_name": "NS-AS",
+          "asn_range": "203.0.113.0/24",
+          "country": "United States",
+          "country_code": "US",
+          "ptr": "ns2.example.net"
+        }
+      ]
+    }
+  ],
+  "total_a_recs": 2,
+  "txt": ["v=spf1 -all", "google-site-verification=EXAMPLEtoken"]
+}

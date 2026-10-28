@@ -1,0 +1,36 @@
+{
+  "hostname": "https://www.example.com",
+  "matches": [
+    {
+      "app": {
+        "cats": ["1", "11"],
+        "category_names": ["CMS", "Blogs"],
+        "website": "https://wordpress.org",
+        "implies": ["PHP", "MySQL"]
+      },
+      "app_name": "WordPress",
+      "matches": [["meta generator"]],
+      "version": "6.4.8"
+    },
+    {
+      "app": {
+        "cats": ["59"],
+        "category_names": ["JavaScript libraries"],
+        "website": "https://jquery.com"
+      },
+      "app_name": "jQuery",
+      "matches": [],
+      "version": "3.6.0"
+    },
+    {
+      "app": {
+        "cats": ["22"],
+        "category_names": ["Web servers"],
+        "website": "https://nginx.org"
+      },
+      "app_name": "Nginx",
+      "matches": [],
+      "version": ""
+    }
+  ]
+}
