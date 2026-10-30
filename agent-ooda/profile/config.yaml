@@ -88,23 +88,17 @@ mcp_servers:
     # aislamiento de la red interna de docker.
     url: "http://kali:8900"
     tools:
-      # WHITELIST EXACTA (en orden) de las tools REALES del servidor kali-mcp, con el nombre TAL
-      # COMO lo expone el servidor. Nombre efectivo que vera el modelo = `mcp_kali_<tool>`.
-      #   OBSERVE : server_info, prowler_scan, iam_enum
-      #   ORIENT  : iam_simulate (AWS read-only), get_scan_status, read_tool_logs
-      #   ACT     : kali_run (bloqueante, una llamada) / kali_exec (async + poll)
-      #   REGISTRO: record_finding / read_findings (store de hallazgos por engagement)
-      include:
-        - kali_run
-        - kali_exec
-        - iam_enum
-        - iam_simulate
-        - get_scan_status
-        - read_tool_logs
-        - prowler_scan
-        - record_finding
-        - read_findings
-        - server_info
+      # POSTURA (el SERVIDOR MCP es la FUENTE DE VERDAD: "lo que el servidor expone = lo que
+      # Hermes ve"). Se RETIRA la `tools.include` que antes hacia whitelist exacta de las tools
+      # de la Kali. Consecuencias deliberadas (decision del usuario):
+      #   - La superficie VISIBLE pasa de 10 tools a las 15 nativas que el servidor publica por
+      #     introspeccion (server_info ya deriva su lista del registro de FastMCP).
+      #   - Cualquier tool que el servidor anada MAS ADELANTE (incluidas las aportadas por un
+      #     plugin de terceros) entra en la superficie de Hermes SIN pasar por un gate aqui: no
+      #     hay revision caso por caso en este archivo.
+      # Si se quisiera volver a revisar tool por tool, la via es REANADIR una `include:` con la
+      # whitelist exacta de nombres (tal como los expone el servidor) bajo esta misma clave
+      # `tools:`. NO se hace ahora: la fuente de verdad es el servidor.
       # Desactiva los wrappers de utilidad que Hermes anadiria (list_prompts/get_prompt,
       # list_resources/read_resource). Verificado en mcp.md ("Filter utility tools too").
       prompts: false

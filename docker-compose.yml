@@ -68,11 +68,16 @@ services:
       SCOPE_FILE: "${SCOPE_FILE:-/scope/scope.json}"
       SCOPE_ENFORCE: "${SCOPE_ENFORCE:-}"
     # Scope-guard mount (OPT-IN): to turn the guard ON, create a `scope.json` at the repo
-    # root (copy scope.example.json), set `enabled: true`, and UNCOMMENT the volume below,
-    # then recreate the kali service. Keep it commented for the default "no gate" behavior.
-    # Create the file BEFORE `docker compose up` so Docker bind-mounts a file (not a dir).
-    # volumes:
-    #   - ./scope.json:/scope/scope.json:ro
+    # root (copy scope.example.json), set `enabled: true`, and UNCOMMENT the mount line
+    # below (under this same volumes: block), then recreate the kali service. Keep it
+    # commented for the default "no gate" behavior. Create the file BEFORE `docker compose up`
+    # so Docker bind-mounts a file (not a dir).
+    volumes:
+      # Artifacts plane: /artifacts holds the staged raw output served over the data channel
+      # (KALI_ARTIFACTS_DIR). A NAMED volume makes it persist across container recreations;
+      # additive, nothing else changes. A plugin can declare it needs this via needs_volume().
+      - kali-artifacts:/artifacts
+      # - ./scope.json:/scope/scope.json:ro
     # kali-mcp server port (exposed for direct inspection from the host if
     # needed; ooda-agent reaches it over the internal network as kali:8900). The host
     # port is configurable with KALI_MCP_HOST_PORT (default 8900) without editing this file;
@@ -109,6 +114,13 @@ services:
         cp /opt/profile-src/profile/config.yaml "$$DEF/config.yaml"
         cp /opt/profile-src/profile/SOUL.md "$$DEF/SOUL.md"
         cp -r /opt/profile-src/skills/. "$$DEF/skills/" 2>/dev/null || true
+        # (a2) PLUGIN SKILLS (SHIELDED). Copy each live plugin's skill/ (bind-mounted at
+        # /opt/plugins) into the default profile's skills/, under a dir named after the plugin.
+        # INVARIANT: nothing here may trip `set -e` or abort Hermes startup — the whole block
+        # is gated on the dir existing and runs inside a `set +e` subshell with per-statement
+        # guards. A plugin dir ending in .disabled is skipped (SAME suffix as the Python loader,
+        # plugin_api.DISABLED_SUFFIX = ".disabled"; kept in sync by test_disabled_parity.py).
+        if [ -d /opt/plugins ]; then ( set +e; for d in /opt/plugins/*/; do [ -d "$$d" ] || continue; [ -d "$${d}skill" ] || continue; name="$$(basename "$$d")"; case "$$name" in *.disabled) continue ;; esac; mkdir -p "$$DEF/skills/$$name" 2>/dev/null || { echo "[plugins] skip $$name (mkdir)"; continue; }; cp -r "$${d}skill/." "$$DEF/skills/$$name/" 2>/dev/null || echo "[plugins] skip $$name (cp)"; done ); fi
         # Copy custom skin(s) so Hermes skin_engine finds them under <hermes_home>/skins/.
         cp -r /opt/profile-src/profile/skins/. "$$DEF/skins/" 2>/dev/null || true
         # (b) inject the API server KEY (secret, not versioned) BEFORE starting.
@@ -198,6 +210,11 @@ services:
       - hermes-data:/opt/data
       # Declarative profile template, READ-ONLY and OUTSIDE /opt/data (does not touch the WAL).
       - ./agent-ooda:/opt/profile-src:ro
+      # LIVE plugins tree, READ-ONLY, at /opt/plugins (DISTINCT from the Kali image's frozen
+      # /opt/kali-mcp/plugins). The command's shielded loop below copies each plugin's skill/
+      # into the Hermes profile, so activating a plugin's skill only needs an ooda-agent
+      # restart (no rebuild). See docs/plugins/discovery.md for the two-paths rule.
+      - ./plugins:/opt/plugins:ro
     # Interactive TUI: 'docker compose exec -it ooda-agent hermes chat' needs stdin+tty.
     stdin_open: true
     tty: true
@@ -345,3 +362,6 @@ volumes:
   # Hermes state (profile + SQLite WAL). NAMED on purpose: avoids the bind-mount
   # that corrupts the SQLite WAL on macOS virtiofs.
   hermes-data:
+  # Kali artifacts plane (/artifacts). NAMED so the staged raw output persists across
+  # container recreations.
+  kali-artifacts:
