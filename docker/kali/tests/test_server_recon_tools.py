@@ -48,8 +48,11 @@ def test_wrappers_registrados_y_delegan():
 
 def test_server_info_lista_tools_y_disponibilidad():
     source = _source()
-    assert "DNS_RECON_TOOL_NAME," in source
-    assert "WEBTECH_SCAN_TOOL_NAME," in source
+    # `server_info` ya NO lleva una lista estática de nombres de tool: deriva `tools` por
+    # introspección del registro de FastMCP (ver test_server_info.py). Las tools de recon
+    # siguen declaradas con sus constantes en el decorador `@mcp.tool(name=...)`.
+    assert "@mcp.tool(name=DNS_RECON_TOOL_NAME)" in source
+    assert "@mcp.tool(name=WEBTECH_SCAN_TOOL_NAME)" in source
     assert '"recon_tools":' in source
     assert '"dnsdumpster_key_present":' in source
     # La disponibilidad se calcula con shutil.which sobre los binarios del módulo webtech.

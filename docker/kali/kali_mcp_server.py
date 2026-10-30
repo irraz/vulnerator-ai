@@ -239,24 +239,79 @@ def server_info() -> dict[str, Any]:
         "dnsdumpster_key_present": bool(
             os.environ.get(dnsdumpster_client.API_KEY_ENV, "")
         ),
-        "tools": [
-            PROWLER_TOOL_NAME,
-            START_COLLECTION_TOOL_NAME,
-            SCAN_STATUS_TOOL_NAME,
-            READ_LOGS_TOOL_NAME,
-            READ_FINDINGS_TOOL_NAME,
-            CANCEL_SCAN_TOOL_NAME,
-            IAM_ENUM_TOOL_NAME,
-            IAM_SIMULATE_TOOL_NAME,
-            KALI_EXEC_TOOL_NAME,
-            KALI_RUN_TOOL_NAME,
-            RECORD_FINDING_TOOL_NAME,
-            READ_FINDINGS_STORE_TOOL_NAME,
-            DNS_RECON_TOOL_NAME,
-            WEBTECH_SCAN_TOOL_NAME,
-            "server_info",
-        ],
+        # `tools` se deriva por INTROSPECCIÓN del registro real de FastMCP, de modo que
+        # incluye tanto las tools nativas como las aportadas por plugins cargados, sin una
+        # lista estática que se desincronice. Opción D: una sola fuente de verdad.
+        "tools": _introspect_tool_names(),
+        # Bloque de observabilidad de plugins (esquema cerrado) leído del reporte de
+        # `load_plugins`. Vacío y coherente si nunca se cargaron plugins (import suelto).
+        "plugins": _plugins_block(),
     }
+
+
+def _introspect_tool_names() -> Any:
+    """Nombres de tool por introspección SÍNCRONA del registro de FastMCP.
+
+    Usa ``mcp._tool_manager.list_tools()`` (SÍNCRONO; devuelve objetos con ``.name``). NO
+    se usa el ``FastMCP.list_tools`` público porque es ``async`` y requeriría un event loop
+    dentro de esta tool. MEDIUM-2: si la API interna no existe o lanza, se DEGRADA con un
+    marcador en vez de propagar la excepción y tumbar ``server_info``.
+    """
+    try:
+        return sorted(t.name for t in mcp._tool_manager.list_tools())
+    except Exception:  # noqa: BLE001 - degradar, no tumbar la tool (MEDIUM-2)
+        return "introspección no disponible"
+
+
+def _plugins_block() -> dict[str, Any]:
+    """Bloque ``plugins`` de ``server_info`` con el esquema CERRADO.
+
+    Lee ``plugin_loader.LAST_REPORT`` (singleton publicado por ``load_plugins``). Clasifica
+    cada ``PluginRecord`` por ``status``:
+      - ``loaded``   -> loaded[]={name,tools[],skill:bool,volumes[]}
+      - ``degraded`` -> degraded[]={name,collisions[]} (y también cuenta como cargado parcial)
+      - ``failed``   -> failed[]={name,phase,error}
+
+    Import local de ``plugin_loader`` para no forzar su presencia a nivel de módulo (HIGH-1):
+    si el módulo no está o ``LAST_REPORT`` es None/ausente, se devuelve un bloque VACÍO
+    coherente (compat idéntica a hoy).
+    """
+    empty: dict[str, Any] = {"loaded": [], "failed": [], "degraded": []}
+    try:
+        import plugin_loader
+
+        report = getattr(plugin_loader, "LAST_REPORT", None)
+    except Exception:  # noqa: BLE001 - sin loader -> bloque vacío coherente
+        return empty
+    if report is None or not getattr(report, "plugins", None):
+        return empty
+
+    loaded: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    degraded: list[dict[str, Any]] = []
+    for rec in report.plugins:
+        if rec.status == "failed":
+            failed.append({"name": rec.name, "phase": rec.phase, "error": rec.error})
+        elif rec.status == "degraded":
+            degraded.append({"name": rec.name, "collisions": list(rec.collisions)})
+            loaded.append(
+                {
+                    "name": rec.name,
+                    "tools": list(rec.tools),
+                    "skill": bool(rec.skill),
+                    "volumes": list(rec.volumes),
+                }
+            )
+        else:  # "loaded"
+            loaded.append(
+                {
+                    "name": rec.name,
+                    "tools": list(rec.tools),
+                    "skill": bool(rec.skill),
+                    "volumes": list(rec.volumes),
+                }
+            )
+    return {"loaded": loaded, "failed": failed, "degraded": degraded}
 
 
 @mcp.tool(name=READ_LOGS_TOOL_NAME)
@@ -926,6 +981,14 @@ def _start_artifacts_http() -> None:
 
 
 if __name__ == "__main__":
+    # Carga de plugins por descubrimiento ANTES de abrir ningún plano. Se invoca SOLO aquí
+    # (HIGH-1): NUNCA a nivel de módulo, para no correr en cada import ni en los tests sin
+    # SDK. `load_plugins` publica el reporte en `plugin_loader.LAST_REPORT`, que lee
+    # `server_info`. Import local a este guard por la misma razón (el loader es STDLIB-pure,
+    # pero mantenerlo aquí deja el import fuera del camino de los tests de inspección).
+    import plugin_loader
+
+    plugin_loader.load_plugins(mcp, os.environ.get("PLUGINS_DIR", "plugins"))
     # Plano de DATOS primero (hilo demonio, no bloquea), luego el plano de CONTROL.
     _start_artifacts_http()
     # Transporte streamable-HTTP (el que consumen los clientes MCP).
