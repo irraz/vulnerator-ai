@@ -1,14 +1,15 @@
-"""Tests de FORMA del cableado de `server_info` y del cargador de plugins.
+"""SHAPE tests of the `server_info` wiring and of the plugin loader.
 
-Restricción del entorno (igual que ``test_server_recon_tools``): ``kali_mcp_server.py``
-exige ``mcp<2`` (FastMCP 1.x) y en el venv dev no está, así que NO se importa el servidor:
-se inspecciona su TEXTO fuente. Aquí se fija que ``server_info``:
-  - deriva ``tools`` por INTROSPECCIÓN síncrona (``mcp._tool_manager.list_tools()``), no de
-    una lista estática;
-  - ya NO contiene la antigua lista estática de 15 nombres de tool;
-  - añade un bloque ``plugins`` leído del reporte del cargador;
-y que ``plugin_loader.load_plugins`` se invoca SOLO dentro del guard ``__main__`` (HIGH-1),
-nunca a nivel de módulo (correría en cada import y en los tests sin SDK).
+Environment constraint (like ``test_server_recon_tools``): ``kali_mcp_server.py`` requires
+``mcp<2`` (FastMCP 1.x) and it is not in the dev venv, so the server is NOT imported: its
+source TEXT is inspected. Here it is pinned that ``server_info``:
+  - derives ``tools`` by synchronous INTROSPECTION (``mcp._tool_manager.list_tools()``), not
+    from a static list;
+  - no longer contains the old static list of 15 tool names;
+  - adds a ``plugins`` block read from the loader's report;
+and that ``plugin_loader.load_plugins`` is invoked ONLY inside the ``__main__`` guard
+(HIGH-1), never at module level (it would run on every import and in the tests without the
+SDK).
 """
 
 from __future__ import annotations
@@ -24,16 +25,16 @@ def _source() -> str:
 
 def test_tools_por_introspeccion_sincrona():
     source = _source()
-    # Deriva de la API interna SÍNCRONA del tool manager.
+    # Derives from the tool manager's SYNCHRONOUS internal API.
     assert "mcp._tool_manager.list_tools()" in source
-    # NO usa el FastMCP.list_tools público (async): no debe aparecer como `mcp.list_tools(`.
+    # Does NOT use the public FastMCP.list_tools (async): must not appear as `mcp.list_tools(`.
     assert "mcp.list_tools(" not in source
 
 
 def test_lista_estatica_de_15_nombres_eliminada():
     source = _source()
-    # La vieja lista estática enumeraba estas constantes como elementos de `tools`
-    # (con coma final). Esa forma ya no debe existir en ningún sitio del servidor.
+    # The old static list enumerated these constants as elements of `tools`
+    # (with a trailing comma). That form must no longer exist anywhere in the server.
     for const in (
         "START_COLLECTION_TOOL_NAME,",
         "SCAN_STATUS_TOOL_NAME,",
@@ -49,14 +50,14 @@ def test_lista_estatica_de_15_nombres_eliminada():
         "WEBTECH_SCAN_TOOL_NAME,",
     ):
         assert const not in source, f"la lista estática aún referencia {const!r}"
-    # El marcador textual de la vieja lista inline (`"server_info",` como elemento) tampoco.
+    # The textual marker of the old inline list (`"server_info",` as an element) neither.
     assert '"server_info",' not in source
 
 
 def test_bloque_plugins_en_server_info():
     source = _source()
     assert '"plugins": _plugins_block()' in source
-    # El bloque usa el esquema cerrado leído de LAST_REPORT.
+    # The block uses the closed schema read from LAST_REPORT.
     assert "plugin_loader.LAST_REPORT" in source or "LAST_REPORT" in source
 
 
@@ -64,11 +65,11 @@ def test_load_plugins_bajo_guard_main_y_no_a_nivel_modulo():
     source = _source()
     assert 'if __name__ == "__main__":' in source
     guard_idx = source.index('if __name__ == "__main__":')
-    # La invocación debe existir y estar DESPUÉS del guard (dentro del bloque __main__).
+    # The invocation must exist and be AFTER the guard (inside the __main__ block).
     call = "plugin_loader.load_plugins("
     assert call in source
     assert source.index(call) > guard_idx, "load_plugins no está bajo el guard __main__"
-    # Y no debe haber una invocación a nivel de módulo (antes del guard).
+    # And there must be no invocation at module level (before the guard).
     assert (
         source[:guard_idx].find(call) == -1
     ), "load_plugins se invoca a nivel de módulo"

@@ -1,4 +1,4 @@
-"""Plugin válido mínimo (fixture). Registra una tool y declara su skill."""
+"""Minimal valid plugin (fixture). Registers a tool and declares its skill."""
 
 PLUGIN_API = 1
 

@@ -1,107 +1,110 @@
-# Descubrimiento y carga de plugins
+# Plugin discovery and loading
 
-Este documento describe **cómo** el servidor kali-mcp descubre y carga los plugins, y las
-**dos rutas** por las que el árbol `plugins/` entra en el stack. Para escribir un plugin,
-consulta [developing-plugins.md](developing-plugins.md).
+This document describes **how** the kali-mcp server discovers and loads plugins, and the
+**two paths** by which the `plugins/` tree enters the stack. To write a plugin, see
+[developing-plugins.md](developing-plugins.md).
 
-## Cuándo se cargan
+## When they are loaded
 
-La carga ocurre **una sola vez, en el arranque del servidor**, dentro del guard
-`if __name__ == "__main__":` de `docker/kali/kali_mcp_server.py`, ANTES de abrir ningún
-plano (datos ni control). Nunca se invoca a nivel de módulo: así `load_plugins` no corre en
-cada `import` del servidor ni en los tests (que no tienen el SDK `mcp`). La llamada es:
+Loading happens **only once, at server startup**, inside the
+`if __name__ == "__main__":` guard of `docker/kali/kali_mcp_server.py`, BEFORE opening any
+plane (data or control). It is never invoked at module level: that way `load_plugins` does
+not run on every `import` of the server nor in the tests (which do not have the `mcp` SDK).
+The call is:
 
 ```python
 plugin_loader.load_plugins(mcp, os.environ.get("PLUGINS_DIR", "plugins"))
 ```
 
-Es decir, la raíz de plugins por defecto es `plugins` **relativa al WORKDIR**
-(`/opt/kali-mcp/plugins` dentro de la imagen), configurable con la variable de entorno
-`PLUGINS_DIR`.
+That is, the default plugins root is `plugins` **relative to the WORKDIR**
+(`/opt/kali-mcp/plugins` inside the image), configurable with the `PLUGINS_DIR` environment
+variable.
 
-## Orden de descubrimiento
+## Discovery order
 
-El cargador enumera los **subdirectorios inmediatos** de la raíz de plugins en **orden
-alfabético determinista** (`sorted(os.listdir(...))`). Un directorio es candidato solo si:
+The loader enumerates the **immediate subdirectories** of the plugins root in
+**deterministic alphabetical order** (`sorted(os.listdir(...))`). A directory is a
+candidate only if:
 
-- no empieza por `.` (ocultos ignorados);
-- no termina en `.disabled` (ver abajo);
-- es un directorio;
-- contiene un fichero `plugin.py`.
+- it does not start with `.` (hidden ones are ignored);
+- it does not end in `.disabled` (see below);
+- it is a directory;
+- it contains a `plugin.py` file.
 
-El orden alfabético es estable entre arranques: dos plugins que registren tools en un orden
-reproducible verán siempre la misma secuencia.
+The alphabetical order is stable across startups: two plugins that register tools in a
+reproducible order will always see the same sequence.
 
-## El sufijo `.disabled`
+## The `.disabled` suffix
 
-Un directorio cuyo nombre termina en `.disabled` se **ignora por completo**. El sufijo es
-una **constante única** en el código Python: `plugin_api.DISABLED_SUFFIX = ".disabled"`
-(NIT-6). Esa MISMA cadena la comparte el bucle de skills de plugins del `command` de
-`ooda-agent` en `docker-compose.yml`, que salta los directorios `*.disabled` antes de
-copiar su skill. El test `docker/kali/tests/test_disabled_parity.py` fija que ambas capas
-usan el mismo sufijo, de modo que no pueden divergir (un plugin nunca queda "apagado en una
-capa y vivo en la otra").
+A directory whose name ends in `.disabled` is **ignored entirely**. The suffix is a
+**single constant** in the Python code: `plugin_api.DISABLED_SUFFIX = ".disabled"`
+(NIT-6). That SAME string is shared by the plugin skills loop in the `ooda-agent` `command`
+in `docker-compose.yml`, which skips `*.disabled` directories before copying their skill.
+The `docker/kali/tests/test_disabled_parity.py` test pins that both layers use the same
+suffix, so they cannot diverge (a plugin never ends up "off in one layer and alive in the
+other").
 
-Para activar un plugin entregado deshabilitado, se quita el sufijo del nombre del
-directorio; para volver a apagarlo, se reañade. (El impacto de un rename sobre cada ruta se
-detalla en «Las dos rutas» más abajo.)
+To activate a plugin shipped disabled, remove the suffix from the directory name; to turn
+it off again, add it back. (The impact of a rename on each path is detailed in "The two
+paths" below.)
 
-## Errores no fatales (aislamiento)
+## Non-fatal errors (isolation)
 
-Cada plugin se procesa dentro de su propio `try/except`: **un plugin roto no tumba a los
-demás ni al arranque del servidor**. El cargador aplica un micro-algoritmo por fases y, en
-cada fallo, registra hasta dónde llegó sin propagar la excepción:
+Each plugin is processed inside its own `try/except`: **a broken plugin does not take down
+the others or the server startup**. The loader applies a phased micro-algorithm and, on
+each failure, records how far it got without propagating the exception:
 
-- `name` — el nombre del directorio no casa el regex permitido.
-- `import` — el cuerpo de `plugin.py` (o un `import` de un módulo hermano) lanzó.
-- `api` — el `PLUGIN_API` del plugin no es compatible (se exige igualdad exacta con
-  `SUPPORTED_PLUGIN_API`).
-- `register-missing` — el plugin no expone un `register(ctx)` invocable.
-- `register` — `register(ctx)` lanzó durante su ejecución.
+- `name` — the directory name does not match the allowed regex.
+- `import` — the body of `plugin.py` (or an `import` of a sibling module) raised.
+- `api` — the plugin's `PLUGIN_API` is not compatible (exact equality with
+  `SUPPORTED_PLUGIN_API` is required).
+- `register-missing` — the plugin does not expose a callable `register(ctx)`.
+- `register` — `register(ctx)` raised during its execution.
 
-El traceback completo va a stdout/stderr; el reporte solo guarda `str(exc)` (una línea).
+The full traceback goes to stdout/stderr; the report only stores `str(exc)` (a single
+line).
 
-## Reversión en fallo de `register` (NIT-8)
+## Rollback on `register` failure (NIT-8)
 
-Si `register(ctx)` lanza **después** de haber registrado una o más tools, el cargador
-**revierte** esas tools ya montadas (`mcp._tool_manager.remove_tool(name)`, best-effort)
-para no dejar tools huérfanas visibles de un plugin que falló a medias. El plugin se reporta
-como `failed` en fase `register`.
+If `register(ctx)` raises **after** having registered one or more tools, the loader
+**rolls back** those already-mounted tools (`mcp._tool_manager.remove_tool(name)`,
+best-effort) so as not to leave orphan tools visible from a plugin that failed halfway. The
+plugin is reported as `failed` in phase `register`.
 
-## Introspección síncrona y esquema `server_info['plugins']`
+## Synchronous introspection and the `server_info['plugins']` schema
 
-`server_info` **no** lleva una lista estática de plugins: lee el singleton de módulo
-`plugin_loader.LAST_REPORT`, que `load_plugins` publica al terminar su pasada (HIGH-1). La
-introspección es **síncrona**: el reporte ya está calculado en el arranque, así que
-`server_info` solo lo clasifica. Si nunca se cargaron plugins (p. ej. en un `import` suelto
-del módulo), `LAST_REPORT` arranca vacío y el bloque es coherente y vacío — comportamiento
-idéntico al de hoy.
+`server_info` does **not** carry a static list of plugins: it reads the module singleton
+`plugin_loader.LAST_REPORT`, which `load_plugins` publishes when its pass finishes (HIGH-1).
+The introspection is **synchronous**: the report is already computed at startup, so
+`server_info` only classifies it. If plugins were never loaded (e.g. in a bare `import` of
+the module), `LAST_REPORT` starts empty and the block is coherent and empty — behavior
+identical to today's.
 
-El bloque `plugins` de `server_info` tiene un **esquema cerrado** derivado del reporte: por
-cada plugin descubierto se expone su nombre, su `status` (`loaded` / `degraded` / `failed`),
-la fase alcanzada, las tools que registró, la skill declarada, los volúmenes anotados y las
-colisiones detectadas.
+The `plugins` block of `server_info` has a **closed schema** derived from the report: for
+each discovered plugin it exposes its name, its `status` (`loaded` / `degraded` / `failed`),
+the phase reached, the tools it registered, the declared skill, the annotated volumes, and
+the detected collisions.
 
-## Las dos rutas del árbol `plugins/` (NIT-5)
+## The two paths of the `plugins/` tree (NIT-5)
 
-El mismo árbol versionado `plugins/` del repo entra en el stack por **dos rutas
-DISTINTAS**, que **no son la misma y no deben unificarse**:
+The same versioned `plugins/` tree from the repo enters the stack through **two DIFFERENT
+paths**, which **are not the same and must not be unified**:
 
-1. **Congelada en la imagen de Kali — `/opt/kali-mcp/plugins`.**
-   El `Dockerfile` hace `COPY plugins/ ./plugins/` (sobre el WORKDIR `/opt/kali-mcp`). Es la
-   ruta que lee `load_plugins` para descubrir y cargar las **tools** del plugin en el
-   servidor kali-mcp. Al copiarse en **build**, queda **congelada**: activar o desactivar un
-   plugin (añadirlo, quitarlo o renombrar su `.disabled`) exige **reconstruir la imagen de
-   Kali** para que el cambio tenga efecto en las tools.
+1. **Frozen in the Kali image — `/opt/kali-mcp/plugins`.**
+   The `Dockerfile` runs `COPY plugins/ ./plugins/` (onto the WORKDIR `/opt/kali-mcp`). It
+   is the path that `load_plugins` reads to discover and load the plugin's **tools** in the
+   kali-mcp server. Being copied at **build** time, it is **frozen**: enabling or disabling
+   a plugin (adding it, removing it, or renaming its `.disabled`) requires **rebuilding the
+   Kali image** for the change to take effect on the tools.
 
-2. **Viva por bind-mount en Hermes — `/opt/plugins`.**
-   `docker-compose.yml` monta `./plugins:/opt/plugins:ro` en el contenedor `ooda-agent`. El
-   `command` de ese servicio recorre esa ruta y copia la `skill/` de cada plugin a la carpeta
-   de skills del perfil de Hermes. Al ser un bind-mount **vivo**, basta un **reinicio de
-   `ooda-agent`** (sin rebuild) para que la **skill** de un plugin se recoja o deje de
-   recogerse.
+2. **Live by bind-mount in Hermes — `/opt/plugins`.**
+   `docker-compose.yml` mounts `./plugins:/opt/plugins:ro` into the `ooda-agent` container.
+   That service's `command` walks that path and copies each plugin's `skill/` into the
+   Hermes profile's skills folder. Being a **live** bind-mount, a **restart of
+   `ooda-agent`** (without a rebuild) is enough for a plugin's **skill** to be picked up or
+   dropped.
 
-Consecuencia práctica: la capa de **tools** (Kali, congelada) y la capa de **skills**
-(Hermes, viva) se activan por mecanismos diferentes. No unifiques las rutas ni asumas que un
-solo cambio basta para ambas: una tool nueva necesita rebuild de la Kali, y una skill nueva
-necesita reinicio de `ooda-agent`.
+Practical consequence: the **tools** layer (Kali, frozen) and the **skills** layer (Hermes,
+live) are activated by different mechanisms. Do not unify the paths or assume that a single
+change is enough for both: a new tool needs a rebuild of the Kali, and a new skill needs a
+restart of `ooda-agent`.

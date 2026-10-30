@@ -1,1 +1,1 @@
-Dir SIN plugin.py: el loader lo omite (no es candidato).
+Dir WITHOUT plugin.py: the loader skips it (it is not a candidate).

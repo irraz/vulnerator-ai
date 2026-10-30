@@ -1,6 +1,6 @@
-"""Fixture fase 'register' + NIT-8: registra una tool y luego LANZA.
+"""Phase 'register' + NIT-8 fixture: registers a tool and then RAISES.
 
-El loader debe revertir la tool ya montada vía ``_tool_manager.remove_tool``.
+The loader must roll back the already-mounted tool via ``_tool_manager.remove_tool``.
 """
 
 PLUGIN_API = 1

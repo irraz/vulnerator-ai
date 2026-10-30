@@ -190,20 +190,20 @@ COPY docker/kali/report_gen.py ./report_gen.py
 # DEBE estar en la imagen aunque el guard esté desactivado por defecto; sin este COPY el
 # servidor aborta al arrancar con ModuleNotFoundError: No module named 'scope_guard'.
 COPY docker/kali/scope_guard.py ./scope_guard.py
-# Subsistema de PLUGINS (CORE). plugin_api.py (contrato: PluginContext, DISABLED_SUFFIX,
-# tipos del reporte) y plugin_loader.py (descubrimiento + load_plugins + LAST_REPORT) son
-# STDLIB PURA pero los importa kali_mcp_server (import plugin_loader dentro de __main__ y
-# el bloque de plugins de server_info). Se copian SIEMPRE, con el mismo patrón per-file que
-# los módulos nativos; sin estos COPY el servidor abortaría al cargar el reporte de plugins.
+# PLUGINS subsystem (CORE). plugin_api.py (contract: PluginContext, DISABLED_SUFFIX,
+# report types) and plugin_loader.py (discovery + load_plugins + LAST_REPORT) are
+# PURE STDLIB but kali_mcp_server imports them (import plugin_loader inside __main__ and
+# the plugins block of server_info). They are copied ALWAYS, with the same per-file pattern as
+# the native modules; without these COPY the server would abort when loading the plugins report.
 COPY docker/kali/plugin_api.py ./plugin_api.py
 COPY docker/kali/plugin_loader.py ./plugin_loader.py
 COPY docker/kali/kali_mcp_server.py ./kali_mcp_server.py
 
-# Árbol de plugins versionado (SOLO plugins). Se congela DENTRO de la imagen en
-# /opt/kali-mcp/plugins (WORKDIR): es la ruta que lee load_plugins (PLUGINS_DIR default
-# "plugins"). Activar/desactivar un plugin aquí exige REBUILD de la Kali. Esta ruta es
-# DISTINTA del bind-mount vivo /opt/plugins de Hermes (ver docs/plugins/discovery.md).
-# No hay .dockerignore, así que el árbol versionado plugins/ DEBE existir o el build falla.
+# Versioned plugins tree (plugins ONLY). It is frozen INSIDE the image at
+# /opt/kali-mcp/plugins (WORKDIR): it is the path that load_plugins reads (PLUGINS_DIR default
+# "plugins"). Enabling/disabling a plugin here requires a REBUILD of the Kali. This path is
+# DIFFERENT from Hermes's live bind-mount /opt/plugins (see docs/plugins/discovery.md).
+# There is no .dockerignore, so the versioned plugins/ tree MUST exist or the build fails.
 COPY plugins/ ./plugins/
 
 # Puerto del servidor kali-mcp. Overridable por entorno (KALI_MCP_PORT) sin

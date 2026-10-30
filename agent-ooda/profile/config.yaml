@@ -88,17 +88,17 @@ mcp_servers:
     # aislamiento de la red interna de docker.
     url: "http://kali:8900"
     tools:
-      # POSTURA (el SERVIDOR MCP es la FUENTE DE VERDAD: "lo que el servidor expone = lo que
-      # Hermes ve"). Se RETIRA la `tools.include` que antes hacia whitelist exacta de las tools
-      # de la Kali. Consecuencias deliberadas (decision del usuario):
-      #   - La superficie VISIBLE pasa de 10 tools a las 15 nativas que el servidor publica por
-      #     introspeccion (server_info ya deriva su lista del registro de FastMCP).
-      #   - Cualquier tool que el servidor anada MAS ADELANTE (incluidas las aportadas por un
-      #     plugin de terceros) entra en la superficie de Hermes SIN pasar por un gate aqui: no
-      #     hay revision caso por caso en este archivo.
-      # Si se quisiera volver a revisar tool por tool, la via es REANADIR una `include:` con la
-      # whitelist exacta de nombres (tal como los expone el servidor) bajo esta misma clave
-      # `tools:`. NO se hace ahora: la fuente de verdad es el servidor.
+      # POSTURE (the MCP SERVER is the SOURCE OF TRUTH: "what the server exposes = what
+      # Hermes sees"). The `tools.include` that previously did an exact whitelist of the Kali's
+      # tools is REMOVED. Deliberate consequences (user's decision):
+      #   - The VISIBLE surface goes from 10 tools to the 15 native ones that the server
+      #     publishes by introspection (server_info already derives its list from FastMCP's registry).
+      #   - Any tool that the server adds LATER (including those contributed by a third-party
+      #     plugin) enters Hermes's surface WITHOUT passing through a gate here: there is no
+      #     case-by-case review in this file.
+      # If one wanted to review tool by tool again, the way is to RE-ADD an `include:` with the
+      # exact whitelist of names (as the server exposes them) under this same `tools:` key.
+      # It is NOT done now: the source of truth is the server.
       # Desactiva los wrappers de utilidad que Hermes anadiria (list_prompts/get_prompt,
       # list_resources/read_resource). Verificado en mcp.md ("Filter utility tools too").
       prompts: false

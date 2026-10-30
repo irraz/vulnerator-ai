@@ -1,5 +1,5 @@
-"""Fixture fase 'api': no declara PLUGIN_API."""
+"""Phase 'api' fixture: it does not declare PLUGIN_API."""
 
 
-def register(ctx):  # pragma: no cover - nunca se alcanza
+def register(ctx):  # pragma: no cover - never reached
     pass

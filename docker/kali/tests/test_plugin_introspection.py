@@ -1,19 +1,20 @@
-"""Guardia EJECUTABLE de la API interna de FastMCP de la que depende el plugin system.
+"""EXECUTABLE guard of the FastMCP internal API that the plugin system depends on.
 
-Este es el ÚNICO test que valida §5.3 DE VERDAD: ejecuta contra el SDK ``mcp`` real las
-cuatro asunciones sobre la API interna/pública de ``FastMCP`` en las que se apoyan el
-cargador de plugins (``plugin_loader`` / ``plugin_api``) y ``server_info``:
+This is the ONLY test that validates §5.3 FOR REAL: it runs against the real ``mcp`` SDK the
+four assumptions about ``FastMCP``'s internal/public API on which the plugin loader
+(``plugin_loader`` / ``plugin_api``) and ``server_info`` rely:
 
-  1. ``mcp._tool_manager.list_tools()`` existe, es SÍNCRONO (no es coroutine function) y
-     devuelve objetos con atributo ``.name``.
-  2. El ``FastMCP.list_tools`` PÚBLICO es ``async`` (por eso ``server_info`` usa el interno).
-  3. Registrar DOS veces una tool con el mismo nombre es un no-op SILENCIOSO (no lanza y no
-     reemplaza la primera) — base de la detección explícita de colisiones.
-  4. ``_tool_manager.remove_tool(name)`` existe y funciona — base del revert NIT-8.
+  1. ``mcp._tool_manager.list_tools()`` exists, is SYNCHRONOUS (not a coroutine function) and
+     returns objects with a ``.name`` attribute.
+  2. The PUBLIC ``FastMCP.list_tools`` is ``async`` (that is why ``server_info`` uses the
+     internal one).
+  3. Registering a tool TWICE with the same name is a SILENT no-op (it does not raise and does
+     not replace the first) — the basis of explicit collision detection.
+  4. ``_tool_manager.remove_tool(name)`` exists and works — the basis of the NIT-8 rollback.
 
-Si el SDK NO está instalado (venv dev) -> ``pytest.skip`` EXPLÍCITO: el skip es sólo para
-el entorno sin SDK. EN CI/IMAGEN CON SDK NO DEBE SALTARSE: un fallo real de API no puede
-quedar enmascarado por el skip local.
+If the SDK is NOT installed (dev venv) -> EXPLICIT ``pytest.skip``: the skip is only for the
+environment without the SDK. IN CI/IMAGE WITH THE SDK IT MUST NOT BE SKIPPED: a real API
+failure cannot be masked by the local skip.
 """
 
 from __future__ import annotations
@@ -23,10 +24,10 @@ import inspect
 
 import pytest
 
-# El SDK sólo está en la imagen Kali / un venv con mcp>=1.28,<2. Sin él, skip explícito.
+# The SDK is only in the Kali image / a venv with mcp>=1.28,<2. Without it, explicit skip.
 fastmcp_mod = pytest.importorskip(
     "mcp.server.fastmcp",
-    reason="SDK 'mcp' no instalado (venv dev); en imagen/CI con SDK NO debe saltarse",
+    reason="'mcp' SDK not installed (dev venv); in image/CI with the SDK it must NOT be skipped",
 )
 FastMCP = fastmcp_mod.FastMCP
 
@@ -40,23 +41,23 @@ def test_tool_manager_list_tools_es_sincrono_y_da_objetos_con_name():
 
     @mcp.tool()
     def alpha() -> str:
-        """tool de prueba."""
+        """test tool."""
         return "alpha"
 
     tool_manager = mcp._tool_manager
-    # Existe y NO es una coroutine function (es SÍNCRONO).
+    # It exists and is NOT a coroutine function (it is SYNCHRONOUS).
     assert hasattr(tool_manager, "list_tools")
     assert not inspect.iscoroutinefunction(tool_manager.list_tools)
 
     tools = tool_manager.list_tools()
     assert not inspect.iscoroutine(tools), "list_tools() no debe devolver una corutina"
-    names = {t.name for t in tools}  # cada objeto expone .name
+    names = {t.name for t in tools}  # each object exposes .name
     assert "alpha" in names
 
 
 def test_fastmcp_list_tools_publico_es_async():
-    # El método público de FastMCP es async: por eso server_info usa el tool_manager interno
-    # (síncrono) en vez de este (requeriría un event loop).
+    # FastMCP's public method is async: that is why server_info uses the internal (synchronous)
+    # tool_manager instead of this one (which would require an event loop).
     assert inspect.iscoroutinefunction(FastMCP.list_tools)
 
 
@@ -65,20 +66,20 @@ def test_add_tool_duplicado_es_noop_silencioso():
 
     @mcp.tool(name="dup")
     def first() -> str:
-        """primera."""
+        """first."""
         return "first"
 
     before = {t.name for t in mcp._tool_manager.list_tools()}
     assert "dup" in before
 
-    # Registrar otra con el MISMO nombre no debe lanzar...
+    # Registering another with the SAME name must not raise...
     @mcp.tool(name="dup")
     def second() -> str:
-        """segunda (misma clave)."""
+        """second (same key)."""
         return "second"
 
     after = [t for t in mcp._tool_manager.list_tools() if t.name == "dup"]
-    # ...ni duplicar la entrada (sigue habiendo exactamente una 'dup').
+    # ...nor duplicate the entry (there is still exactly one 'dup').
     assert len(after) == 1
 
 
@@ -87,7 +88,7 @@ def test_remove_tool_existe_y_funciona():
 
     @mcp.tool(name="temp")
     def temp() -> str:
-        """tool temporal."""
+        """temporary tool."""
         return "temp"
 
     assert "temp" in {t.name for t in mcp._tool_manager.list_tools()}
@@ -97,12 +98,12 @@ def test_remove_tool_existe_y_funciona():
 
 
 def test_server_puede_listar_tools_via_api_publica_async():
-    # Sanity: la API pública async también funciona (confirma que el objeto es usable).
+    # Sanity: the async public API also works (confirms the object is usable).
     mcp = _new_server()
 
     @mcp.tool()
     def beta() -> str:
-        """tool de prueba."""
+        """test tool."""
         return "beta"
 
     tools = asyncio.run(mcp.list_tools())

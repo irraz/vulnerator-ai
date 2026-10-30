@@ -1,30 +1,30 @@
-# example-hello (plugin de ejemplo, entregado DESHABILITADO)
+# example-hello (example plugin, shipped DISABLED)
 
-Plugin de ejemplo que demuestra el contrato de plugins de kali-mcp de principio a fin:
+Example plugin that demonstrates the kali-mcp plugin contract end to end:
 
-- Registra la tool **`hello`**, inocua: devuelve `{"status": "done", "greeting":
-  "hello, <name>"}` y no toca red, filesystem ni target.
-- Declara una **skill** (`skill/SKILL.md`).
-- Declara (solo anota) que necesita el volumen **`kali-artifacts`**.
+- Registers the **`hello`** tool, which is harmless: it returns `{"status": "done", "greeting":
+  "hello, <name>"}` and does not touch the network, filesystem, or target.
+- Declares a **skill** (`skill/SKILL.md`).
+- Declares (only annotates) that it needs the **`kali-artifacts`** volume.
 
-Se entrega dentro de un directorio terminado en `.disabled`, por lo que **por defecto no
-se carga**: ni el cargador de plugins ni el bucle de skills lo montan. El comportamiento
-del servidor es idéntico a no tener este plugin.
+It ships inside a directory ending in `.disabled`, so **by default it is not loaded**:
+neither the plugin loader nor the skills loop mounts it. The server behavior is identical
+to not having this plugin.
 
-## Cómo activarlo
+## How to enable it
 
-Renombra el directorio quitando el sufijo `.disabled`:
+Rename the directory by removing the `.disabled` suffix:
 
 ```sh
 mv plugins/example-hello.disabled plugins/example-hello
 ```
 
-Para deshabilitarlo de nuevo, vuelve a añadir el sufijo.
+To disable it again, add the suffix back.
 
-## Importante tras activar/desactivar
+## Important after enabling/disabling
 
-El árbol `plugins/` se copia dentro de la imagen de Kali en **tiempo de build**, de modo
-que para que un cambio de activación surta efecto hay que **reconstruir la imagen de
-Kali**. El contenedor del agente (ooda-agent) monta el árbol y recarga las skills al
-**reiniciarse**. El detalle de este flujo (bind-mount `./plugins:/opt/plugins:ro` y el
-bucle de skills) se documenta junto a la integración de runtime.
+The `plugins/` tree is copied into the Kali image at **build time**, so for an enable
+change to take effect you must **rebuild the Kali image**. The agent container (ooda-agent)
+mounts the tree and reloads the skills when it **restarts**. The details of this flow (the
+`./plugins:/opt/plugins:ro` bind-mount and the skills loop) are documented alongside the
+runtime integration.

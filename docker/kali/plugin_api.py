@@ -1,23 +1,24 @@
-"""Contrato público del mecanismo de plugins de kali-mcp (STDLIB PURA, SIN ``mcp``).
+"""Public contract of the kali-mcp plugin mechanism (PURE STDLIB, NO ``mcp``).
 
-Es la cara del contrato que ven los autores de plugins y que comparten el cargador
-(``plugin_loader``) y —por inspección de texto— el ``for`` de skills del compose. Vive en
-un módulo aparte que usa SOLO la librería estándar para poder cubrirse con tests unitarios
-en el venv de dev, donde el SDK ``mcp`` no está instalado (igual que ``shell_exec`` /
+It is the face of the contract seen by plugin authors and shared by the loader
+(``plugin_loader``) and —by text inspection— the skills ``for`` of the compose. It lives in
+a separate module that uses ONLY the standard library so it can be covered by unit tests in
+the dev venv, where the ``mcp`` SDK is not installed (just like ``shell_exec`` /
 ``collector_runner`` / ``scope_guard``).
 
-Qué expone:
-  - ``SUPPORTED_PLUGIN_API`` / ``DISABLED_SUFFIX`` / ``PLUGIN_DIR_NAME_RE``: constantes de
-    contrato. ``DISABLED_SUFFIX`` es la ÚNICA fuente del sufijo de deshabilitado en el
-    código Python (NIT-6): loader y shell del compose lo comparten.
-  - ``PluginRecord`` / ``PluginLoadReport``: tipos del reporte que lee ``server_info``.
-  - ``PluginContext``: el handle con firmas fijas (``PLUGIN_API=1``) que el plugin recibe
-    en su ``register(ctx)``. Detecta colisiones ANTES de registrar una tool y valida que
-    la skill no escape del directorio del plugin (MEDIUM-4). Es declarativo: ``needs_volume``
-    NO monta ni habilita nada, solo anota para ``server_info``.
+What it exposes:
+  - ``SUPPORTED_PLUGIN_API`` / ``DISABLED_SUFFIX`` / ``PLUGIN_DIR_NAME_RE``: contract
+    constants. ``DISABLED_SUFFIX`` is the SINGLE source of the disabled suffix in the
+    Python code (NIT-6): loader and compose shell share it.
+  - ``PluginRecord`` / ``PluginLoadReport``: types of the report that ``server_info`` reads.
+  - ``PluginContext``: the handle with fixed signatures (``PLUGIN_API=1``) that the plugin
+    receives in its ``register(ctx)``. It detects collisions BEFORE registering a tool and
+    validates that the skill does not escape the plugin's directory (MEDIUM-4). It is
+    declarative: ``needs_volume`` does NOT mount or enable anything, it only annotates for
+    ``server_info``.
 
-Este módulo NO importa ``mcp``: ``PluginContext`` delega en el objeto ``mcp`` que recibe
-(FastMCP real en la imagen, un doble en los tests).
+This module does NOT import ``mcp``: ``PluginContext`` delegates to the ``mcp`` object it
+receives (real FastMCP in the image, a double in the tests).
 """
 
 from __future__ import annotations
@@ -27,35 +28,35 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# Versión del contrato que este core soporta. Un plugin declara su ``PLUGIN_API`` y el
-# loader exige igualdad exacta (fase 'api'); así una ruptura de contrato falla claro en
-# lugar de cargar un plugin incompatible a medias.
+# Version of the contract that this core supports. A plugin declares its ``PLUGIN_API`` and
+# the loader requires exact equality (phase 'api'); that way a contract break fails cleanly
+# instead of loading an incompatible plugin halfway.
 SUPPORTED_PLUGIN_API = 1
 
-# Sufijo que marca un directorio de plugin como DESHABILITADO. FUENTE ÚNICA (NIT-6): el
-# loader lo usa para ignorar el dir y el ``for`` del compose lo compara por inspección.
+# Suffix that marks a plugin directory as DISABLED. SINGLE SOURCE (NIT-6): the loader uses
+# it to ignore the dir and the compose ``for`` compares it by inspection.
 DISABLED_SUFFIX = ".disabled"
 
-# Nombre de directorio de plugin permitido (MEDIUM-4): solo alfanuméricos y ``._-`` para
-# evitar que un nombre raro se cuele como módulo o rompa el ``sys.path`` insert.
+# Allowed plugin directory name (MEDIUM-4): only alphanumerics and ``._-`` to avoid a weird
+# name sneaking in as a module or breaking the ``sys.path`` insert.
 PLUGIN_DIR_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
-# Versión del contrato de ``PluginContext`` (firmas fijas). Se expone como atributo de
-# clase e instancia para que un plugin pueda afirmarla si quisiera.
+# Version of the ``PluginContext`` contract (fixed signatures). Exposed as a class and
+# instance attribute so a plugin can assert it if it wants.
 PLUGIN_API = 1
 
-# Prefijo común de los logs del subsistema de plugins (loader y contexto).
+# Common prefix of the plugin subsystem logs (loader and context).
 _LOG_PREFIX = "[kali-mcp][plugins]"
 
 
 @dataclass
 class PluginRecord:
-    """Resultado por plugin descubierto, para el reporte y ``server_info``.
+    """Per-discovered-plugin result, for the report and ``server_info``.
 
-    ``phase`` describe HASTA DÓNDE llegó: ``loaded`` (ok), ``degraded`` (cargó pero con
-    colisiones) o la fase donde falló (``name``/``import``/``api``/``register-missing``/
-    ``register``). ``error`` guarda SOLO ``str(exc)`` (una línea, sin rutas); el traceback
-    completo va a stdout/stderr, no al reporte.
+    ``phase`` describes HOW FAR it got: ``loaded`` (ok), ``degraded`` (loaded but with
+    collisions) or the phase where it failed (``name``/``import``/``api``/``register-missing``/
+    ``register``). ``error`` stores ONLY ``str(exc)`` (a single line, without paths); the full
+    traceback goes to stdout/stderr, not to the report.
     """
 
     name: str
@@ -70,7 +71,7 @@ class PluginRecord:
 
 @dataclass
 class PluginLoadReport:
-    """Reporte agregado de una pasada de ``load_plugins`` (lo lee ``server_info``)."""
+    """Aggregate report of a ``load_plugins`` pass (``server_info`` reads it)."""
 
     plugins: list[PluginRecord] = field(default_factory=list)
 
@@ -79,11 +80,12 @@ class PluginLoadReport:
 
 
 class PluginContext:
-    """Handle que el plugin recibe en ``register(ctx)``. Firmas fijas: ``PLUGIN_API=1``.
+    """Handle the plugin receives in ``register(ctx)``. Fixed signatures: ``PLUGIN_API=1``.
 
-    Es el único punto por el que un plugin toca el servidor: registra tools (con detección
-    de colisión), declara UNA skill (validada contra escapes de ruta) y anota volúmenes que
-    necesita (declarativo). No ejecuta efectos de montaje ni habilita nada por sí mismo.
+    It is the only point through which a plugin touches the server: it registers tools (with
+    collision detection), declares ONE skill (validated against path escapes) and annotates
+    the volumes it needs (declarative). It does not run mount effects or enable anything on
+    its own.
     """
 
     PLUGIN_API = PLUGIN_API
@@ -92,41 +94,41 @@ class PluginContext:
         self._mcp = mcp
         self._plugin_dir = os.path.abspath(plugin_dir)
         self.PLUGIN_API = PLUGIN_API
-        # Anotaciones recogidas por el loader tras ``register(ctx)``.
+        # Annotations collected by the loader after ``register(ctx)``.
         self.tools: list[str] = []
         self.collisions: list[str] = []
         self.volumes: list[str] = []
-        # Ruta validada de la (única) skill del plugin. Atributo DISTINTO del método
-        # ``skill()`` para no sombrearlo; el loader lo lee como ``ctx.skill_path``.
+        # Validated path of the plugin's (single) skill. A DIFFERENT attribute from the
+        # ``skill()`` method so as not to shadow it; the loader reads it as ``ctx.skill_path``.
         self.skill_path: str | None = None
 
     def _existing_tool_names(self) -> set[str]:
-        """Nombres de tool ya registradas vía la API interna de FastMCP.
+        """Names of tools already registered via FastMCP's internal API.
 
-        MEDIUM-2: si ``mcp._tool_manager.list_tools()`` no existe o lanza, se PROPAGA la
-        excepción para que el registro FALLE en vez de delegar a ciegas (no se puede
-        detectar colisión sin la lista fiable de nombres).
+        MEDIUM-2: if ``mcp._tool_manager.list_tools()`` does not exist or raises, the
+        exception is PROPAGATED so that the registration FAILS instead of delegating blindly
+        (a collision cannot be detected without the reliable list of names).
         """
         tool_manager = self._mcp._tool_manager
         tools = tool_manager.list_tools()
         return {t.name for t in tools}
 
     def tool(self, *args: Any, **kwargs: Any):
-        """Decorador de tool con DETECCIÓN DE COLISIÓN previa a delegar.
+        """Tool decorator with COLLISION DETECTION prior to delegating.
 
-        Resuelve el nombre objetivo (kwarg ``name=`` o ``fn.__name__``) y consulta los
-        nombres existentes. Si ya existe -> NO delega, anota la colisión y devuelve la
-        función intacta. Si no existe -> delega literalmente en ``mcp.tool(*a, **k)`` y
-        anota el nombre registrado. MEDIUM-2: si no se puede obtener la lista de nombres,
-        el registro FALLA (``_existing_tool_names`` propaga).
+        It resolves the target name (kwarg ``name=`` or ``fn.__name__``) and queries the
+        existing names. If it already exists -> it does NOT delegate, records the collision
+        and returns the function untouched. If it does not exist -> it delegates literally to
+        ``mcp.tool(*a, **k)`` and records the registered name. MEDIUM-2: if the list of names
+        cannot be obtained, the registration FAILS (``_existing_tool_names`` propagates).
         """
 
         def _decorator(fn: Any) -> Any:
             name = kwargs.get("name") or getattr(fn, "__name__", None)
             existing = self._existing_tool_names()
             if name in existing:
-                # Colisión: no se pisa la tool existente (add_tool sería un no-op silencioso
-                # de FastMCP, pero aquí se anota explícitamente como colisión -> degraded).
+                # Collision: the existing tool is not overwritten (add_tool would be a silent
+                # no-op in FastMCP, but here it is explicitly recorded as a collision -> degraded).
                 self.collisions.append(name)
                 print(
                     f"{_LOG_PREFIX} collision: tool '{name}' ya existe; "
@@ -141,11 +143,11 @@ class PluginContext:
         return _decorator
 
     def skill(self, path: str) -> None:
-        """Declara la ÚNICA skill del plugin (ruta relativa al dir del plugin).
+        """Declares the plugin's SINGLE skill (path relative to the plugin dir).
 
-        MEDIUM-4: valida con ``os.path.realpath`` que la ruta resuelta queda BAJO
-        ``plugin_dir``; si escapa -> warning NO fatal y NO se anota. Una segunda llamada es
-        un error de contrato (máximo una skill por plugin): se loguea y se ignora.
+        MEDIUM-4: it validates with ``os.path.realpath`` that the resolved path stays UNDER
+        ``plugin_dir``; if it escapes -> a NON-fatal warning and it is NOT annotated. A second
+        call is a contract error (at most one skill per plugin): it is logged and ignored.
         """
         if self.skill_path is not None:
             print(
@@ -166,13 +168,13 @@ class PluginContext:
         self.skill_path = resolved
 
     def needs_volume(self, name: str) -> None:
-        """Declara (solo anota) que el plugin necesita un volumen. NO monta nada."""
+        """Declares (only annotates) that the plugin needs a volume. Mounts NOTHING."""
         self.volumes.append(name)
 
     def plugin_dir(self) -> str:
-        """Ruta absoluta del directorio del plugin. SIEMPRE devuelve ruta, exista o no."""
+        """Absolute path of the plugin's directory. ALWAYS returns a path, exist or not."""
         return self._plugin_dir
 
     def vendor_dir(self) -> str:
-        """Ruta absoluta de ``<plugin_dir>/vendor``. SIEMPRE devuelve ruta, exista o no."""
+        """Absolute path of ``<plugin_dir>/vendor``. ALWAYS returns a path, exist or not."""
         return os.path.join(self._plugin_dir, "vendor")

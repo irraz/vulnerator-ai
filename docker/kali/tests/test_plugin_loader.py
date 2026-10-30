@@ -1,8 +1,8 @@
-"""Tests de ``load_plugins`` (STDLIB PURA, con un doble de ``mcp`` — SIN el SDK).
+"""Tests of ``load_plugins`` (PURE STDLIB, with a ``mcp`` double — WITHOUT the SDK).
 
-Usan el árbol de fixtures en ``tests/fixtures/plugins/`` como ``plugins_root`` y un doble de
-``mcp`` cuyo ``_tool_manager`` registra las llamadas a ``remove_tool`` (para probar la
-reversión NIT-8). No se importa el SDK ``mcp`` (no está en el venv de dev).
+They use the fixtures tree in ``tests/fixtures/plugins/`` as ``plugins_root`` and an ``mcp``
+double whose ``_tool_manager`` records the calls to ``remove_tool`` (to test the NIT-8
+rollback). The ``mcp`` SDK is not imported (it is not in the dev venv).
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def test_raiz_inexistente_reporte_vacio_y_last_report(tmp_path):
     missing = str(tmp_path / "nope")
     report = plugin_loader.load_plugins(mcp, missing)
     assert report.plugins == []
-    # LAST_REPORT quedó asignado al reporte vacío (HIGH-1).
+    # LAST_REPORT was assigned to the empty report (HIGH-1).
     assert plugin_loader.LAST_REPORT is report
 
 
@@ -74,12 +74,12 @@ def test_orden_determinista_y_omisiones():
     report = plugin_loader.load_plugins(mcp, str(_FIXTURES))
     names = [r.name for r in report.plugins]
 
-    # Orden alfabético estricto entre los candidatos presentes.
+    # Strict alphabetical order among the present candidates.
     assert names == sorted(names)
-    # Dir .disabled ignorado y dir sin plugin.py omitido.
+    # .disabled dir ignored and dir without plugin.py skipped.
     assert "example.disabled" not in names
     assert "not_a_plugin" not in names
-    # 'aaa_first' va antes que 'zzz_last'.
+    # 'aaa_first' comes before 'zzz_last'.
     assert names.index("aaa_first") < names.index("zzz_last")
 
 
@@ -105,7 +105,7 @@ def test_import_roto_cae_en_fase_import():
     rec = _by_name(report)["broken_import"]
     assert rec.status == "failed"
     assert rec.phase == "import"
-    # El reporte guarda SOLO el mensaje corto (una línea, sin rutas ni traceback).
+    # The report stores ONLY the short message (a single line, without paths or traceback).
     assert rec.error and "\n" not in rec.error
 
 
@@ -131,7 +131,7 @@ def test_register_que_lanza_revierte_tools_nit8():
     rec = _by_name(report)["raises_register"]
     assert rec.status == "failed"
     assert rec.phase == "register"
-    # NIT-8: la tool parcial 'partial_tool' se revirtió vía _tool_manager.remove_tool.
+    # NIT-8: the partial tool 'partial_tool' was rolled back via _tool_manager.remove_tool.
     assert "partial_tool" in mcp._tool_manager.removed
     assert "partial_tool" not in mcp._tool_manager._names
 
@@ -143,7 +143,7 @@ def test_sys_path_restaurado_tras_la_pasada():
 
 
 def test_nombre_invalido_cae_en_fase_name(tmp_path):
-    # Un nombre de dir inválido se crea en caliente (no portable como fixture versionado).
+    # An invalid dir name is created on the fly (not portable as a versioned fixture).
     bad = tmp_path / "bad name!"
     bad.mkdir()
     (bad / "plugin.py").write_text("PLUGIN_API = 1\n\ndef register(ctx):\n    pass\n", encoding="utf-8")
@@ -156,4 +156,4 @@ def test_nombre_invalido_cae_en_fase_name(tmp_path):
 def test_last_report_asignado_tras_pasada_no_vacia():
     report = plugin_loader.load_plugins(_FakeMcp(), str(_FIXTURES))
     assert plugin_loader.LAST_REPORT is report
-    assert report.plugins  # hubo candidatos
+    assert report.plugins  # there were candidates

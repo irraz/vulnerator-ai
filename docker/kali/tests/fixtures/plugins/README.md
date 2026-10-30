@@ -1,18 +1,18 @@
-# Fixtures de plugins para `test_plugin_loader`
+# Plugin fixtures for `test_plugin_loader`
 
-Árbol de plugins de ejemplo que `test_plugin_loader.py` apunta como `plugins_root`. Cada
-subdirectorio ejercita un camino del cargador:
+Example plugin tree that `test_plugin_loader.py` points at as `plugins_root`. Each
+subdirectory exercises one loader path:
 
-- `aaa_first` / `zzz_last`: plugins válidos (comprueban orden alfabético determinista).
-- `sibling_import`: `plugin.py` que hace `import helper` (hermano) — demuestra MEDIUM-3.
-- `broken_import.src` → se renombra en test a un dir con import roto (ver nota). En su
-  lugar usamos `broken_import` con un `import` inexistente (fase 'import').
-- `no_api`: sin `PLUGIN_API` (fase 'api').
-- `bad_api`: `PLUGIN_API` incompatible (fase 'api').
-- `no_register`: sin callable `register` (fase 'register-missing').
-- `raises_register`: `register` que registra una tool y luego lanza (fase 'register' + NIT-8).
-- `example.disabled`: dir deshabilitado (ignorado).
-- `not_a_plugin`: dir sin `plugin.py` (omitido).
+- `aaa_first` / `zzz_last`: valid plugins (check deterministic alphabetical order).
+- `sibling_import`: `plugin.py` that does `import helper` (sibling) — demonstrates MEDIUM-3.
+- `broken_import.src` → renamed in the test to a dir with a broken import (see note). Instead
+  we use `broken_import` with a nonexistent `import` (phase 'import').
+- `no_api`: without `PLUGIN_API` (phase 'api').
+- `bad_api`: incompatible `PLUGIN_API` (phase 'api').
+- `no_register`: without a callable `register` (phase 'register-missing').
+- `raises_register`: `register` that registers a tool and then raises (phase 'register' + NIT-8).
+- `example.disabled`: disabled dir (ignored).
+- `not_a_plugin`: dir without `plugin.py` (skipped).
 
-Los nombres inválidos de directorio (MEDIUM-4) NO pueden existir como carpeta portable en
-todos los FS, así que ese caso se crea en caliente dentro del test con `tmp_path`.
+Invalid directory names (MEDIUM-4) CANNOT exist as a portable folder on all FS, so that case
+is created on the fly inside the test with `tmp_path`.

@@ -1,10 +1,10 @@
-"""Fixture MEDIUM-3: plugin.py que importa un HERMANO (``helper``) del mismo dir.
+"""MEDIUM-3 fixture: plugin.py that imports a SIBLING (``helper``) from the same dir.
 
-Si el ``sys.path`` insert del loader no estuviera, este ``import helper`` fallaría y el
-plugin caería en fase 'import'. Con el insert, resuelve contra el propio directorio.
+If the loader's ``sys.path`` insert were not there, this ``import helper`` would fail and the
+plugin would fall into phase 'import'. With the insert, it resolves against its own directory.
 """
 
-import helper  # noqa: F401 - hermano del mismo dir del plugin
+import helper  # noqa: F401 - sibling from the plugin's own dir
 
 PLUGIN_API = 1
 

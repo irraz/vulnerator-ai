@@ -1,11 +1,11 @@
-# Escribir un plugin de kali-mcp
+# Writing a kali-mcp plugin
 
-Guía para autores de plugins. Para el detalle del descubrimiento/carga y de las dos rutas
-del árbol `plugins/`, consulta [discovery.md](discovery.md).
+Guide for plugin authors. For the details of discovery/loading and the two paths of the
+`plugins/` tree, see [discovery.md](discovery.md).
 
-## Estructura de un plugin
+## Structure of a plugin
 
-Un plugin es un **subdirectorio inmediato** de `plugins/` con, al menos, un `plugin.py`:
+A plugin is an **immediate subdirectory** of `plugins/` with, at minimum, a `plugin.py`:
 
 ```
 plugins/
@@ -17,19 +17,19 @@ plugins/
     README.md          # recomendado
 ```
 
-`plugin.py` debe exponer:
+`plugin.py` must expose:
 
-- `PLUGIN_API = 1` — versión del contrato que el plugin implementa. El cargador exige
-  **igualdad exacta** con `plugin_api.SUPPORTED_PLUGIN_API`; si no casan, el plugin se
-  rechaza en fase `api`.
-- `PLUGIN_NAME = "mi-plugin"` — nombre del plugin (para logs y `server_info`).
-- `register(ctx)` — función que recibe un `PluginContext` y declara tools, skill y
-  volúmenes a través de él.
+- `PLUGIN_API = 1` — version of the contract that the plugin implements. The loader
+  requires **exact equality** with `plugin_api.SUPPORTED_PLUGIN_API`; if they do not match,
+  the plugin is rejected in phase `api`.
+- `PLUGIN_NAME = "mi-plugin"` — name of the plugin (for logs and `server_info`).
+- `register(ctx)` — function that receives a `PluginContext` and declares tools, skill, and
+  volumes through it.
 
 ## `register(ctx)`
 
-Es el **único punto** por el que el plugin toca el servidor. Recibe un `PluginContext` ya
-configurado para el directorio del plugin. Ejemplo mínimo:
+It is the **only point** through which the plugin touches the server. It receives a
+`PluginContext` already configured for the plugin's directory. Minimal example:
 
 ```python
 from __future__ import annotations
@@ -48,89 +48,92 @@ def register(ctx):
     ctx.needs_volume("kali-artifacts")
 ```
 
-El plugin de ejemplo `plugins/example-hello.disabled/` demuestra el contrato completo y
-sirve de plantilla.
+The example plugin `plugins/example-hello.disabled/` demonstrates the full contract and
+serves as a template.
 
-## API de `PluginContext`
+## `PluginContext` API
 
-Firmas fijas, versionadas con `PLUGIN_API = 1`:
+Fixed signatures, versioned with `PLUGIN_API = 1`:
 
-- `ctx.tool(*args, **kwargs)` — **decorador de tool con detección de colisión**. Resuelve el
-  nombre objetivo (kwarg `name=` o `fn.__name__`) y consulta las tools ya registradas. Si el
-  nombre ya existe, **no** delega: anota la colisión (el plugin queda `degraded`) y devuelve
-  la función intacta. Si no existe, delega literalmente en `mcp.tool(*a, **k)` y anota el
-  nombre. Si no puede obtener la lista fiable de nombres, el registro **falla** (no delega a
-  ciegas).
-- `ctx.skill(path)` — declara la **única** skill del plugin (ruta relativa al directorio del
-  plugin). Valida con `realpath` que la ruta resuelta queda **bajo** el directorio del
-  plugin; si escapa, se ignora con un warning no fatal. Una segunda llamada es un error de
-  contrato (máximo una skill): se ignora.
-- `ctx.needs_volume(name)` — **solo anota** que el plugin necesita un volumen. **No monta ni
-  habilita nada**; es declarativo para `server_info`.
-- `ctx.plugin_dir()` — ruta absoluta del directorio del plugin (siempre devuelve ruta,
-  exista o no).
-- `ctx.vendor_dir()` — ruta absoluta de `<plugin_dir>/vendor` (siempre devuelve ruta, exista
-  o no). **Contrato**: devuelve la ruta a `vendor/`; tú decides si existe y si la insertas en
-  `sys.path`. No crea el directorio ni verifica su contenido.
+- `ctx.tool(*args, **kwargs)` — **tool decorator with collision detection**. It resolves
+  the target name (kwarg `name=` or `fn.__name__`) and queries the already-registered
+  tools. If the name already exists, it does **not** delegate: it records the collision (the
+  plugin ends up `degraded`) and returns the function untouched. If it does not exist, it
+  delegates literally to `mcp.tool(*a, **k)` and records the name. If it cannot obtain the
+  reliable list of names, the registration **fails** (it does not delegate blindly).
+- `ctx.skill(path)` — declares the **single** skill of the plugin (path relative to the
+  plugin's directory). It validates with `realpath` that the resolved path stays **under**
+  the plugin's directory; if it escapes, it is ignored with a non-fatal warning. A second
+  call is a contract error (at most one skill): it is ignored.
+- `ctx.needs_volume(name)` — **only annotates** that the plugin needs a volume. It **does
+  not mount or enable anything**; it is declarative for `server_info`.
+- `ctx.plugin_dir()` — absolute path of the plugin's directory (always returns a path,
+  whether it exists or not).
+- `ctx.vendor_dir()` — absolute path of `<plugin_dir>/vendor` (always returns a path,
+  whether it exists or not). **Contract**: it returns the path to `vendor/`; you decide
+  whether it exists and whether to insert it into `sys.path`. It does not create the
+  directory or verify its contents.
 
-## Regla de PREFIJAR módulos (sombra en `sys.modules`)
+## Rule for PREFIXING modules (shadow in `sys.modules`)
 
-El cargador importa cada `plugin.py` bajo un nombre namespaced (`vuln_plugin_<dir>`) e
-inserta el directorio del plugin en `sys.path` **solo** mientras ejecuta su cuerpo, para que
-`import <hermano>` resuelva contra el propio directorio del plugin.
+The loader imports each `plugin.py` under a namespaced name (`vuln_plugin_<dir>`) and
+inserts the plugin's directory into `sys.path` **only** while running its body, so that
+`import <sibling>` resolves against the plugin's own directory.
 
-Aun así, los módulos hermanos que importes (y cualquier dependencia de `vendor/`) entran en
-`sys.modules` por su **nombre tal cual**. Si dos plugins (o un plugin y el core) usan el
-mismo nombre de módulo, el segundo **sombrea** al primero en `sys.modules`. Para evitarlo,
-**prefija** los nombres de tus módulos y paquetes vendorizados con algo propio del plugin
-(p. ej. `miplugin_utils` en vez de `utils`). No asumas que tu `utils` es el que se importa.
+Even so, the sibling modules you import (and any `vendor/` dependency) enter `sys.modules`
+under their **name as is**. If two plugins (or a plugin and the core) use the same module
+name, the second **shadows** the first in `sys.modules`. To avoid this, **prefix** the
+names of your vendored modules and packages with something specific to the plugin (e.g.
+`miplugin_utils` instead of `utils`). Do not assume that your `utils` is the one that gets
+imported.
 
-## La skill = nombre del directorio
+## The skill = directory name
 
-La skill del plugin se copia al perfil de Hermes bajo un directorio **con el nombre del
-plugin** (el nombre de su directorio). Es el bucle de skills del `command` de `ooda-agent`
-en `docker-compose.yml` quien hace la copia desde el bind-mount `/opt/plugins`. Nombra el
-directorio del plugin con cuidado: es también el nombre de su skill en Hermes.
+The plugin's skill is copied into the Hermes profile under a directory **with the plugin's
+name** (its directory name). It is the skills loop of the `ooda-agent` `command` in
+`docker-compose.yml` that does the copy from the `/opt/plugins` bind-mount. Name the
+plugin's directory carefully: it is also the name of its skill in Hermes.
 
-## Cómo entregar `vendor/` y `skill/`
+## How to ship `vendor/` and `skill/`
 
-- **`vendor/`**: empaqueta aquí las dependencias de terceros del plugin. Si necesitas que
-  Python las encuentre, inserta `ctx.vendor_dir()` en `sys.path` **dentro de `register`** y
-  recuerda la regla de prefijos. `vendor_dir()` no añade nada por sí solo.
-- **`skill/`**: deja aquí el `SKILL.md` (y recursos) de la skill. Declárala con
-  `ctx.skill(path="skill")`. Se copia a Hermes como se describe arriba; recuerda que esa capa
-  es **viva** (bind-mount) y solo necesita reinicio de `ooda-agent`, mientras que las tools
-  viajan en la imagen **congelada** de la Kali y necesitan rebuild (ver
+- **`vendor/`**: package the plugin's third-party dependencies here. If you need Python to
+  find them, insert `ctx.vendor_dir()` into `sys.path` **inside `register`** and remember
+  the prefix rule. `vendor_dir()` does not add anything on its own.
+- **`skill/`**: leave the skill's `SKILL.md` (and resources) here. Declare it with
+  `ctx.skill(path="skill")`. It is copied to Hermes as described above; remember that this
+  layer is **live** (bind-mount) and only needs a restart of `ooda-agent`, whereas the tools
+  travel in the Kali's **frozen** image and need a rebuild (see
   [discovery.md](discovery.md)).
 
-## Postura de seguridad (NIT-7)
+## Security posture (NIT-7)
 
-El código de un plugin se ejecuta con **confianza plena**: corre en el **mismo proceso** del
-servidor kali-mcp, con sus mismos privilegios, **sin sandbox** y **sin aislamiento** entre
-el plugin y el servidor. Un plugin puede hacer lo que haga el core.
+A plugin's code runs with **full trust**: it runs in the **same process** as the kali-mcp
+server, with its same privileges, **without a sandbox** and **without isolation** between
+the plugin and the server. A plugin can do whatever the core does.
 
-Además, el perfil de Hermes **ya no hace whitelist** de las tools de la Kali (se retiró
-`mcp_servers.kali.tools.include` de `agent-ooda/profile/config.yaml`): el **servidor MCP es
-la fuente de verdad** y lo que el servidor expone es lo que Hermes ve. Por tanto, una tool
-aportada por un plugin de terceros entra en la superficie de Hermes **sin pasar por un
-gate**. Instala únicamente plugins de **origen conocido y revisado**.
+In addition, the Hermes profile **no longer whitelists** the Kali's tools
+(`mcp_servers.kali.tools.include` was removed from `agent-ooda/profile/config.yaml`): the
+**MCP server is the source of truth** and what the server exposes is what Hermes sees.
+Therefore, a tool contributed by a third-party plugin enters Hermes's surface **without
+passing through a gate**. Only install plugins of **known and reviewed origin**.
 
-Si quisieras volver a revisar tool por tool, la vía es **reañadir manualmente** una
-`include:` con la whitelist exacta de nombres (tal como los expone el servidor) bajo
-`mcp_servers.kali.tools` en el `config.yaml`. No está puesta por defecto.
+If you wanted to review tool by tool again, the way is to **manually re-add** an
+`include:` with the exact whitelist of names (as the server exposes them) under
+`mcp_servers.kali.tools` in the `config.yaml`. It is not set by default.
 
-## `.disabled` como constante única (NIT-6)
+## `.disabled` as a single constant (NIT-6)
 
-El sufijo que apaga un plugin es `.disabled`, definido **una sola vez** en el código Python
-como `plugin_api.DISABLED_SUFFIX`. Lo comparten el cargador (capa de tools) y el bucle de
-skills del compose (capa de Hermes), y un test de paridad fija que no diverjan. Para apagar
-un plugin, renombra su directorio añadiendo `.disabled`; para encenderlo, quítalo.
+The suffix that turns off a plugin is `.disabled`, defined **only once** in the Python code
+as `plugin_api.DISABLED_SUFFIX`. It is shared by the loader (tools layer) and the compose
+skills loop (Hermes layer), and a parity test pins that they do not diverge. To turn off a
+plugin, rename its directory by adding `.disabled`; to turn it on, remove it.
 
-## Cómo testear con un `ctx` doble
+## How to test with a double `ctx`
 
-Los tests del core **no** importan el SDK `mcp` ni el servidor: usan un **doble** de `mcp`
-que imita la parte de la API interna de FastMCP que `PluginContext` toca —`mcp.tool(*a, **k)`
-(decorador) y `mcp._tool_manager.list_tools()` (nombres existentes)—. Sigue el mismo patrón
-para tu plugin: construye un `PluginContext` con ese doble y llama a tu `register(ctx)`,
-luego afirma sobre `ctx.tools`, `ctx.skill_path`, `ctx.volumes` y `ctx.collisions`.
-Consulta `docker/kali/tests/test_plugin_api.py` y `test_example_hello.py` como ejemplos.
+The core tests do **not** import the `mcp` SDK nor the server: they use a **double** of
+`mcp` that mimics the part of FastMCP's internal API that `PluginContext` touches —
+`mcp.tool(*a, **k)` (decorator) and `mcp._tool_manager.list_tools()` (existing names). Follow
+the same pattern for your plugin: build a `PluginContext` with that double and call your
+`register(ctx)`, then assert on `ctx.tools`, `ctx.skill_path`, `ctx.volumes`, and
+`ctx.collisions`. See `docker/kali/tests/test_plugin_api.py` and `test_example_hello.py` as
+examples.

@@ -1,19 +1,19 @@
-"""Test de PARIDAD del sufijo .disabled entre las dos capas (NIT-6).
+"""PARITY test of the .disabled suffix between the two layers (NIT-6).
 
-El sufijo que apaga un plugin vive en DOS sitios que NO deben divergir:
-  - la capa Python: ``plugin_api.DISABLED_SUFFIX`` (lo usa ``plugin_loader`` para ignorar el
-    directorio en el servidor kali-mcp);
-  - la capa shell: el ``for`` de skills de plugins del ``command`` de ``ooda-agent`` en
-    ``docker-compose.yml``, que salta los directorios ``*.disabled`` antes de copiar su skill.
+The suffix that turns off a plugin lives in TWO places that must NOT diverge:
+  - the Python layer: ``plugin_api.DISABLED_SUFFIX`` (``plugin_loader`` uses it to ignore the
+    directory in the kali-mcp server);
+  - the shell layer: the plugin skills ``for`` of the ``ooda-agent`` ``command`` in
+    ``docker-compose.yml``, which skips ``*.disabled`` directories before copying their skill.
 
-Si una capa cambiara el sufijo y la otra no, un plugin quedaría "medio apagado" (apagado en
-una capa y vivo en la otra). Este test fija que:
-  1. ``plugin_api.DISABLED_SUFFIX == '.disabled'`` (fuente única del lado Python);
-  2. el ``command`` de ``ooda-agent`` contiene la regla shell que salta ``*.disabled``,
-     por INSPECCIÓN del texto fuente del compose (no se levanta el stack).
+If one layer changed the suffix and the other did not, a plugin would end up "half off" (off
+in one layer and alive in the other). This test pins that:
+  1. ``plugin_api.DISABLED_SUFFIX == '.disabled'`` (single source on the Python side);
+  2. the ``ooda-agent`` ``command`` contains the shell rule that skips ``*.disabled``, by
+     INSPECTION of the compose source text (the stack is not brought up).
 
-Restricción de entorno (igual que el resto del core): STDLIB PURA, sin importar el SDK
-``mcp`` ni el servidor; ``plugin_api`` es STDLIB PURA y sí se puede importar.
+Environment constraint (like the rest of the core): PURE STDLIB, without importing the
+``mcp`` SDK or the server; ``plugin_api`` is PURE STDLIB and can indeed be imported.
 """
 
 from __future__ import annotations
@@ -26,28 +26,28 @@ sys.path.insert(0, str(_PARENT))
 
 import plugin_api  # noqa: E402
 
-# Raíz del worktree = dos niveles por encima de docker/kali/.
+# Worktree root = two levels above docker/kali/.
 _COMPOSE_PATH = _PARENT.parent.parent / "docker-compose.yml"
 
 
 def test_disabled_suffix_es_punto_disabled():
-    """La fuente única del lado Python es exactamente '.disabled'."""
+    """The single source on the Python side is exactly '.disabled'."""
     assert plugin_api.DISABLED_SUFFIX == ".disabled"
 
 
 def test_compose_salta_disabled_en_el_bucle_de_skills():
-    """El command de ooda-agent salta los plugins *.disabled con el MISMO sufijo."""
+    """The ooda-agent command skips *.disabled plugins with the SAME suffix."""
     source = _COMPOSE_PATH.read_text(encoding="utf-8")
-    # La regla shell que apaga un plugin por nombre de directorio. Comparte el sufijo
-    # '.disabled' con plugin_api.DISABLED_SUFFIX: ambas capas deben usar el mismo.
+    # The shell rule that turns off a plugin by directory name. It shares the '.disabled'
+    # suffix with plugin_api.DISABLED_SUFFIX: both layers must use the same one.
     assert 'case "$$name" in *.disabled) continue' in source
-    # El sufijo del compose coincide literalmente con la constante del lado Python.
+    # The compose suffix matches the Python-side constant literally.
     assert f"*{plugin_api.DISABLED_SUFFIX})" in source
 
 
 def test_bucle_de_skills_blindado():
-    """El bucle de skills de plugins está blindado (no puede abortar el arranque)."""
+    """The plugin skills loop is shielded (it cannot abort startup)."""
     source = _COMPOSE_PATH.read_text(encoding="utf-8")
-    # Gateado en que el directorio exista y ejecutado en un subshell con `set +e`.
+    # Gated on the directory existing and run in a subshell with `set +e`.
     assert "if [ -d /opt/plugins ]; then (" in source
     assert "set +e;" in source

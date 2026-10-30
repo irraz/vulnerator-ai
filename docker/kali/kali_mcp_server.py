@@ -239,49 +239,49 @@ def server_info() -> dict[str, Any]:
         "dnsdumpster_key_present": bool(
             os.environ.get(dnsdumpster_client.API_KEY_ENV, "")
         ),
-        # `tools` se deriva por INTROSPECCIÓN del registro real de FastMCP, de modo que
-        # incluye tanto las tools nativas como las aportadas por plugins cargados, sin una
-        # lista estática que se desincronice. Opción D: una sola fuente de verdad.
+        # `tools` is derived by INTROSPECTION of FastMCP's real registry, so that it
+        # includes both the native tools and those contributed by loaded plugins, without a
+        # static list that gets out of sync. Option D: a single source of truth.
         "tools": _introspect_tool_names(),
-        # Bloque de observabilidad de plugins (esquema cerrado) leído del reporte de
-        # `load_plugins`. Vacío y coherente si nunca se cargaron plugins (import suelto).
+        # Plugin observability block (closed schema) read from the `load_plugins` report.
+        # Empty and coherent if plugins were never loaded (bare import).
         "plugins": _plugins_block(),
     }
 
 
 def _introspect_tool_names() -> Any:
-    """Nombres de tool por introspección SÍNCRONA del registro de FastMCP.
+    """Tool names via SYNCHRONOUS introspection of FastMCP's registry.
 
-    Usa ``mcp._tool_manager.list_tools()`` (SÍNCRONO; devuelve objetos con ``.name``). NO
-    se usa el ``FastMCP.list_tools`` público porque es ``async`` y requeriría un event loop
-    dentro de esta tool. MEDIUM-2: si la API interna no existe o lanza, se DEGRADA con un
-    marcador en vez de propagar la excepción y tumbar ``server_info``.
+    It uses ``mcp._tool_manager.list_tools()`` (SYNCHRONOUS; returns objects with ``.name``).
+    The public ``FastMCP.list_tools`` is NOT used because it is ``async`` and would require an
+    event loop inside this tool. MEDIUM-2: if the internal API does not exist or raises, it
+    DEGRADES with a marker instead of propagating the exception and taking down ``server_info``.
     """
     try:
         return sorted(t.name for t in mcp._tool_manager.list_tools())
-    except Exception:  # noqa: BLE001 - degradar, no tumbar la tool (MEDIUM-2)
+    except Exception:  # noqa: BLE001 - degrade, do not take down the tool (MEDIUM-2)
         return "introspección no disponible"
 
 
 def _plugins_block() -> dict[str, Any]:
-    """Bloque ``plugins`` de ``server_info`` con el esquema CERRADO.
+    """``plugins`` block of ``server_info`` with the CLOSED schema.
 
-    Lee ``plugin_loader.LAST_REPORT`` (singleton publicado por ``load_plugins``). Clasifica
-    cada ``PluginRecord`` por ``status``:
+    It reads ``plugin_loader.LAST_REPORT`` (singleton published by ``load_plugins``). It
+    classifies each ``PluginRecord`` by ``status``:
       - ``loaded``   -> loaded[]={name,tools[],skill:bool,volumes[]}
-      - ``degraded`` -> degraded[]={name,collisions[]} (y también cuenta como cargado parcial)
+      - ``degraded`` -> degraded[]={name,collisions[]} (and also counts as partially loaded)
       - ``failed``   -> failed[]={name,phase,error}
 
-    Import local de ``plugin_loader`` para no forzar su presencia a nivel de módulo (HIGH-1):
-    si el módulo no está o ``LAST_REPORT`` es None/ausente, se devuelve un bloque VACÍO
-    coherente (compat idéntica a hoy).
+    Local import of ``plugin_loader`` so as not to force its presence at module level (HIGH-1):
+    if the module is absent or ``LAST_REPORT`` is None/missing, a coherent EMPTY block is
+    returned (compat identical to today).
     """
     empty: dict[str, Any] = {"loaded": [], "failed": [], "degraded": []}
     try:
         import plugin_loader
 
         report = getattr(plugin_loader, "LAST_REPORT", None)
-    except Exception:  # noqa: BLE001 - sin loader -> bloque vacío coherente
+    except Exception:  # noqa: BLE001 - no loader -> coherent empty block
         return empty
     if report is None or not getattr(report, "plugins", None):
         return empty
@@ -981,11 +981,11 @@ def _start_artifacts_http() -> None:
 
 
 if __name__ == "__main__":
-    # Carga de plugins por descubrimiento ANTES de abrir ningún plano. Se invoca SOLO aquí
-    # (HIGH-1): NUNCA a nivel de módulo, para no correr en cada import ni en los tests sin
-    # SDK. `load_plugins` publica el reporte en `plugin_loader.LAST_REPORT`, que lee
-    # `server_info`. Import local a este guard por la misma razón (el loader es STDLIB-pure,
-    # pero mantenerlo aquí deja el import fuera del camino de los tests de inspección).
+    # Plugin loading by discovery BEFORE opening any plane. It is invoked ONLY here
+    # (HIGH-1): NEVER at module level, so it does not run on every import nor in the tests
+    # without the SDK. `load_plugins` publishes the report in `plugin_loader.LAST_REPORT`,
+    # which `server_info` reads. Local import to this guard for the same reason (the loader is
+    # STDLIB-pure, but keeping it here keeps the import out of the inspection tests' path).
     import plugin_loader
 
     plugin_loader.load_plugins(mcp, os.environ.get("PLUGINS_DIR", "plugins"))

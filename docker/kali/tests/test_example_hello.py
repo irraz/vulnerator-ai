@@ -1,12 +1,12 @@
-"""Test del plugin de EJEMPLO ``example-hello`` (STDLIB PURA, con doble de ``mcp``).
+"""Test of the EXAMPLE plugin ``example-hello`` (PURE STDLIB, with an ``mcp`` double).
 
-El directorio del plugin termina en ``.disabled``, por lo que NO es importable por nombre:
-se carga su ``plugin.py`` POR RUTA con ``importlib.util.spec_from_file_location`` (igual que
-hace el cargador real). Se ejecuta ``register(ctx)`` con un ``PluginContext`` real sobre un
-doble de ``mcp`` (el SDK no está en el venv de dev), siguiendo el patrón de ``test_plugin_api``.
+The plugin's directory ends in ``.disabled``, so it is NOT importable by name: its
+``plugin.py`` is loaded BY PATH with ``importlib.util.spec_from_file_location`` (just like
+the real loader does). ``register(ctx)`` is run with a real ``PluginContext`` over an ``mcp``
+double (the SDK is not in the dev venv), following the ``test_plugin_api`` pattern.
 
-Verifica que el plugin monta la tool ``hello``, declara la skill y el volumen, y que la tool
-capturada devuelve el saludo inocuo esperado.
+It verifies that the plugin mounts the ``hello`` tool, declares the skill and the volume,
+and that the captured tool returns the expected harmless greeting.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ sys.path.insert(0, str(_PARENT))
 
 import plugin_api  # noqa: E402
 
-# Ruta al plugin.py del ejemplo (directorio .disabled -> solo cargable por ruta).
+# Path to the example's plugin.py (.disabled directory -> only loadable by path).
 _PLUGIN_DIR = _PARENT.parent.parent / "plugins" / "example-hello.disabled"
 _PLUGIN_PY = _PLUGIN_DIR / "plugin.py"
 
@@ -43,7 +43,7 @@ class _FakeToolManager:
 
 
 class _FakeMcp:
-    """Doble de FastMCP que CAPTURA la función decorada por ``tool()`` para invocarla."""
+    """Double of FastMCP that CAPTURES the function decorated by ``tool()`` to invoke it."""
 
     def __init__(self, existing=None) -> None:
         self._tool_manager = _FakeToolManager(existing)
@@ -80,15 +80,15 @@ def test_register_monta_hello_skill_y_volumen():
 
     module.register(ctx)
 
-    # Monta la tool 'hello'.
+    # Mounts the 'hello' tool.
     assert ctx.tools == ["hello"]
     assert ctx.collisions == []
     assert "hello" in mcp.registered
 
-    # Declara la skill (directorio skill/ bajo el plugin).
+    # Declares the skill (skill/ directory under the plugin).
     assert ctx.skill_path == os.path.realpath(str(_PLUGIN_DIR / "skill"))
 
-    # Declara (anota) el volumen de artefactos.
+    # Declares (annotates) the artifacts volume.
     assert ctx.volumes == ["kali-artifacts"]
 
 

@@ -1,4 +1,4 @@
-"""Fixture fase 'register-missing': no expone un callable register."""
+"""Phase 'register-missing' fixture: it does not expose a callable register."""
 
 PLUGIN_API = 1
 

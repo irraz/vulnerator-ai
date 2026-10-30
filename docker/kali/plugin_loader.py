@@ -1,17 +1,18 @@
-"""Cargador por DESCUBRIMIENTO de plugins de kali-mcp (STDLIB PURA, SIN ``mcp``).
+"""kali-mcp plugin loader by DISCOVERY (PURE STDLIB, NO ``mcp``).
 
-Enumera los subdirectorios inmediatos de ``plugins_root`` que contienen ``plugin.py``, los
-importa AISLADOS (cada uno namespaced bajo ``vuln_plugin_<dir>``) y les da un
-``PluginContext`` para que registren tools/skill/volúmenes. Cada plugin se procesa dentro
-de su propio ``try/except`` para que uno roto no tumbe a los demás ni al arranque del
-servidor. El resultado se guarda en el singleton de módulo ``LAST_REPORT`` (HIGH-1) para
-que ``server_info`` lo lea de forma fiable.
+It enumerates the immediate subdirectories of ``plugins_root`` that contain ``plugin.py``,
+imports them ISOLATED (each namespaced under ``vuln_plugin_<dir>``) and gives them a
+``PluginContext`` so they register tools/skill/volumes. Each plugin is processed inside its
+own ``try/except`` so a broken one does not take down the others or the server startup. The
+result is stored in the module singleton ``LAST_REPORT`` (HIGH-1) so that ``server_info``
+reads it reliably.
 
-Compatibilidad idéntica a hoy: si ``plugins_root`` no existe o no es un directorio, el
-reporte es VACÍO y no se toca el servidor.
+Compatibility identical to today: if ``plugins_root`` does not exist or is not a directory,
+the report is EMPTY and the server is not touched.
 
-Este módulo usa SOLO la librería estándar (no importa ``mcp``) para cubrirse con tests en
-el venv de dev; ``load_plugins`` recibe el objeto ``mcp`` (FastMCP real o un doble).
+This module uses ONLY the standard library (it does not import ``mcp``) so it can be covered
+by tests in the dev venv; ``load_plugins`` receives the ``mcp`` object (real FastMCP or a
+double).
 """
 
 from __future__ import annotations
@@ -30,21 +31,22 @@ from plugin_api import (
     PluginRecord,
 )
 
-# Prefijo de logs del subsistema de carga (tracebacks completos a stdout/stderr).
+# Log prefix of the loading subsystem (full tracebacks to stdout/stderr).
 _LOG_PREFIX = "[kali-mcp][plugins]"
 
-# Singleton de módulo con el ÚLTIMO reporte de carga. ``server_info`` lo lee (HIGH-1).
-# Arranca vacío para que, si nunca se llamó a ``load_plugins``, ``server_info`` vea cero
-# plugins (compat idéntica a hoy).
+# Module singleton with the LAST loading report. ``server_info`` reads it (HIGH-1). It
+# starts empty so that, if ``load_plugins`` was never called, ``server_info`` sees zero
+# plugins (compat identical to today).
 LAST_REPORT = PluginLoadReport()
 
 
 def _iter_plugin_dirs(plugins_root: str) -> list[tuple[str, str]]:
-    """Devuelve ``(name, plugin_dir)`` de los candidatos, en orden ALFABÉTICO determinista.
+    """Returns ``(name, plugin_dir)`` of the candidates, in deterministic ALPHABETICAL order.
 
-    Ignora: no-directorios, ocultos (prefijo ``.``), dirs terminados en ``DISABLED_SUFFIX``
-    y dirs sin ``plugin.py``. NO filtra por regex de nombre aquí: un nombre inválido pero
-    con ``plugin.py`` debe reportarse como fallo de fase 'name' (MEDIUM-4), no omitirse.
+    It ignores: non-directories, hidden ones (``.`` prefix), dirs ending in
+    ``DISABLED_SUFFIX`` and dirs without ``plugin.py``. It does NOT filter by name regex
+    here: an invalid name but with ``plugin.py`` must be reported as a phase 'name' failure
+    (MEDIUM-4), not skipped.
     """
     candidates: list[tuple[str, str]] = []
     for name in sorted(os.listdir(plugins_root)):
@@ -62,14 +64,14 @@ def _iter_plugin_dirs(plugins_root: str) -> list[tuple[str, str]]:
 
 
 def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
-    """Carga un plugin AISLADO aplicando el micro-algoritmo MEDIUM-3/NIT-8.
+    """Loads a plugin ISOLATED applying the MEDIUM-3/NIT-8 micro-algorithm.
 
-    Fases: 'name' (regex de dir) -> 'import' (exec del cuerpo, dispara los ``import
-    <hermano>`` vía el ``sys.path`` insert) -> 'api' (PLUGIN_API) -> 'register-missing'
-    (callable ausente) -> 'register' (``register(ctx)``). En fallo de 'register' se
-    REVIERTEN las tools ya montadas (NIT-8) para no dejar tools huérfanas visibles.
+    Phases: 'name' (dir regex) -> 'import' (exec of the body, triggers the ``import
+    <sibling>`` via the ``sys.path`` insert) -> 'api' (PLUGIN_API) -> 'register-missing'
+    (callable absent) -> 'register' (``register(ctx)``). On a 'register' failure the
+    already-mounted tools are ROLLED BACK (NIT-8) so as not to leave visible orphan tools.
     """
-    # (fase name) El nombre de dir debe casar el regex ANTES de tocar sys.path/import.
+    # (phase name) The dir name must match the regex BEFORE touching sys.path/import.
     if not PLUGIN_DIR_NAME_RE.match(name):
         print(
             f"{_LOG_PREFIX} plugin '{name}' rechazado: nombre de directorio inválido",
@@ -86,22 +88,22 @@ def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
     mod_name = f"vuln_plugin_{name}"
     ctx = PluginContext(mcp, plugin_dir)
 
-    # (a) sys.path insert ANTES de ejecutar el cuerpo, para que ``import <hermano>`` dentro
-    # de plugin.py resuelva contra el propio directorio del plugin (MEDIUM-3).
+    # (a) sys.path insert BEFORE executing the body, so that ``import <sibling>`` inside
+    # plugin.py resolves against the plugin's own directory (MEDIUM-3).
     sys.path.insert(0, plugin_dir)
     try:
-        # (b) fase 'import': spec_from_file_location + exec_module ejecuta el cuerpo y
-        # dispara los imports de hermanos; su fallo cae aquí.
+        # (b) phase 'import': spec_from_file_location + exec_module runs the body and
+        # triggers the sibling imports; its failure lands here.
         try:
             spec = importlib.util.spec_from_file_location(mod_name, plugin_py)
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
             spec.loader.exec_module(module)
-        except Exception as exc:  # noqa: BLE001 - aislado: un plugin roto no tumba al resto
+        except Exception as exc:  # noqa: BLE001 - isolated: a broken plugin does not take down the rest
             traceback.print_exc()
             return PluginRecord(name=name, status="failed", phase="import", error=str(exc))
 
-        # (c) fase 'api': el plugin debe declarar un PLUGIN_API compatible (igualdad exacta).
+        # (c) phase 'api': the plugin must declare a compatible PLUGIN_API (exact equality).
         plugin_api_version = getattr(module, "PLUGIN_API", None)
         if plugin_api_version != SUPPORTED_PLUGIN_API:
             msg = (
@@ -111,7 +113,7 @@ def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
             print(f"{_LOG_PREFIX} plugin '{name}' rechazado: {msg}", flush=True)
             return PluginRecord(name=name, status="failed", phase="api", error=msg)
 
-        # (d) fase 'register-missing': debe exponer un ``register`` callable.
+        # (d) phase 'register-missing': it must expose a callable ``register``.
         register = getattr(module, "register", None)
         if not callable(register):
             msg = "falta un callable register(ctx)"
@@ -120,21 +122,21 @@ def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
                 name=name, status="failed", phase="register-missing", error=msg
             )
 
-        # (e) fase 'register': ejecutar register(ctx). Si lanza, NIT-8: revertir tools.
+        # (e) phase 'register': run register(ctx). If it raises, NIT-8: roll back tools.
         try:
             register(ctx)
-        except Exception as exc:  # noqa: BLE001 - aislado
+        except Exception as exc:  # noqa: BLE001 - isolated
             traceback.print_exc()
             for tool_name in ctx.tools:
                 try:
                     mcp._tool_manager.remove_tool(tool_name)
-                except Exception:  # noqa: BLE001 - best-effort de reversión
+                except Exception:  # noqa: BLE001 - best-effort rollback
                     traceback.print_exc()
             return PluginRecord(
                 name=name, status="failed", phase="register", error=str(exc)
             )
 
-        # (f) recoger lo anotado; colisiones -> degraded (cargó, pero no todo entró).
+        # (f) collect what was annotated; collisions -> degraded (loaded, but not all entered).
         if ctx.collisions:
             status, phase = "degraded", "register"
         else:
@@ -149,7 +151,7 @@ def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
             collisions=list(ctx.collisions),
         )
     finally:
-        # (g) restaurar sys.path tras cada plugin (quitar SOLO la entrada insertada).
+        # (g) restore sys.path after each plugin (remove ONLY the inserted entry).
         try:
             sys.path.remove(plugin_dir)
         except ValueError:
@@ -157,10 +159,11 @@ def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
 
 
 def load_plugins(mcp, plugins_root: str) -> PluginLoadReport:
-    """Descubre y carga los plugins bajo ``plugins_root``. Devuelve y publica el reporte.
+    """Discovers and loads the plugins under ``plugins_root``. Returns and publishes the report.
 
-    Si ``plugins_root`` no existe o no es un directorio -> reporte VACÍO (compat idéntica a
-    hoy). Antes de devolver, asigna ``plugin_loader.LAST_REPORT = report`` (HIGH-1).
+    If ``plugins_root`` does not exist or is not a directory -> EMPTY report (compat
+    identical to today). Before returning, it assigns ``plugin_loader.LAST_REPORT = report``
+    (HIGH-1).
     """
     global LAST_REPORT
     report = PluginLoadReport()

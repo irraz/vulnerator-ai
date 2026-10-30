@@ -1,47 +1,46 @@
 # plugins/
 
-Árbol versionado de plugins del servidor kali-mcp. Este directorio **siempre debe
-existir** en el repo: el `Dockerfile` hace `COPY plugins/ ./plugins/` y, sin un árbol
-versionado, el build fallaría. Por eso este `README.md` lo mantiene presente aunque no
-haya ningún plugin activo.
+Versioned tree of kali-mcp server plugins. This directory **must always exist** in the
+repo: the `Dockerfile` runs `COPY plugins/ ./plugins/`, and without a versioned tree the
+build would fail. That is why this `README.md` keeps it present even when there is no
+active plugin.
 
-## Qué es un plugin
+## What a plugin is
 
-Un plugin es un subdirectorio inmediato de `plugins/` con, al menos, un `plugin.py` que
-expone:
+A plugin is an immediate subdirectory of `plugins/` with, at minimum, a `plugin.py` that
+exposes:
 
-- `PLUGIN_API = 1` — versión del contrato que el plugin implementa.
-- `PLUGIN_NAME = "<nombre>"` — nombre del plugin.
-- `register(ctx)` — función que recibe un `PluginContext` y declara tools, skill y
-  volúmenes a través de él.
+- `PLUGIN_API = 1` — version of the contract that the plugin implements.
+- `PLUGIN_NAME = "<name>"` — name of the plugin.
+- `register(ctx)` — function that receives a `PluginContext` and declares tools, skill, and
+  volumes through it.
 
-El cargador descubre los subdirectorios en orden alfabético y, por cada uno con
-`plugin.py`, ejecuta su `register(ctx)`. Consulta `docs/plugins/` para el detalle del
-contrato y del descubrimiento.
+The loader discovers the subdirectories in alphabetical order and, for each one with a
+`plugin.py`, runs its `register(ctx)`. See `docs/plugins/` for the details of the contract
+and discovery.
 
-## Postura de confianza
+## Trust posture
 
-El código de un plugin se ejecuta **con la misma confianza que el core**: corre en el
-mismo proceso del servidor, con sus mismos privilegios, sin sandbox. Añade aquí solo
-plugins de origen conocido y revisado. No hay aislamiento entre un plugin y el servidor.
+A plugin's code runs **with the same trust as the core**: it runs in the same server
+process, with its same privileges, without a sandbox. Only add plugins of known and
+reviewed origin here. There is no isolation between a plugin and the server.
 
-## Habilitar / deshabilitar un plugin
+## Enable / disable a plugin
 
-Un directorio cuyo nombre termina en `.disabled` se **ignora** por completo (ni el
-cargador ni el resto del sistema lo montan). Para activar un plugin entregado
-deshabilitado, **renombra el directorio quitando el sufijo `.disabled`**:
+A directory whose name ends in `.disabled` is **ignored** entirely (neither the loader nor
+the rest of the system mounts it). To activate a plugin shipped disabled, **rename the
+directory by removing the `.disabled` suffix**:
 
 ```sh
 mv plugins/example-hello.disabled plugins/example-hello
 ```
 
-Para deshabilitarlo de nuevo, vuelve a añadir el sufijo. Tras activar o desactivar un
-plugin hay que reconstruir la imagen de Kali (el árbol `plugins/` se copia en build);
-consulta el `README.md` del propio plugin de ejemplo para el recordatorio completo.
+To disable it again, add the suffix back. After enabling or disabling a plugin you must
+rebuild the Kali image (the `plugins/` tree is copied at build time); see the example
+plugin's own `README.md` for the full reminder.
 
-## Ejemplo entregado
+## Shipped example
 
-`example-hello.disabled/` es un plugin de ejemplo entregado **deshabilitado**. Demuestra
-el contrato completo (una tool inocua, una skill y la declaración de un volumen) sin
-cambiar el comportamiento por defecto del servidor. Léelo como plantilla para escribir
-plugins propios.
+`example-hello.disabled/` is an example plugin shipped **disabled**. It demonstrates the
+full contract (a harmless tool, a skill, and a volume declaration) without changing the
+server's default behavior. Read it as a template for writing your own plugins.

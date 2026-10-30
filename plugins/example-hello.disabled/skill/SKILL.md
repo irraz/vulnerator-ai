@@ -1,8 +1,8 @@
 # Skill: example-hello
 
-Skill de ejemplo del plugin `example-hello`. Es trivial y neutral: existe solo para
-demostrar que un plugin puede entregar una skill junto a su `plugin.py`.
+Example skill of the `example-hello` plugin. It is trivial and neutral: it exists only to
+demonstrate that a plugin can ship a skill alongside its `plugin.py`.
 
-La tool `hello` que acompaña a esta skill devuelve un saludo inocuo y no realiza ninguna
-acción sobre la red, el sistema de ficheros ni el objetivo. Úsala como punto de partida
-para escribir skills propias en tus plugins.
+The `hello` tool that accompanies this skill returns a harmless greeting and performs no
+action on the network, the filesystem, or the target. Use it as a starting point for
+writing your own skills in your plugins.

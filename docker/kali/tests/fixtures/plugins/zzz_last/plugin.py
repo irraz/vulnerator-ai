@@ -1,4 +1,4 @@
-"""Segundo plugin válido (fixture) para comprobar orden alfabético determinista."""
+"""Second valid plugin (fixture) to check deterministic alphabetical order."""
 
 PLUGIN_API = 1
 

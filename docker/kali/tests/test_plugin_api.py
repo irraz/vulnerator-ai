@@ -1,9 +1,9 @@
-"""Tests de ``PluginContext`` (STDLIB PURA, con un doble de ``mcp`` — SIN el SDK).
+"""Tests of ``PluginContext`` (PURE STDLIB, with a ``mcp`` double — WITHOUT the SDK).
 
-El contrato se valida con un doble de ``mcp`` que imita la parte de la API interna de
-FastMCP que ``PluginContext`` toca: ``mcp.tool(*a, **k)`` (decorador) y
-``mcp._tool_manager.list_tools()`` (nombres existentes). No se importa el SDK ``mcp``
-(no está en el venv de dev), igual que el resto de tests del core.
+The contract is validated with an ``mcp`` double that mimics the part of FastMCP's internal
+API that ``PluginContext`` touches: ``mcp.tool(*a, **k)`` (decorator) and
+``mcp._tool_manager.list_tools()`` (existing names). The ``mcp`` SDK is not imported
+(it is not in the dev venv), just like the rest of the core tests.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class _FakeTool:
 
 
 class _FakeToolManager:
-    """Doble del ``_tool_manager`` de FastMCP: lista y elimina tools por nombre."""
+    """Double of FastMCP's ``_tool_manager``: lists and removes tools by name."""
 
     def __init__(self, names=None) -> None:
         self._names = list(names or [])
@@ -39,7 +39,7 @@ class _FakeToolManager:
 
 
 class _FakeMcp:
-    """Doble de FastMCP: ``tool(*a, **k)`` registra el nombre al aplicarse al fn."""
+    """Double of FastMCP: ``tool(*a, **k)`` records the name when applied to the fn."""
 
     def __init__(self, existing=None) -> None:
         self._tool_manager = _FakeToolManager(existing)
@@ -54,7 +54,7 @@ class _FakeMcp:
 
 
 class _McpWithoutListTools:
-    """Doble SIN ``_tool_manager.list_tools`` para probar el fallback MEDIUM-2."""
+    """Double WITHOUT ``_tool_manager.list_tools`` to test the MEDIUM-2 fallback."""
 
     class _TM:
         pass
@@ -62,7 +62,7 @@ class _McpWithoutListTools:
     def __init__(self) -> None:
         self._tool_manager = self._TM()
 
-    def tool(self, *args, **kwargs):  # pragma: no cover - no debe llegar a delegar
+    def tool(self, *args, **kwargs):  # pragma: no cover - must not reach delegation
         def _decorator(fn):
             return fn
 
@@ -79,7 +79,7 @@ def test_tool_delega_y_registra_el_nombre():
 
     assert ctx.tools == ["my_scan"]
     assert ctx.collisions == []
-    # La tool quedó efectivamente registrada en el doble.
+    # The tool was effectively registered in the double.
     assert "my_scan" in {t.name for t in mcp._tool_manager.list_tools()}
 
 
@@ -96,7 +96,7 @@ def test_tool_colision_con_nativa_no_delega():
 
 
 def test_tool_colision_con_otro_plugin_no_delega():
-    # Dos contextos sobre el MISMO mcp: el primero registra 'shared', el segundo colisiona.
+    # Two contexts over the SAME mcp: the first registers 'shared', the second collides.
     mcp = _FakeMcp()
     ctx_a = plugin_api.PluginContext(mcp, "/opt/plugins/a")
     ctx_b = plugin_api.PluginContext(mcp, "/opt/plugins/b")
@@ -153,7 +153,7 @@ def test_skill_segunda_llamada_es_error_de_contrato(tmp_path):
 
     ctx.skill("a.md")
     ctx.skill("b.md")
-    # Se queda con la primera; la segunda se ignora.
+    # It keeps the first; the second is ignored.
     assert ctx.skill_path == os.path.realpath(str(plugin_dir / "a.md"))
 
 
@@ -173,7 +173,7 @@ def test_plugin_dir_y_vendor_dir_siempre_absolutos():
 
 
 def test_vendor_dir_absoluto_aunque_no_exista(tmp_path):
-    # vendor/ no existe pero vendor_dir() devuelve ruta absoluta igualmente (nunca None).
+    # vendor/ does not exist but vendor_dir() returns an absolute path anyway (never None).
     plugin_dir = tmp_path / "p"
     plugin_dir.mkdir()
     ctx = plugin_api.PluginContext(_FakeMcp(), str(plugin_dir))
