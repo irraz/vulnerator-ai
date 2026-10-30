@@ -1,0 +1,1 @@
+# aaa skill (fixture)
