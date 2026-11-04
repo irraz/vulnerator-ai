@@ -245,7 +245,181 @@ def test_server_info_expone_estado_de_caido_y_las_tres_tools(server, monkeypatch
     monkeypatch.delenv("CAIDO_PAT", raising=False)
     monkeypatch.delenv("CAIDO_ACCESS_TOKEN", raising=False)
     info = server.server_info()
-    assert set(info["caido"]) == {"url", "token_present", "guest_login"}
+    assert set(info["caido"]) == {
+        "url",
+        "token_present",
+        "guest_login",
+        "proxy_capture",
+    }
     assert info["caido"]["token_present"] is False
     assert isinstance(info["caido"]["guest_login"], bool)
-    assert {"caido_graphql", "caido_request", "caido_history"} <= set(server.mcp.tools)
+    assert info["caido"]["proxy_capture"] is False
+    assert {
+        "caido_graphql",
+        "caido_request",
+        "caido_history",
+        "caido_automate",
+        "caido_intercept",
+        "caido_proxy",
+    } <= set(server.mcp.tools)
+
+
+# --- caido_automate (scope-gated) -------------------------------------------------------
+
+
+def test_caido_automate_fuera_de_scope_no_lanza_fuzz(server, scope_on, monkeypatch):
+    import caido_automate
+
+    called = []
+    monkeypatch.setattr(
+        caido_automate,
+        "run_automate",
+        lambda *a, **k: called.append(1) or {"status": "done"},
+    )
+    out = server.caido_automate(
+        "http://example.net/?q=§", payloads=["a", "b"], engagement_id="e"
+    )
+    assert out["status"] == "failed" and out["scope_violation"] is True
+    assert called == []  # el motor Automate nunca se invocó
+
+
+def test_caido_automate_en_scope_delega_con_destino_validado(
+    server, scope_on, monkeypatch
+):
+    import caido_automate
+
+    seen = {}
+
+    def fake(url, **kw):
+        seen["url"] = url
+        seen["payloads"] = kw.get("payloads")
+        return {"status": "done", "count": 2, "results": []}
+
+    monkeypatch.setattr(caido_automate, "run_automate", fake)
+    out = server.caido_automate(
+        "http://juice-shop:3000/rest/search?q=§",
+        payloads=["x", "y"],
+        strategy="SEQUENTIAL",
+    )
+    assert out["status"] == "done"
+    assert seen["url"].startswith("http://juice-shop:3000/") and seen["payloads"] == [
+        "x",
+        "y",
+    ]
+
+
+def test_caido_automate_url_invalida_falla_sin_tocar_motor(
+    server, scope_off, monkeypatch
+):
+    import caido_automate
+
+    monkeypatch.setattr(
+        caido_automate,
+        "run_automate",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no")),
+    )
+    assert server.caido_automate("http://[::1/", payloads=["a"])["status"] == "failed"
+
+
+# --- caido_intercept (dispatcher) -------------------------------------------------------
+
+
+def test_caido_intercept_despacha_cada_accion(server, monkeypatch):
+    import caido_intercept
+
+    calls = []
+    for name in (
+        "set_intercept",
+        "intercept_status",
+        "list_queue",
+        "get_entry_raw",
+        "forward",
+        "drop",
+        "pause",
+        "resume",
+    ):
+        monkeypatch.setattr(
+            caido_intercept,
+            name,
+            (lambda n: (lambda *a, **k: calls.append(n) or {"status": "done"}))(name),
+        )
+    assert server.caido_intercept("set", request_enabled=True)["status"] == "done"
+    assert server.caido_intercept("status")["status"] == "done"
+    assert server.caido_intercept("queue", limit=5)["status"] == "done"
+    assert server.caido_intercept("get", entry_id="1")["status"] == "done"
+    assert (
+        server.caido_intercept("forward", entry_id="1", raw="edited")["status"]
+        == "done"
+    )
+    assert server.caido_intercept("drop", entry_id="1")["status"] == "done"
+    assert server.caido_intercept("pause")["status"] == "done"
+    assert server.caido_intercept("resume")["status"] == "done"
+    assert calls == [
+        "set_intercept",
+        "intercept_status",
+        "list_queue",
+        "get_entry_raw",
+        "forward",
+        "drop",
+        "pause",
+        "resume",
+    ]
+
+
+def test_caido_intercept_accion_desconocida_y_id_faltante(server, monkeypatch):
+    import caido_intercept
+
+    monkeypatch.setattr(caido_intercept, "forward", lambda *a, **k: {"status": "done"})
+    assert server.caido_intercept("nonsense")["status"] == "failed"
+    # forward sin entry_id -> fail-closed sin llamar
+    assert server.caido_intercept("forward")["status"] == "failed"
+    assert server.caido_intercept("get")["status"] == "failed"
+
+
+# --- caido_proxy ------------------------------------------------------------------------
+
+
+def test_caido_proxy_enable_status_disable(server, monkeypatch):
+    import caido_proxy
+    import shell_exec
+
+    monkeypatch.setattr(
+        caido_proxy,
+        "enable_capture",
+        lambda **k: {
+            "status": "done",
+            "ca_path": "/x/caido.crt",
+            "env": {
+                "HTTP_PROXY": "http://caido:8080",
+                "HTTPS_PROXY": "http://caido:8080",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        caido_client, "resolve_url_safe", lambda *a, **k: "http://caido:8080"
+    )
+    shell_exec.set_subprocess_env({})
+    assert server.caido_proxy("status")["enabled"] is False
+    en = server.caido_proxy("enable")
+    assert en["status"] == "done"
+    # el env del proxy se inyectó a los subprocesos, con NO_PROXY al host de Caido
+    assert shell_exec._SUBPROCESS_ENV.get("HTTP_PROXY") == "http://caido:8080"
+    assert shell_exec._SUBPROCESS_ENV.get("NO_PROXY") == "caido"
+    st = server.caido_proxy("status")
+    assert st["enabled"] is True and st["proxy"] == "http://caido:8080"
+    assert server.caido_proxy("disable")["enabled"] is False
+    assert shell_exec._SUBPROCESS_ENV == {}
+
+
+def test_caido_proxy_enable_falla_no_inyecta(server, monkeypatch):
+    import caido_proxy
+    import shell_exec
+
+    shell_exec.set_subprocess_env({})
+    monkeypatch.setattr(
+        caido_proxy,
+        "enable_capture",
+        lambda **k: {"status": "unreachable", "error": "down"},
+    )
+    out = server.caido_proxy("enable")
+    assert out["status"] == "unreachable" and shell_exec._SUBPROCESS_ENV == {}

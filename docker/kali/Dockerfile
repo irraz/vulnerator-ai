@@ -204,6 +204,12 @@ COPY docker/kali/plugin_loader.py ./plugin_loader.py
 # arrancar con ModuleNotFoundError: No module named 'caido_client'. Caido en sí corre en su
 # propio servicio del compose (no se instala nada en esta imagen).
 COPY docker/kali/caido_client.py ./caido_client.py
+# Subsistemas de Caido sobre caido_client (STDLIB PURA): Automate (fuzzing), Intercept
+# (retención) y captura por proxy. Los importa kali_mcp_server (import caido_automate/_intercept/
+# _proxy) para las tools homónimas; sin estos COPY el servidor aborta con ModuleNotFoundError.
+COPY docker/kali/caido_automate.py ./caido_automate.py
+COPY docker/kali/caido_intercept.py ./caido_intercept.py
+COPY docker/kali/caido_proxy.py ./caido_proxy.py
 COPY docker/kali/kali_mcp_server.py ./kali_mcp_server.py
 
 # Versioned plugins tree (plugins ONLY). It is frozen INSIDE the image at

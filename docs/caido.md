@@ -11,6 +11,9 @@ can do**, without wrapping every operation by hand.
 | `caido_graphql` | Passthrough to Caido's **entire** public GraphQL API (Replay, scope, workflows, projects, intercept, findings, schema introspection…). Version-agnostic: if a query does not match the running Caido version, the server's GraphQL error is returned verbatim. | **Partial.** With `scope.json` active, documents that *send traffic* (Replay/Automate/workflows/intercept) are rejected and redirected to `caido_request`, because the destination is opaque inside a query. This is a best-effort denylist of send-capable fields (Caido's schema changes every release), not a proof. Without an active scope the passthrough is total. |
 | `caido_request` | Sends an HTTP request to a target **through Caido's Replay**, waits for and returns the response: `status_code`, `length`, `roundtrip_ms` and the full `raw` response (headers + body, capped at `max_response_bytes`, default 20000, with `raw_truncated`). Traffic is logged in Caido (reproducible, searchable). Method, path and header names/values are validated (CR/LF/NUL are rejected, never sanitized) to prevent request injection. | **Yes** — same gate as `kali_run`/`kali_exec`. The full `scheme://host:port` is validated, so `allow`, `deny` and `ports` in `scope.json` are all honored. Blocked requests send **no traffic**. |
 | `caido_history` | Searches captured traffic with an [HTTPQL](https://docs.caido.io) expression (e.g. `resp.code.eq:401`, `req.host.cont:"juice-shop"`). Read-only. | No (read-only) |
+| `caido_automate` | Intruder/ffuf-style fuzzing: mark one injection point with `§` in the URL, a header or the body, give a `payloads` list, and Caido's Automate reissues the request once per payload, returning per-payload `status_code`/`length`/`roundtrip_ms` (differences are the signal). `strategy` ALL/SEQUENTIAL/PARALLEL/MATRIX, `workers`/`delay`. | **Yes** — same gate as `caido_request` (full `scheme://host:port`); blocked = no traffic. |
+| `caido_intercept` | Hold / list / read / edit-forward / drop proxy traffic. One tool, `action`: `set` (enable holding, optional HTTPQL filter), `status`, `queue` (list held), `get` (raw of a held entry), `forward` (unchanged, or an edited `raw`), `drop`, `pause`, `resume`. Operates on traffic going through Caido's **proxy** (see `caido_proxy`). | No. Operates on requests already in flight; an edited Host on forward is not re-validated (documented). |
+| `caido_proxy` | Route the Kali's own HTTP tool traffic (`kali_run` curl/nuclei/ffuf/sqlmap/wget) **through Caido's proxy** so it lands in Caido's history, and install Caido's CA for HTTPS. `action`: `enable` / `status` / `disable`. Opt-in at startup via `CAIDO_PROXY_CAPTURE=1` (auto-retries until Caido is reachable). Only `HTTP(S)_PROXY`-aware clients are captured; raw-socket tools (nmap/masscan) are not. kali-mcp's own Caido calls are excluded via `NO_PROXY` (no loop). | n/a (configures capture; the tools it captures keep their own gating) |
 
 ### Known limitations
 
@@ -38,6 +41,18 @@ No configuration is needed — the defaults work out of the box:
 ```bash
 docker compose up -d --build
 ```
+
+### Proxy capture (opt-in)
+
+Set `CAIDO_PROXY_CAPTURE=1` in `.env` to route `kali_run`'s HTTP-client traffic through Caido so it
+is captured in the history (and interceptable). kali-mcp fetches Caido's per-instance CA from
+`http://caido:8080/ca.crt` at startup and retries in the background until Caido is reachable (so
+service start order does not matter), then injects `HTTP(S)_PROXY` into `kali_run`/`kali_exec`
+subprocesses only — never the kali-mcp process itself — with `NO_PROXY` set to Caido's host to avoid a
+loop. To also route the headless **browser** (`playwright-mcp`) through Caido, add
+`--proxy-server=http://caido:8080` and `--ignore-https-errors` to its command in `docker-compose.yml`
+(the browser must trust or ignore Caido's CA). Raw-socket scanners (nmap/masscan) do not honor
+`HTTP_PROXY` and are not captured.
 
 ## Authentication (zero-touch by default)
 

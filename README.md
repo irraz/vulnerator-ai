@@ -204,7 +204,7 @@ Hermes uses **Mistral Large 4** as primary with automatic fallback to **GLM-5.3 
 > **intentional.** Use it **only against explicitly authorized targets** and in a **controlled
 > environment**. All responsibility for the scope and for lawful use rests with the operator.
 
-There are two opt-in controls (a deterministic scope-guard for `kali_run`/`kali_exec`/`caido_request`, and the MCP
+There are two opt-in controls (a deterministic scope-guard for `kali_run`/`kali_exec`/`caido_request`/`caido_automate`, and the MCP
 inbound token). Neither is consent or a firewall. See **[`docs/security.md`](docs/security.md)** for
 what each does and does **not** cover.
 

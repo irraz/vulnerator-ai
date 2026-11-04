@@ -79,6 +79,11 @@ services:
       CAIDO_PAT: "${CAIDO_PAT:-}"
       CAIDO_ACCESS_TOKEN: "${CAIDO_ACCESS_TOKEN:-}"
       CAIDO_ALLOW_GUEST: "${CAIDO_ALLOW_GUEST:-1}"
+      # Captura por proxy OPT-IN: a "1" el arranque de kali-mcp baja la CA de Caido y enruta el
+      # tráfico HTTP de kali_run (curl/nuclei/ffuf/sqlmap/wget) por el proxy de Caido, para que
+      # quede en su historial; HTTPS incluido al confiar en la CA. Vacío/0 = off (comportamiento
+      # de siempre). Sólo clientes que respetan HTTP(S)_PROXY; nmap/masscan (socket crudo) no.
+      CAIDO_PROXY_CAPTURE: "${CAIDO_PROXY_CAPTURE:-}"
       # Tuning (empty = built-in default): per-HTTP-call timeout in seconds (60), cap in bytes
       # of the response body returned by caido_request (20000), and the name of the project
       # created when the instance has none ("vulnerator").

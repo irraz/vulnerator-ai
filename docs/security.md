@@ -7,7 +7,7 @@
 
 There are two things you *can* turn on, and it helps to know what each does and does **not** cover.
 
-## The opt-in scope-guard (`kali_run` / `kali_exec` / `caido_request`)
+## The opt-in scope-guard (`kali_run` / `kali_exec` / `caido_request` / `caido_automate`)
 
 A deterministic (code, not prompt) gate that validates the destination of every raw-shell action
 **before** executing it. It lives inside the Kali MCP, in front of the two raw-shell runners. It
@@ -54,7 +54,7 @@ Turn it on:
    parse of the command is an extra belt that can only **block**, never approve — the declared
    `targets` are the source of truth.
 
-   **Caido tools:** `caido_request` goes through the same gate, but derives the destination itself
+   **Caido tools:** `caido_request` and `caido_automate` (fuzzing) go through the same gate, but derives the destination itself
    from its `url` (it needs no `targets` argument), validating the full `scheme://host:port` — so
    `allow`, `deny` and `ports` are all honored, and a blocked request sends no traffic. `caido_history`
    is read-only and ungated. `caido_graphql` cannot validate the destination of an opaque GraphQL
