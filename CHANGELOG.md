@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Caido integration (`caido_graphql`, `caido_request`, `caido_history`)** — kali-mcp can now drive [Caido](https://caido.io) (proxy + Replay + HTTPQL + scope + workflows), so "anything Caido can do, Vulnerator can do". `caido_graphql` is a version-agnostic passthrough to Caido's whole public GraphQL API; `caido_request` sends a request through Caido's Replay (logged and searchable) **behind the same scope-guard as `kali_run`** (full `scheme://host:port` is validated, so `ports` in `scope.json` is honored); `caido_history` searches captured traffic by HTTPQL. New `caido` service in `docker-compose.yml` (internal network only, persistent volume, `--allow-guests`): fully zero-touch — kali-mcp logs in as guest and selects a project on its own. Stdlib-pure `docker/kali/caido_client.py` (no new dependencies), auto-renews a stale session if Caido is recreated, and reports `unauthenticated`/`unreachable` instead of faking success. See `docs/caido.md`.
+
 ## [1.7.0] - 2026-10-28
 
 ### Added

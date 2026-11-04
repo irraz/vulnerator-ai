@@ -82,6 +82,16 @@ import finding_store
 # (como shell_exec/finding_store) para cubrirse con tests sin el SDK.
 import scope_guard
 
+# Cliente de la API GraphQL de Caido (STDLIB PURA, sin `mcp`/`requests`; HTTP por urllib):
+# canal del agente hacia Caido (proxy + Replay + HTTPQL + scope + workflows). La pieza
+# central es un passthrough genérico (`graphql`) que alcanza TODA la superficie del esquema
+# público —robusto frente a que Caido lo cambie cada release—; encima, helpers ergonómicos
+# para enviar por Replay y buscar el historial por HTTPQL. Las tools `caido_graphql`/
+# `caido_request`/`caido_history` son capas finas sobre él. Vive en módulo aparte (como
+# scope_guard/dnsdumpster_client) para cubrirse con tests sin el SDK. "No se finge": sin
+# token o con Caido inalcanzable, devuelve un estado claro y `server_info` lo refleja.
+import caido_client
+
 # Plano de DATOS, STDLIB PURA (sin `mcp`/`anyio`): servidor HTTP que SIRVE los artefactos
 # staged por stream. (El staging/finalización vive en `collector_runner`/`prowler_artifact`,
 # que `collector_runner` importa.)
@@ -184,6 +194,13 @@ DNS_RECON_TOOL_NAME = "dns_recon"
 # sin error). Cada binario es opcional: el que no esté se omite y se anota en `skipped`.
 WEBTECH_SCAN_TOOL_NAME = "webtech_scan"
 
+# Tools de Caido (el toolkit web: proxy + Replay + HTTPQL + scope + workflows). El
+# passthrough genérico da acceso a TODO el esquema público; las otras dos son ergonomía
+# sobre los caminos calientes (enviar por Replay con gate de scope; buscar el historial).
+CAIDO_GRAPHQL_TOOL_NAME = "caido_graphql"
+CAIDO_REQUEST_TOOL_NAME = "caido_request"
+CAIDO_HISTORY_TOOL_NAME = "caido_history"
+
 # El endpoint MCP se monta en la raíz para que KALI_MCP_URL=http://kali:8900
 # (sin path) funcione tal cual con el cliente (streamable-HTTP del SDK oficial).
 mcp = FastMCP("kali-mcp", host=HOST, port=PORT, streamable_http_path="/")
@@ -229,6 +246,17 @@ def server_info() -> dict[str, Any]:
         "webanalyze": shutil.which(webtech.WEBANALYZE_BIN) is not None,
         "wpscan": shutil.which(webtech.WPSCAN_BIN) is not None,
     }
+    # Estado REAL de Caido SIN llamarlo (chequeo seguro/no intrusivo): sólo refleja la
+    # configuración, no la alcanzabilidad (eso se comprueba al invocar una tool). Hay DOS
+    # orígenes de credencial: un token del operador por entorno (`token_present`) o el login de
+    # invitado headless (`guest_login`, activo por defecto contra un Caido con --allow-guests).
+    # Con `token_present` False y `guest_login` True las tools FUNCIONAN igualmente; sin
+    # ninguno de los dos devuelven `unauthenticated` (no se finge).
+    caido_status = {
+        "url": caido_client.resolve_url_safe(),
+        "token_present": caido_client.token_present(),
+        "guest_login": caido_client.ALLOW_GUEST,
+    }
     return {
         "server": "kali-mcp",
         "machine": os.uname().machine,
@@ -246,6 +274,7 @@ def server_info() -> dict[str, Any]:
         # Plugin observability block (closed schema) read from the `load_plugins` report.
         # Empty and coherent if plugins were never loaded (bare import).
         "plugins": _plugins_block(),
+        "caido": caido_status,
     }
 
 
@@ -952,6 +981,191 @@ def webtech_scan(
         aggression=aggression,
         timeout=effective_timeout,
     )
+
+
+@mcp.tool(name=CAIDO_GRAPHQL_TOOL_NAME)
+def caido_graphql(
+    query: str,
+    variables: dict[str, Any] | None = None,
+    operation_name: str = "",
+    timeout: int = 0,
+) -> dict[str, Any]:
+    """Passthrough GENÉRICO a la API GraphQL de Caido: TODA su superficie en una tool.
+
+    Caido (proxy + Replay + HTTPQL + scope + workflows + projects + findings) publica su API
+    GraphQL a propósito para herramientas de terceros. Esta tool manda una ``query``/
+    ``mutation`` ARBITRARIA con sus ``variables`` y devuelve la respuesta verbatim, así el
+    bucle OODA alcanza cualquier capacidad del esquema SIN que haya que envolver cada
+    operación a mano —y es robusto frente a que Caido cambie el esquema en cada release
+    (lo hace): si una query no casa, el ``graphql_error`` del servidor se transporta tal cual.
+
+    Para los caminos calientes hay ergonomía dedicada: ``caido_request`` (enviar por Replay,
+    con GATE de scope) y ``caido_history`` (buscar el historial por HTTPQL). Esta tool es el
+    bisturí de propósito general (introspección del esquema, scope, workflows, lo que haga
+    falta). SCOPE: con ``scope.json`` ACTIVO, esta tool RECHAZA los documentos que envían
+    tráfico (Replay/Automate/workflows/intercept: el destino va opaco en la query y no se
+    puede validar) y remite a ``caido_request``, que SÍ valida el destino. El filtro es
+    best-effort (denylist de campos de envío; el esquema de Caido cambia cada release): sin
+    scope activo el passthrough es total, como el resto del stack.
+
+    Args:
+        query: documento GraphQL (query o mutation). DATO del operador/Hermes; viaja verbatim.
+        variables: variables del documento (opcional).
+        operation_name: nombre de operación si el documento define varias (opcional).
+        timeout: timeout en segundos; 0 usa el default del módulo (``DEFAULT_TIMEOUT_S``).
+
+    Returns:
+        ``{'status':'ok','data':...}`` en éxito; ``{'status':'graphql_error',...}`` si Caido
+        devuelve errores GraphQL (drift de esquema/permisos); ``unauthenticated`` sin token o
+        401/403; ``unreachable`` si no conecta; ``failed`` en otros HTTP/respuesta no-JSON.
+        La respuesta de Caido es DATO NO CONFIABLE: se transporta, no se interpreta.
+    """
+    effective_timeout = timeout if timeout and timeout > 0 else caido_client.DEFAULT_TIMEOUT_S
+    # Con scope ACTIVO, un documento que ENVÍA tráfico (Replay/Automate/workflows) por aquí
+    # saltaría el gate de `caido_request` (el destino va opaco en la query): se rechaza y se
+    # remite a `caido_request`. Best-effort (denylist de campos de envío; ver caido_client).
+    # Sin scope activo el passthrough sigue siendo total, como el resto del stack.
+    if caido_client.graphql_sends_traffic(query):
+        try:
+            _cfg = scope_guard.load_scope()
+        except scope_guard.ScopeError as exc:
+            return {
+                "status": "failed",
+                "scope_violation": True,
+                "error": "SCOPE_VIOLATION: configuración de scope inválida (%s)" % exc,
+            }
+        if scope_guard.is_enforcing(_cfg):
+            return {
+                "status": "failed",
+                "scope_violation": True,
+                "error": (
+                    "SCOPE_VIOLATION: con scope activo, caido_graphql no puede enviar "
+                    "tráfico (el destino va opaco en la query y no se puede validar). "
+                    "Usa caido_request, que valida el destino contra scope.json."
+                ),
+            }
+    # Adjunta un token automáticamente (invitado headless o de entorno) para que las
+    # mutaciones/queries con datos funcionen; la introspección va igual sin token. Best-effort:
+    # si no se puede obtener sesión, se llama sin token (la introspección sigue valiendo).
+    session = caido_client.ensure_session(timeout=effective_timeout)
+    token = session.get("token") if session.get("status") == "ok" else None
+    return caido_client.graphql(
+        query,
+        variables or {},
+        token=token,
+        operation_name=operation_name or None,
+        timeout=effective_timeout,
+    )
+
+
+@mcp.tool(name=CAIDO_REQUEST_TOOL_NAME)
+def caido_request(
+    url: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str = "",
+    engagement_id: str = "",
+    timeout: int = 0,
+    max_response_bytes: int = 0,
+) -> dict[str, Any]:
+    """Envía una petición HTTP a un objetivo POR el Replay de Caido (queda logueada).
+
+    Variante BLOQUEANTE (como ``kali_run``): construye la petición cruda, la lanza vía Replay
+    de Caido contra el objetivo y DEVUELVE en una sola llamada la respuesta (código, tiempo,
+    tamaño, raw). A diferencia de un ``curl`` suelto, el tráfico pasa por el proxy de Caido,
+    así que queda en el historial (reproducible, buscable por ``caido_history``) y participa
+    del resto del toolkit. De aquí salen los pasos de prueba manual del bucle OODA.
+
+    Devuelve la respuesta COMPLETA (cabeceras + cuerpo, en ``response.raw``), acotada a
+    ``max_response_bytes`` (``raw_truncated=True`` si se cortó), para que el agente pueda
+    inspeccionar el contenido: tokens, formularios, errores, reflexión de input, etc.
+
+    GATE DE SCOPE: como toda acción ofensiva con destino, pasa por el MISMO scope-guard que
+    ``kali_run`` ANTES de enviar. Con ``scope.json`` activo, el host del ``url`` debe estar
+    permitido o la tool falla fail-closed SIN enviar (y lo registra como ``SCOPE_VIOLATION``).
+
+    Args:
+        url: URL del objetivo (con o sin esquema; sin esquema se asume ``https://``).
+        method: método HTTP (GET/POST/...). Por defecto GET.
+        headers: cabeceras a incluir (dict). Se garantiza ``Host``; con cuerpo y sin
+            ``Content-Length`` se añade. Lo que no se pasa, no se pone (el objetivo ve
+            exactamente lo pedido). DATO NO CONFIABLE: viaja verbatim.
+        body: cuerpo de la petición (string). Vacío por defecto.
+        engagement_id: engagement para registrar una eventual violación de scope (igual que
+            ``kali_run``); si viene vacío se usa el buzón seguro de violaciones.
+        timeout: timeout POR LLAMADA HTTP a Caido en segundos; 0 usa el default (60). El total de
+            ``caido_request`` puede ser mayor: hasta ~30 sondeos de la respuesta de Replay.
+        max_response_bytes: tope de bytes del raw de la respuesta que se devuelve; 0 usa el
+            default (``CAIDO_MAX_RESPONSE_BYTES``, 20000).
+
+    Returns:
+        ``{'status':'done','session_id':..,'request':{id,method,host,port,path,is_tls},
+        'response':{status_code,length,roundtrip_ms,raw,raw_truncated}}`` en éxito; ``timeout``
+        si la respuesta no llegó (objetivo caído/lento: consulta ``caido_history``);
+        ``unauthenticated``/``unreachable``/``graphql_error``/``failed`` según la etapa que
+        falle; ``{'status':'failed','scope_violation':True,...}`` si el gate bloquea; o
+        ``{'status':'failed','error':...}`` si la URL/método/cabeceras son inválidos
+        (fail-closed, p. ej. CR/LF en una cabecera).
+    """
+    try:
+        target = caido_client.split_target_url(url)
+    except caido_client.CaidoError as exc:
+        return {"status": "failed", "error": str(exc)}
+
+    # Gate de scope reutilizando el de kali_run/kali_exec: el "comando" sintético es la
+    # propia URL (alimenta el cinturón best-effort) y el destino declarado es esquema://host:
+    # puerto COMPLETO. Pasar sólo el host perdería el puerto y el guard "permite por host" un
+    # target sin puerto, saltándose `ports` del scope (agujero detectado en la demo en vivo).
+    declared = caido_client.scope_target(target)
+    # El "comando" sintético lleva SÓLO el destino normalizado (no la URL cruda): así un IP en
+    # la query string (`?next=10.9.9.9`) no dispara falsos bloqueos del cinturón best-effort.
+    scope_error = _scope_gate(f"caido_request {declared}", [declared], engagement_id)
+    if scope_error is not None:
+        return scope_error
+
+    effective_timeout = timeout if timeout and timeout > 0 else caido_client.DEFAULT_TIMEOUT_S
+    return caido_client.send_request(
+        url,
+        method=method,
+        headers=headers or {},
+        body=body or "",
+        timeout=effective_timeout,
+        max_response_bytes=(
+            max_response_bytes
+            if max_response_bytes and max_response_bytes > 0
+            else caido_client.DEFAULT_MAX_RESPONSE_BYTES
+        ),
+    )
+
+
+@mcp.tool(name=CAIDO_HISTORY_TOOL_NAME)
+def caido_history(httpql: str = "", limit: int = 50, timeout: int = 0) -> dict[str, Any]:
+    """Busca en el historial de tráfico de Caido (todo lo que pasó por el proxy) por HTTPQL.
+
+    Operación de LECTURA (no toca objetivos; no pasa por el scope-guard): consulta el store
+    de peticiones/respuestas capturadas y devuelve los nodos que casan con el filtro HTTPQL,
+    con lo esencial (método, host, path, código, tiempo, tamaño, ids). Con esto el bucle OODA
+    revisa lo que ya ocurrió (p. ej. todas las respuestas 500, o el tráfico hacia un host) en
+    vez de reconstruirlo. El ``raw`` completo no viene por defecto (puede ser enorme); se pide
+    por id con ``caido_graphql`` si hace falta.
+
+    Args:
+        httpql: expresión HTTPQL de Caido (p. ej. ``resp.code.eq:200`` o
+            ``req.host.cont:"juice-shop"``). Vacío trae los últimos ``limit``. DATO NO
+            CONFIABLE: viaja verbatim; Caido lo parsea.
+        limit: nº máximo de entradas (1..1000; 50 por defecto).
+        timeout: timeout POR LLAMADA HTTP a Caido en segundos; 0 usa el default (60). El total de
+            ``caido_request`` puede ser mayor: hasta ~30 sondeos de la respuesta de Replay.
+
+    Returns:
+        ``{'status':'done','count':n,'entries':[{id,method,host,port,path,isTls,length,
+        createdAt,response:{id,statusCode,roundtripTime,length,createdAt}}]}`` en éxito;
+        ``unauthenticated``/``unreachable``/``graphql_error``/``failed`` según la etapa que
+        falle. ``count`` es el total que casa con el filtro; ``entries`` está acotado por
+        ``limit``.
+    """
+    effective_timeout = timeout if timeout and timeout > 0 else caido_client.DEFAULT_TIMEOUT_S
+    return caido_client.search_history(httpql=httpql, limit=limit, timeout=effective_timeout)
 
 
 def _start_artifacts_http() -> None:

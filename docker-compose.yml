@@ -67,6 +67,24 @@ services:
       # guard even if the file says enabled:true (leave empty to honor the file).
       SCOPE_FILE: "${SCOPE_FILE:-/scope/scope.json}"
       SCOPE_ENFORCE: "${SCOPE_ENFORCE:-}"
+      # --- Caido (toolkit web: proxy + Replay + HTTPQL + scope + workflows) ---
+      # kali-mcp habla la API GraphQL de Caido para las tools caido_graphql/caido_request/
+      # caido_history (ver docs/caido.md). El servicio `caido` (abajo) vive en la MISMA red
+      # interna: se alcanza por DNS en http://caido:8080 (NO publicado al host). ZERO-TOUCH: el
+      # servicio arranca con --allow-guests y caido_client inicia sesión como invitado y elige/
+      # crea un proyecto solo, así que NO hace falta token. CAIDO_PAT/CAIDO_ACCESS_TOKEN son
+      # OPCIONALES (Caido sin --allow-guests, o externo); CAIDO_ALLOW_GUEST=0 fuerza exigirlos.
+      # Sin credenciales válidas las tools devuelven `unauthenticated` (no se finge).
+      CAIDO_URL: "${CAIDO_URL:-http://caido:8080}"
+      CAIDO_PAT: "${CAIDO_PAT:-}"
+      CAIDO_ACCESS_TOKEN: "${CAIDO_ACCESS_TOKEN:-}"
+      CAIDO_ALLOW_GUEST: "${CAIDO_ALLOW_GUEST:-1}"
+      # Tuning (empty = built-in default): per-HTTP-call timeout in seconds (60), cap in bytes
+      # of the response body returned by caido_request (20000), and the name of the project
+      # created when the instance has none ("vulnerator").
+      CAIDO_TIMEOUT: "${CAIDO_TIMEOUT:-}"
+      CAIDO_MAX_RESPONSE_BYTES: "${CAIDO_MAX_RESPONSE_BYTES:-}"
+      CAIDO_PROJECT: "${CAIDO_PROJECT:-}"
     # Scope-guard mount (OPT-IN): to turn the guard ON, create a `scope.json` at the repo
     # root (copy scope.example.json), set `enabled: true`, and UNCOMMENT the mount line
     # below (under this same volumes: block), then recreate the kali service. Keep it
@@ -358,6 +376,94 @@ services:
       retries: 5
       start_period: 20s
 
+  caido-init:
+    # One-shot: make the caido-data named volume writable by Caido's non-root user.
+    # Docker creates a NEW named volume root-owned, but the image runs as `caido` (uid/gid
+    # 996, checked with `id`), so without this Caido panics at startup with "Unable to create
+    # logging directory: Permission denied" (reproduced live). Uses the Caido image itself
+    # (already pulled; no extra image) overriding the user to root just for the chown.
+    image: "${CAIDO_IMAGE:-caido/caido:0.59.0}"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "996:996", "/data"]
+    command: []
+    volumes:
+      - caido-data:/data
+    restart: "no"
+
+  caido:
+    # Caido — modern, Rust-powered web security toolkit (proxy + Replay + HTTPQL + scope +
+    # workflows + findings), the engine behind the caido_graphql/caido_request/caido_history
+    # tools in kali-mcp. Official image. It serves its GraphQL API (the one kali-mcp talks to)
+    # and the GUI on :8080. It lives on the SAME internal compose network, so kali reaches it
+    # by DNS as http://caido:8080. NO host port is published by default (internal network
+    # only, like playwright-mcp/juice-shop), which keeps the surface confined to the
+    # controlled environment; to reach the GUI from your machine, tunnel over SSH or
+    # temporarily uncomment the ports: block below on a controlled host.
+    #
+    # VERSION: pinned by default to 0.59.0, the release the caido_request/caido_history queries
+    # were verified against (Caido's GraphQL schema changes between releases; the caido_graphql
+    # passthrough is version-agnostic). Override with CAIDO_IMAGE in .env to try another tag.
+    image: "${CAIDO_IMAGE:-caido/caido:0.59.0}"
+    # The image's ENTRYPOINT is ["tini","--"] and its default CMD is the full
+    # `caido-cli --no-renderer-sandbox --no-open --listen 0.0.0.0:8080`. We restate that CMD
+    # explicitly (binary INCLUDED — overriding with just flags drops caido-cli and tini fails
+    # "exec --listen: No such file or directory") so a base-image change can't silently move
+    # the listener off the address kali-mcp expects. --no-renderer-sandbox/--no-open are
+    # required for headless (no GUI renderer, don't try to open a browser).
+    #
+    # --allow-guests is what makes the integration ZERO-TOUCH (verified live): without it a
+    # fresh instance only hands out tokens after a human logs into the GUI with a Caido
+    # account. With it, kali-mcp's caido_client calls the `loginAsGuest` GraphQL mutation and
+    # gets a working token headlessly.
+    #
+    # TRADE-OFF (read this): "not published to the host" is NOT isolation from the other
+    # services on this compose network. Any container on it — including a deliberately
+    # vulnerable lab target such as juice-shop/DVWA, or an SSRF in one — can reach
+    # http://caido:8080/graphql, call `loginAsGuest`, and obtain a full-privilege token (read
+    # all captured traffic, send arbitrary Replay requests). This is acceptable for a local lab
+    # and for engagements whose targets are EXTERNAL; if you put untrusted workloads on this
+    # network, drop --allow-guests, set CAIDO_ALLOW_GUEST=0 and use a CAIDO_PAT instead (mint it
+    # once via an SSH tunnel to the GUI). The same applies if you publish the port.
+    command:
+      - caido-cli
+      - --no-renderer-sandbox
+      - --no-open
+      - --allow-guests
+      # Caido's own anti-DNS-rebinding protection (same mechanism as playwright-mcp's
+      # --allowed-hosts above): by default it ONLY accepts requests whose Host matches
+      # localhost, so it rejects kali-mcp's calls with 403 ("Domain caido not allowed" in
+      # the logs — reproduced live), which arrive with Host: caido:8080 (the service's
+      # internal DNS name). That name is EXPLICITLY allowed (not a wildcard): it keeps the
+      # protection scoped to the internal docker network, from which kali connects.
+      - --ui-domain
+      - caido
+      - --listen
+      - 0.0.0.0:8080
+    depends_on:
+      caido-init:
+        condition: service_completed_successfully
+    volumes:
+      # Persist projects/sessions/token across recreates. The official image stores Caido
+      # data under /home/caido/.local/share/caido; without this, projects created in the
+      # container are lost on each `up`. NAMED volume (not a bind-mount) by the same WAL/
+      # virtiofs discipline the rest of the stack follows.
+      - caido-data:/home/caido/.local/share/caido
+    # To reach the GUI from the host (optional; the tools do NOT need it), tunnel over SSH to
+    # this service, or UNCOMMENT on a CONTROLLED machine (exposes the proxy/GUI to the host;
+    # see the --allow-guests note above before doing so):
+    # ports:
+    #   - "${CAIDO_HOST_PORT:-7000}:8080"
+    healthcheck:
+      # The image ships neither curl nor nc (checked), but it has bash: probe with a raw TCP
+      # connect through /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    # Default compose network: kali reaches it as caido:8080 via internal DNS.
+
 volumes:
   # Hermes state (profile + SQLite WAL). NAMED on purpose: avoids the bind-mount
   # that corrupts the SQLite WAL on macOS virtiofs.
@@ -365,3 +471,5 @@ volumes:
   # Kali artifacts plane (/artifacts). NAMED so the staged raw output persists across
   # container recreations.
   kali-artifacts:
+  # Caido projects/sessions/token — persisted across recreates (see the caido service).
+  caido-data:

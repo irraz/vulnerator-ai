@@ -197,6 +197,13 @@ COPY docker/kali/scope_guard.py ./scope_guard.py
 # the native modules; without these COPY the server would abort when loading the plugins report.
 COPY docker/kali/plugin_api.py ./plugin_api.py
 COPY docker/kali/plugin_loader.py ./plugin_loader.py
+
+# Cliente de la API GraphQL de Caido (proxy + Replay + HTTPQL). STDLIB PURA. Lo importa
+# kali_mcp_server (import caido_client) para las tools caido_graphql/caido_request/
+# caido_history, por lo que DEBE estar en la imagen; sin este COPY el servidor aborta al
+# arrancar con ModuleNotFoundError: No module named 'caido_client'. Caido en sí corre en su
+# propio servicio del compose (no se instala nada en esta imagen).
+COPY docker/kali/caido_client.py ./caido_client.py
 COPY docker/kali/kali_mcp_server.py ./kali_mcp_server.py
 
 # Versioned plugins tree (plugins ONLY). It is frozen INSIDE the image at
