@@ -10,6 +10,10 @@
   <a href="https://irraz.github.io/vulnerator-ai/">
     <img src="https://img.shields.io/badge/website-irraz.github.io%2Fvulnerator--ai-b03a3a?style=for-the-badge&labelColor=0a0a0a" alt="Website">
   </a>
+  &nbsp;
+  <a href="https://deepwiki.com/irraz/vulnerator-ai">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
+  </a>
 </p>
 
 <p align="center">
