@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-05
+
 ### Added
 
 - **Caido Automate, Intercept and proxy capture (`caido_automate`, `caido_intercept`, `caido_proxy`)** — three more Caido subsystems as first-class kali-mcp tools, each verified end-to-end against Caido 0.59.0 + OWASP Juice Shop/DVWA. `caido_automate`: Intruder/ffuf-style fuzzing (mark an injection point with `§`, give a payload list, get per-payload status/length/timing), behind the same scope-guard as `caido_request`. `caido_intercept`: a single `action`-dispatched tool to hold/list/read/edit-forward/drop traffic on Caido's proxy. `caido_proxy` + `CAIDO_PROXY_CAPTURE=1`: route `kali_run`'s HTTP-tool traffic (curl/nuclei/ffuf/sqlmap/wget) through Caido so it is captured in the history and interceptable — CA fetched at startup with background retry until Caido is reachable, proxy env injected into subprocesses only (never the kali-mcp process), `NO_PROXY` excludes Caido to avoid a loop. Stdlib-pure `caido_automate.py`/`caido_intercept.py`/`caido_proxy.py` (no new deps). See `docs/caido.md`.

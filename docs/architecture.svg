@@ -159,6 +159,18 @@
   <text x="874" y="619" fill="#6a6a6a" font-size="9">--isolated ephemeral profile &#183; --no-sandbox &#183; allowed-host: playwright-mcp:8931</text>
   <text x="874" y="633" fill="#6a6a6a" font-size="9">not published to host &#8212; reachable only over the docker internal network</text>
 
+  <!-- ==== CAIDO (web-security toolkit, driven by kali-mcp) ==== -->
+  <rect x="836" y="664" width="582" height="84" rx="6" fill="#0b0b0b" stroke="#9a9a9a" stroke-width="1.6"/>
+  <text x="862" y="690" fill="#f2f2f2" font-size="15" font-weight="700" letter-spacing="1"
+        font-family="'Impact','Arial Black',sans-serif">CAIDO</text>
+  <text x="862" y="708" fill="#8a8a8a" font-size="11">web-security toolkit &#183; proxy + Replay + HTTPQL + Automate + intercept &#183; image: caido/caido:0.59.0</text>
+  <rect x="858" y="716" width="536" height="26" rx="4" fill="#101010" stroke="#9a9a9a" stroke-width="1.3"/>
+  <text x="874" y="733" fill="#e8e8e8" font-size="10.5" font-weight="700">[&#8734;] GraphQL API &#183; caido:8080 (internal only) &#183; driven by kali-mcp &#183; zero-touch guest login</text>
+
+  <!-- kali-mcp -> caido (routed down the right margin to clear playwright) -->
+  <path d="M1418,450 C1436,450 1436,470 1436,490 L1436,685 C1436,702 1434,706 1418,706" fill="none" stroke="#e8e8e8" stroke-width="2" marker-end="url(#aReq)"/>
+  <text x="1452" y="585" fill="#cfcfcf" font-size="9.5" text-anchor="middle" transform="rotate(-90 1452 585)">drives &#183; caido:8080</text>
+
   <!-- ===================== OPENROUTER (external cloud) ===================== -->
   <rect x="344" y="700" width="330" height="92" rx="6" fill="#0a0a0a" stroke="#8a4a4a" stroke-width="1.5"/>
   <text x="368" y="726" fill="#e8a0a0" font-size="14" font-weight="700" letter-spacing="1">&#9729; OPENROUTER (remote LLM)</text>
@@ -226,7 +238,7 @@
   <text x="1360" y="312" fill="#8a6a6a" font-size="8.5" text-anchor="start">no scope-gate &#8212; operator owns it</text>
 
   <!-- ===================== LEGEND ===================== -->
-  <rect x="36" y="460" width="250" height="294" rx="6" fill="#0a0a0a" stroke="#4a4a4a" stroke-width="1.2"/>
+  <rect x="36" y="460" width="250" height="316" rx="6" fill="#0a0a0a" stroke="#4a4a4a" stroke-width="1.2"/>
   <text x="54" y="486" fill="#f2f2f2" font-size="12.5" font-weight="700" letter-spacing="1">&#8224; LEGEND</text>
 
   <line x1="54" y1="510" x2="90" y2="510" stroke="#e8e8e8" stroke-width="2.4" marker-end="url(#aReq)"/>
@@ -244,9 +256,10 @@
   <text x="54" y="644" fill="#cfcfcf" font-size="9.5">:8900  kali-mcp</text>
   <text x="54" y="660" fill="#cfcfcf" font-size="9.5">:8901  artifacts data-plane</text>
   <text x="54" y="676" fill="#7f8c8d" font-size="9.5">:8931  playwright (internal only)</text>
+  <text x="54" y="692" fill="#7f8c8d" font-size="9.5">:8080  caido (internal only)</text>
 
-  <line x1="54" y1="690" x2="286" y2="690" stroke="#2f2f2f"/>
-  <text x="54" y="710" fill="#8a8a8a" font-size="9">assistant triggers &#183; Hermes reasons the OODA</text>
-  <text x="54" y="724" fill="#8a8a8a" font-size="9">kali executes &#183; findings are evidence-first</text>
-  <text x="54" y="740" fill="#5a5a5a" font-size="8.5">&#8224; summoned from the depths of the OODA abyss &#8224;</text>
+  <line x1="54" y1="706" x2="286" y2="706" stroke="#2f2f2f"/>
+  <text x="54" y="726" fill="#8a8a8a" font-size="9">assistant triggers &#183; Hermes reasons the OODA</text>
+  <text x="54" y="740" fill="#8a8a8a" font-size="9">kali executes &#183; findings are evidence-first</text>
+  <text x="54" y="756" fill="#5a5a5a" font-size="8.5">&#8224; summoned from the depths of the OODA abyss &#8224;</text>
 </svg>

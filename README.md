@@ -10,6 +10,10 @@
   <a href="https://irraz.github.io/vulnerator-ai/">
     <img src="https://img.shields.io/badge/website-irraz.github.io%2Fvulnerator--ai-b03a3a?style=for-the-badge&labelColor=0a0a0a" alt="Website">
   </a>
+  &nbsp;
+  <a href="https://deepwiki.com/irraz/vulnerator-ai">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
+  </a>
 </p>
 
 <p align="center">
@@ -81,17 +85,22 @@ tools run on a Kali governed by an MCP server. Hermes decides what
 to run and launches it **directly** against the target through the Kali MCP.
 
 It is a deliberately minimal design: **no core, no REST API, no UI, no gates**.
-Four containers (the agent, two tool MCP servers and the MCP front door) and the agent driving
-end to end.
+Five containers (the agent, two tool MCP servers, the Caido web-security toolkit and the MCP
+front door) and the agent driving end to end.
 
-## Architecture (4 containers)
+## Architecture (5 containers)
 
-![Vulnerator AI system architecture: an MCP client (Claude Code / Kiro / BugTraceAI) drives a pentest THROUGH the vulnerator-mcp front door (MCP, :8700 internal), which forwards to Hermes' :8642 runs API over HTTP Bearer; an external assistant can still trigger/observe Hermes directly over :8642. Hermes is the OODA brain, reasoning with mistralai/mistral-large on OpenRouter and driving the kali-mcp (:8900) and playwright-mcp (:8931) servers over MCP; kali runs the pentest tools against the authorized target. ATT&CK is the Orient language of the loop.](docs/architecture.svg)
+![Vulnerator AI system architecture: an MCP client (Claude Code / Kiro / BugTraceAI) drives a pentest THROUGH the vulnerator-mcp front door (MCP, :8700 internal), which forwards to Hermes' :8642 runs API over HTTP Bearer; an external assistant can still trigger/observe Hermes directly over :8642. Hermes is the OODA brain, reasoning with mistralai/mistral-large on OpenRouter and driving the kali-mcp (:8900) and playwright-mcp (:8931) servers over MCP; kali runs the pentest tools against the authorized target and also drives the Caido web-security toolkit (caido:8080, internal network only) for proxy, Replay, HTTPQL history, Automate fuzzing and interception. ATT&CK is the Orient language of the loop.](docs/architecture.svg)
 
 - **kali** — deterministic runtime for pentest and collection tools (nmap, whatweb, nuclei, ffuf,
   sqlmap, Prowler, ...) over a `kali-mcp` server (`:8900`).
 - **playwright-mcp** — real browser (headless Chromium) over MCP (`:8931`), the web surface used by
   the `web-pentest` skill.
+- **caido** — the [Caido](https://caido.io) web-security toolkit (proxy + Replay + HTTPQL history +
+  Automate fuzzing + interception), reached by `kali-mcp` over its GraphQL API on the internal
+  network (`http://caido:8080`, **not** published to the host). It powers the `caido_*` tools and
+  optional proxy capture of `kali_run` traffic; fully zero-touch (headless guest login, persistent
+  volume, pinned image). See **[`docs/caido.md`](docs/caido.md)**.
 - **ooda-agent** — Hermes (`nousresearch/hermes-agent`) as the OODA loop driver and client of both
   MCPs. Keeps its OpenAI-compatible API server alive on `:8642`.
 - **vulnerator-mcp** — thin MCP **front door** over Hermes' `:8642` runs API so MCP clients
