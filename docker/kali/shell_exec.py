@@ -40,6 +40,21 @@ import tool_streaming
 # entorno o por el parámetro ``timeout`` de la tool.
 DEFAULT_TIMEOUT = int(os.environ.get("KALI_EXEC_TIMEOUT", "600"))
 
+# Variables de entorno EXTRA que se inyectan al entorno de CADA subproceso lanzado por
+# ``run_shell`` (y por tanto por ``kali_run``/``kali_exec``), SIN tocar el entorno del proceso
+# kali-mcp. Lo usa la captura por proxy de Caido: el servidor pone aquí HTTP_PROXY/HTTPS_PROXY
+# (+ NO_PROXY al host de Caido) para que el tráfico HTTP de las herramientas (curl, nuclei,
+# ffuf...) pase por el proxy de Caido y quede capturado, mientras que las llamadas propias de
+# kali-mcp a Caido (urllib en `caido_client`) NO se proxyean (su env queda limpio). Vacío por
+# defecto -> los subprocesos heredan el entorno tal cual (comportamiento de siempre).
+_SUBPROCESS_ENV: dict[str, str] = {}
+
+
+def set_subprocess_env(extra: dict[str, str] | None) -> None:
+    """Fija (o limpia con ``None``/``{}``) las variables extra de los subprocesos de run_shell."""
+    global _SUBPROCESS_ENV
+    _SUBPROCESS_ENV = {str(k): str(v) for k, v in (extra or {}).items()}
+
 
 class ShellExecError(ValueError):
     """Entrada inválida para el runner de shell (fail-closed; no se ejecuta nada)."""
@@ -110,8 +125,10 @@ def run_shell(
     workdir = tempfile.mkdtemp(prefix="kali-exec-")
     try:
         cmd = ["sh", "-c", cmd_str]
+        # Inyecta el env extra (p. ej. proxy de Caido) SOLO al subproceso; None = heredar.
+        sub_env = {**os.environ, **_SUBPROCESS_ENV} if _SUBPROCESS_ENV else None
         returncode, timed_out, cancelled = tool_streaming.run_tool_streaming(
-            cmd, execution_id, timeout=timeout, cwd=workdir
+            cmd, execution_id, timeout=timeout, cwd=workdir, env=sub_env
         )
         if cancelled:
             return {"status": "cancelled", "cancelled": True, "returncode": returncode}

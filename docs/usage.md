@@ -103,6 +103,16 @@ hosts feed the downstream fan-out (e.g. `webtech_scan` per live host).
 - **Returns:** `{status, domain, pages, surface:{hosts, ips, cidrs, txt, counts}, banners?, warnings?}`.
   The API response is untrusted data — it is normalized in shape, never interpreted.
 
+## `caido_graphql` / `caido_request` / `caido_history` — drive Caido
+
+Give the agent [Caido](https://caido.io) (intercepting proxy, Replay, HTTPQL history, scope,
+workflows). `caido_request` sends one request through Caido's Replay and returns the response —
+status, timing and the raw headers+body (capped, `raw_truncated` when cut) — behind the same
+scope-guard as `kali_run`; `caido_history` searches captured traffic by HTTPQL
+(e.g. `resp.code.eq:401`); `caido_graphql` is a passthrough to Caido's whole GraphQL API. The
+`caido` service starts with the stack and needs no configuration. Full reference, auth model and
+limits: [`docs/caido.md`](caido.md).
+
 ## `webtech_scan` — technology/version fingerprint by cross-reference
 
 Runs **whatweb + webanalyze + wpscan** against a URL and **merges** what each one sees into a single

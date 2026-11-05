@@ -7,7 +7,7 @@
 
 There are two things you *can* turn on, and it helps to know what each does and does **not** cover.
 
-## The opt-in scope-guard (`kali_run` / `kali_exec`)
+## The opt-in scope-guard (`kali_run` / `kali_exec` / `caido_request` / `caido_automate`)
 
 A deterministic (code, not prompt) gate that validates the destination of every raw-shell action
 **before** executing it. It lives inside the Kali MCP, in front of the two raw-shell runners. It
@@ -54,6 +54,14 @@ Turn it on:
    parse of the command is an extra belt that can only **block**, never approve — the declared
    `targets` are the source of truth.
 
+   **Caido tools:** `caido_request` and `caido_automate` (fuzzing) go through the same gate, but derives the destination itself
+   from its `url` (it needs no `targets` argument), validating the full `scheme://host:port` — so
+   `allow`, `deny` and `ports` are all honored, and a blocked request sends no traffic. `caido_history`
+   is read-only and ungated. `caido_graphql` cannot validate the destination of an opaque GraphQL
+   document, so with the scope active it **rejects any `mutation` that looks like it sends traffic**
+   (Replay/Automate/workflows/intercept/plugins, matched by verb) and points to `caido_request`. That
+   filter is a heuristic, not a proof — see [`docs/caido.md`](caido.md) for its limits.
+
    **Kill-switch:** `SCOPE_ENFORCE=0` force-disables the guard even if the file says `enabled: true`.
 
 ## The MCP inbound token (`vulnerator-mcp` over HTTP)
@@ -67,7 +75,7 @@ no listener and needs no token.
 
 ## What none of this is
 
-The scope-guard gates `kali_run`/`kali_exec` by destination; the inbound token gates reachability.
+The scope-guard gates `kali_run`/`kali_exec`/`caido_request` by destination; the inbound token gates reachability.
 Neither is consent, a human-approval workflow, or a network firewall. The `scope` argument on the
 MCP `start_pentest` tool is **advisory** (folded into the prompt for operator clarity), not an
 enforced constraint. The hard brake is the opt-in scope-guard above.
