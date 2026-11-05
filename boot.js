@@ -48,6 +48,7 @@
     { t: '  ├─ OODA engine  ·  Mistral Large 4.0',     ok: true,              p: 60  },
     { t: '  ├─ kali-mcp  →  Kali container',           ok: true,              p: 140 },
     { t: '  ├─ playwright-mcp  →  Chromium',           ok: true,              p: 90  },
+    { t: '  ├─ caido  →  web-security toolkit',        ok: true,              p: 90  },
     { t: '  └─ Hermes LLM  →  online',                 ok: true,              p: 200 },
     { t: '',                                                                   p: 60  },
     // ── Authorization ────────────────────────────────────────────
@@ -464,7 +465,7 @@
   function initSysBar() {
     const ITEMS = [
       'OODA-LOOP: ACTIVE', 'HERMES-LLM: ONLINE',
-      'KALI-MCP ▸ :8900', 'PLAYWRIGHT ▸ :8931',
+      'KALI-MCP ▸ :8900', 'PLAYWRIGHT ▸ :8931', 'CAIDO ▸ :8080',
       'ENC: AES-256-GCM', 'TLS: 1.3',
       '0xDEADBEEF', '0xCAFEBABE', '0x48455246',
       'TUNNEL: ACTIVE', 'FINDINGS: CLASSIFIED', 'TARGET: CONFIRMED',

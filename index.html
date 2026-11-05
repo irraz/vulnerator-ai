@@ -96,7 +96,7 @@
           <span id="gh-stars">—</span> stars
         </a>
         <a class="hbadge hbadge--link" href="https://github.com/irraz/vulnerator-ai/releases/latest" rel="noopener" target="_blank" title="Latest release">
-          v<span id="version-badge">1.6.0</span>
+          v<span id="version-badge">1.8.0</span>
         </a>
         <a class="hbadge hbadge--link" href="https://github.com/irraz/vulnerator-ai/fork" rel="noopener" target="_blank" title="Fork on GitHub">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm0 2.122a2.25 2.25 0 1 0-1.5 0v.878A2.25 2.25 0 0 0 5.75 8.5h1.5v2.128a2.251 2.251 0 1 0 1.5 0V8.5h1.5a2.25 2.25 0 0 0 2.25-2.25v-.878a2.25 2.25 0 1 0-1.5 0v.878a.75.75 0 0 1-.75.75h-4.5A.75.75 0 0 1 5 6.25v-.878zm3.75 7.378a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3-8.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"/></svg>
@@ -120,7 +120,8 @@
         </p>
         <p class="prose">
           A deliberately minimal design: <strong>no core, no REST API, no UI, no gates</strong>.
-          Three containers — the agent and two MCP servers — driving the engagement end to end.
+          Four containers — the agent, two MCP servers and the Caido web-security toolkit —
+          driving the engagement end to end.
         </p>
       </div>
     </section>
@@ -128,7 +129,7 @@
     <section class="section" aria-labelledby="arch-title">
       <div class="wrap">
         <h2 class="section__title" id="arch-title">Architecture</h2>
-        <p class="section__lead">Three containers.</p>
+        <p class="section__lead">Four containers.</p>
         <ul class="cards" role="list">
           <li class="card">
             <h3 class="card__name">kali</h3>
@@ -142,6 +143,14 @@
             <p class="card__body">
               A real headless Chromium browser exposed over MCP — the web flank for
               navigation, DOM and interaction, with zero native toolsets.
+            </p>
+          </li>
+          <li class="card">
+            <h3 class="card__name">caido</h3>
+            <p class="card__body">
+              The Caido web-security toolkit — intercepting proxy, Replay, HTTPQL history,
+              Automate fuzzing and interception — driven by <code>kali-mcp</code> on the
+              internal network. Scope-guarded, zero-touch, never exposed to the host.
             </p>
           </li>
           <li class="card">
@@ -529,7 +538,7 @@
               Star on GitHub
             </a>
             <p class="gh-stars-count"><span id="gh-stars-oss">—</span> stars</p>
-            <p class="gh-version">v<span id="version-oss">1.6.0</span> · MIT</p>
+            <p class="gh-version">v<span id="version-oss">1.8.0</span> · MIT</p>
           </div>
         </div>
       </div>
@@ -557,7 +566,7 @@
       <div class="footer__top">
         <div class="footer__brand">
           <span class="footer__name">VULNERATOR-AI</span>
-          <span class="footer__version">v<span id="version-footer">1.6.0</span></span>
+          <span class="footer__version">v<span id="version-footer">1.8.0</span></span>
           <span class="footer__oss">Open Source · MIT</span>
         </div>
         <div class="footer__links">

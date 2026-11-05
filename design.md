@@ -108,3 +108,34 @@ navigation/DOM/XSS without re-enabling the native `browser` toolset. Its guardra
 the project's philosophy: there is no gate that blocks, but there is audit discipline and
 reproducible evidence so the exploitation can be re-established (and the leakage warning from the
 auxiliary client is kept: redact credentials, `title_generation` off in sensitive engagements).
+
+## The intercepting-proxy flank (Caido, driven by kali-mcp)
+
+Beyond the CLI tools and the browser, the loop can drive **[Caido](https://caido.io)** — a modern
+web-security toolkit (intercepting proxy + Replay + HTTPQL history + Automate fuzzing + interception
++ scope + workflows). Caido runs as its **own container** (`caido`, official `caido/caido:0.59.0`
+image pinned, persistent named volume, a one-shot `caido-init` that fixes the volume ownership for
+Caido's non-root user). It is **not** a separate MCP server: it lives on the internal compose network
+and `kali-mcp` talks to its GraphQL API at `http://caido:8080` (never published to the host). This
+keeps the project principle intact — the agent's tool surface is still just the MCP servers — while
+reusing the deterministic `kali-mcp` runtime as the single control point.
+
+Why a dedicated container rather than installing Caido inside `kali`: Caido is a stateful,
+long-lived service (proxy daemon + GraphQL API + project/session store), not a short-lived CLI, so it
+follows the same pattern as `playwright-mcp` and the lab targets — a separate service reached by
+internal DNS. This decouples its upgrade cycle (bump `CAIDO_IMAGE`), keeps the `kali` image slim, and
+avoids supervising a persistent daemon inside the tool-exec container. Proxy capture does not need
+co-location: it works over `HTTP(S)_PROXY` to `caido:8080` regardless.
+
+The surface is exposed to Hermes as thin `@mcp.tool` wrappers over stdlib-pure modules (no new
+dependencies): `caido_graphql` (version-agnostic passthrough to the whole GraphQL schema),
+`caido_request` (send through Replay), `caido_history` (HTTPQL search), `caido_automate`
+(Intruder/ffuf-style fuzzing), `caido_intercept` (hold/list/read/edit-forward/drop), and
+`caido_proxy` (opt-in routing of `kali_run`'s HTTP-tool traffic through Caido for capture). Every
+tool that **sends traffic to a target** (`caido_request`, `caido_automate`, and traffic-sending
+`caido_graphql` mutations) goes through the **same scope-guard as `kali_run`**, validating the full
+`scheme://host:port` so `scope.json` ports are honored and a blocked request sends nothing
+(fail-closed). Authentication is zero-touch by default (headless guest login against a
+`--allow-guests` instance); failure modes are explicit (`unauthenticated` / `unreachable` /
+`graphql_error` / `timeout` / `failed`), never faked. See **[`docs/caido.md`](caido.md)** for the
+auth model, the `--allow-guests` trade-off, and the documented limitations.
