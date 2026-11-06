@@ -1,6 +1,6 @@
 ---
 name: attack-navigation
-description: Usa MITRE ATT&CK como IDIOMA del bucle OODA — orienta por tacticas (que viene despues) y etiqueta cada hallazgo con su technique_id.
+description: Use MITRE ATT&CK as the LANGUAGE of the OODA loop — orient by tactics (what comes next) and tag every finding with its technique_id.
 version: 0.1.0
 author: vulnerator-ai
 license: MIT
@@ -8,69 +8,69 @@ metadata:
   hermes:
     tags: [Security, Pentest, MITRE, ATTACK, OODA, Orient]
     related_skills: [pentest-ooda, aws-pacu-privesc, l3-recon-pivot, ooda-report-handoff]
-    # Transversal: aplica a cualquier engagement con ejecucion en la Kali. Es una LENTE de orientacion
-    # y una taxonomia de etiquetado, no un procedimiento de ataque.
+    # Cross-cutting: applies to any engagement with execution on the Kali. It is an ORIENTATION LENS
+    # and a tagging taxonomy, not an attack procedure.
     requires_tools: [mcp_kali_kali_run]
 ---
 
-# ATT&CK como idioma del bucle OODA
+# ATT&CK as the language of the OODA loop
 
-[MITRE ATT&CK](https://attack.mitre.org/) es el vocabulario estandar de tacticas y tecnicas
-adversarias. NO es tu bucle de control (el bucle sigue siendo OODA) ni un procedimiento de ataque:
-es el **idioma con el que ORIENTAS** (nombrar lo que ves y ver que tactica toca despues) y la
-**taxonomia con la que ETIQUETAS** cada hallazgo. Ligero a proposito: esto es el esqueleto de
-tacticas y las tecnicas mas relevantes a lo que tu Kali puede ejecutar, NO la matriz completa.
+[MITRE ATT&CK](https://attack.mitre.org/) is the standard vocabulary of adversary tactics and
+techniques. It is NOT your control loop (the loop is still OODA) nor an attack procedure:
+it is the **language you ORIENT with** (naming what you see and seeing which tactic comes next) and the
+**taxonomy you TAG with** for each finding. Deliberately lightweight: this is the skeleton of
+tactics and the techniques most relevant to what your Kali can execute, NOT the full matrix.
 
-Metodologia y IDs tomados de la fuente oficial (https://attack.mitre.org/, dominio Enterprise).
+Methodology and IDs taken from the official source (https://attack.mitre.org/, Enterprise domain).
 
 ## When to Use
 
-En la fase **Orient** de cualquier engagement, para situar donde estas en el kill-chain y decidir
-que tactica es la siguiente logica. Y al registrar un hallazgo, para asignarle su `technique_id`. Si
-el engagement es cloud/AWS, combina con `aws-pacu-privesc` (que trae el detalle de ATT&CK Cloud).
+In the **Orient** phase of any engagement, to situate where you are in the kill-chain and decide
+which tactic is the next logical one. And when recording a finding, to assign it its `technique_id`. If
+the engagement is cloud/AWS, combine with `aws-pacu-privesc` (which brings the ATT&CK Cloud detail).
 
-## Las 14 tacticas Enterprise (el eje del kill-chain)
+## The 14 Enterprise tactics (the axis of the kill-chain)
 
-Orden tipico de progresion de un engagement. En Orient, pregunta: "¿en que tactica estoy y cual es
-la siguiente plausible?".
+Typical progression order of an engagement. In Orient, ask: "which tactic am I in and which is
+the next plausible one?".
 
-| ID | Tactica | El "por que" del adversario |
+| ID | Tactic | The adversary's "why" |
 |---|---|---|
-| TA0043 | Reconnaissance | Recopilar informacion del objetivo (previa al acceso). |
-| TA0042 | Resource Development | Preparar infraestructura/credenciales para el ataque. |
-| TA0001 | Initial Access | Entrar en el entorno. |
-| TA0002 | Execution | Ejecutar codigo en el objetivo. |
-| TA0003 | Persistence | Mantener el acceso. |
-| TA0004 | Privilege Escalation | Obtener permisos mas altos. |
-| TA0005 | Defense Evasion | Evitar deteccion. |
-| TA0006 | Credential Access | Robar credenciales. |
-| TA0007 | Discovery | Entender el entorno interno. |
-| TA0008 | Lateral Movement | Moverse a otros sistemas. |
-| TA0009 | Collection | Reunir datos de interes. |
-| TA0011 | Command and Control | Comunicarse con sistemas comprometidos. |
-| TA0010 | Exfiltration | Sacar los datos. |
-| TA0040 | Impact | Manipular/interrumpir/destruir. |
+| TA0043 | Reconnaissance | Gather information about the target (pre-access). |
+| TA0042 | Resource Development | Prepare infrastructure/credentials for the attack. |
+| TA0001 | Initial Access | Get into the environment. |
+| TA0002 | Execution | Run code on the target. |
+| TA0003 | Persistence | Maintain access. |
+| TA0004 | Privilege Escalation | Obtain higher permissions. |
+| TA0005 | Defense Evasion | Avoid detection. |
+| TA0006 | Credential Access | Steal credentials. |
+| TA0007 | Discovery | Understand the internal environment. |
+| TA0008 | Lateral Movement | Move to other systems. |
+| TA0009 | Collection | Gather data of interest. |
+| TA0011 | Command and Control | Communicate with compromised systems. |
+| TA0010 | Exfiltration | Get the data out. |
+| TA0040 | Impact | Manipulate/interrupt/destroy. |
 
-El orden NO es rigido: un engagement real salta y repite tacticas. El eje sirve para orientar, no
-para forzar una secuencia.
+The order is NOT rigid: a real engagement jumps and repeats tactics. The axis is for orienting, not
+for forcing a sequence.
 
-## Como integrarlo en OODA (sin cambiar el bucle)
+## How to integrate it into OODA (without changing the loop)
 
-- **Observe.** Lo que observas suele ser Reconnaissance/Discovery. Registra que descubriste.
-- **Orient.** Situa lo observado en una tactica y pregunta cual es la siguiente plausible dado tu
-  acceso actual. Ejemplo: tienes credenciales validas (T1078) -> la siguiente logica puede ser
-  Discovery (TA0007) para mapear permisos, o Privilege Escalation (TA0004) si ya ves una ruta. ATT&CK
-  te da el abanico de "que viene despues", que alimenta el **Decide con alternativas** de
+- **Observe.** What you observe is usually Reconnaissance/Discovery. Record what you discovered.
+- **Orient.** Situate what you observed in a tactic and ask which is the next plausible one given your
+  current access. Example: you have valid credentials (T1078) -> the next logical one may be
+  Discovery (TA0007) to map permissions, or Privilege Escalation (TA0004) if you already see a path. ATT&CK
+  gives you the range of "what comes next", which feeds the **Decide with alternatives** step of
   `pentest-ooda`.
-- **Decide.** Al elegir UNA accion, nombra la tactica/tecnica que persigue. Eso hace la decision
-  trazable y comparable.
-- **Act + registro.** Al ejecutar y registrar el resultado, **etiqueta el hallazgo con su
-  `technique_id`** (p. ej. `T1552` para credenciales expuestas que encontraste). Esto es lo que, mas
-  adelante, permite informes mapeados a ATT&CK y un Navigator layer casi gratis.
+- **Decide.** When choosing ONE action, name the tactic/technique it pursues. That makes the decision
+  traceable and comparable.
+- **Act + record.** When executing and recording the result, **tag the finding with its
+  `technique_id`** (e.g. `T1552` for exposed credentials you found). This is what, later,
+  enables ATT&CK-mapped reports and a Navigator layer almost for free.
 
-## Tecnicas frecuentes por tactica (subconjunto util en esta Kali)
+## Frequent techniques by tactic (a useful subset on this Kali)
 
-No exhaustivo. Son las que mas probablemente etiquetaras con las tools de pentest/recoleccion de esta
+Not exhaustive. These are the ones you are most likely to tag with the pentest/collection tools of this
 Kali:
 
 - **Reconnaissance (TA0043)**: T1595 Active Scanning (nmap), T1590 Gather Victim Network Info.
@@ -85,19 +85,19 @@ Kali:
 - **Collection/Exfiltration (TA0009/TA0010)**: T1530 Data from Cloud Storage, T1537 Transfer to Cloud
   Account.
 
-Cuando necesites una tecnica que no esta aqui, usa el ID real de attack.mitre.org; no inventes IDs.
+When you need a technique that is not here, use the real ID from attack.mitre.org; do not invent IDs.
 
 ## Pitfalls
 
-- **ATT&CK clasifica, no procede.** No lo trates como una checklist a completar de arriba abajo; es
-  una lente para orientar y etiquetar. El bucle lo conduces con OODA.
-- **No inventes technique_ids.** Si no estas seguro del ID, dilo o busca el real; un ID inventado
-  contamina el informe.
-- **Etiqueta solo lo que la evidencia respalda.** Marcar un hallazgo con una tecnica es afirmar que
-  ocurrio: aplica la misma disciplina hipotesis-vs-confirmado del resto del OODA.
+- **ATT&CK classifies, it does not procedure.** Do not treat it as a checklist to complete top to
+  bottom; it is a lens for orienting and tagging. You drive the loop with OODA.
+- **Do not invent technique_ids.** If you are not sure of the ID, say so or look up the real one; an
+  invented ID contaminates the report.
+- **Tag only what the evidence supports.** Tagging a finding with a technique is asserting that it
+  happened: apply the same hypothesis-vs-confirmed discipline as the rest of the OODA loop.
 
 ## Verification
 
-Antes de cerrar un ciclo con ATT&CK: (a) orientaste nombrando la tactica actual y la siguiente
-plausible; (b) cada hallazgo registrado lleva un `technique_id` REAL y respaldado por evidencia; (c)
-no forzaste una secuencia rigida de tacticas ni inventaste IDs.
+Before closing a cycle with ATT&CK: (a) you oriented by naming the current tactic and the next
+plausible one; (b) each recorded finding carries a REAL `technique_id` backed by evidence; (c)
+you did not force a rigid sequence of tactics or invent IDs.
