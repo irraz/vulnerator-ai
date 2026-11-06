@@ -25,6 +25,14 @@
 # copied to /opt/data/skins/ by the docker-compose startup script.
 display:
   skin: "vulnerator"
+  # Pet (petdex `gat-reaper`) — the floating OODA mascot shown in the Webapp/Desktop
+  # (Settings → Appearance) and the CLI/TUI. The sprite is installed at startup by the
+  # docker-compose command (`hermes pets install gat-reaper --select`) into
+  # <HERMES_HOME>/pets/gat-reaper; selecting it here keeps it active across rebuilds.
+  pet:
+    enabled: true
+    slug: "gat-reaper"
+    scale: 0.33
 
 model:
   # mistral-large-4-0: a model suited to the authorized-pentest offensive framing. Claude

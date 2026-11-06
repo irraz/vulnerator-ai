@@ -192,6 +192,12 @@ services:
         printf '\033[1;31m│\033[0m  \033[1;32m⚡ VULNERATOR-AI — OODA Pentest Engine\033[0m                     \033[1;31m│\033[0m\n'
         printf '\033[1;31m│\033[0m  \033[2;37mkali-mcp · playwright-mcp · vulnerator-mcp\033[0m                \033[1;31m│\033[0m\n'
         printf '\033[1;31m└────────────────────────────────────────────────────────────┘\033[0m\n'
+        # (c2) brand the default profile as "Vulnerator" (display name; canonical id stays
+        #      'default') and install + select its pet (petdex gat-reaper) so both survive
+        #      rebuilds and a clean volume. Non-fatal: a transient petdex/network hiccup must
+        #      NOT abort container startup, hence the '|| true'.
+        hermes profile rename default Vulnerator >/dev/null 2>&1 || true
+        hermes pets install gat-reaper --select >/dev/null 2>&1 || true
         # (d) start the default profile gateway: foreground (live container) + API server.
         exec hermes gateway run
     environment:
