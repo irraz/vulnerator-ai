@@ -256,6 +256,12 @@ services:
       # Web dashboard (hermes dashboard --host 0.0.0.0): started by the command block above.
       # Configurable with HERMES_DASHBOARD_HOST_PORT in .env; default 9119.
       - "${HERMES_DASHBOARD_HOST_PORT:-9119}:9119"
+      # Webapp — the Desktop workspace in a browser (config.yaml `webapp.enabled: true`, host
+      # 0.0.0.0, port 9120). Sign in with the dashboard account (admin / vulnerator). Requires
+      # Hermes >= 0.23 (the image is `latest`, which now resolves to 0.23.x). Configurable with
+      # HERMES_WEBAPP_HOST_PORT in .env; default 9120. SECURITY: a signed-in Webapp user can run
+      # commands as the account running the no-guardrails agent — keep this on a controlled host.
+      - "${HERMES_WEBAPP_HOST_PORT:-9120}:9120"
     depends_on:
       # Wait until kali is healthy (MCP listening) before starting.
       kali:
