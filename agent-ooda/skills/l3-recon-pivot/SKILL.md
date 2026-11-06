@@ -1,6 +1,6 @@
 ---
 name: l3-recon-pivot
-description: Enumera topologia de red en capa 3 tras NAT, valida hallazgos y reconoce cuando un objetivo es inalcanzable desde tu posicion.
+description: Enumerate layer-3 network topology behind NAT, validate findings, and recognize when a target is unreachable from your position.
 version: 0.1.0
 author: vulnerator-ai
 license: MIT
@@ -8,105 +8,104 @@ metadata:
   hermes:
     tags: [Security, Pentest, Network, Recon, L3]
     related_skills: [pentest-ooda]
-    # Activacion condicional: solo aparece si la tool de ACCION del MCP de la Kali esta presente,
-    # igual que pentest-ooda. Si no hay red que enumerar, este conocimiento NO ensucia el prompt.
+    # Conditional activation: it only appears if the Kali MCP's ACTION tool is present,
+    # just like pentest-ooda. If there is no network to enumerate, this knowledge does NOT clutter the prompt.
     requires_tools: [mcp_kali_kali_run]
 ---
 
-# Reconocimiento L3 y pivoting tras NAT
+# L3 recon and pivoting behind NAT
 
-Conocimiento de dominio para la fase de reconocimiento de red cuando el objetivo esta en OTRA subred
-que la tuya y hay NAT de por medio (p. ej. corres en un contenedor). Complementa `pentest-ooda`: no
-cambia la disciplina del bucle, aporta la tecnica para enumerar capa 3 y, sobre todo, para
-distinguir "sigo descubriendo terreno" de "ya se que no puedo llegar".
+Domain knowledge for the network reconnaissance phase when the target is on a DIFFERENT subnet
+than yours and there is NAT in between (e.g. you run inside a container). It complements `pentest-ooda`: it
+does not change the loop's discipline, it brings the technique to enumerate layer 3 and, above all, to
+distinguish "I am still discovering terrain" from "I already know I cannot get through".
 
 ## When to Use
 
-Cuando el objetivo NO esta en tu misma subred y necesitas descubrir la topologia (gateways, saltos,
-subredes) o decidir si el objetivo es siquiera alcanzable desde tu posicion. Si el objetivo ya esta
-en tu segmento o te lo dieron por IP, NO necesitas esto: ve directo al escaneo.
+When the target is NOT on your same subnet and you need to discover the topology (gateways, hops,
+subnets) or decide whether the target is even reachable from your position. If the target is already
+on your segment or you were given it by IP, you do NOT need this: go straight to scanning.
 
-## Mapear tu posicion antes de escanear nada
+## Map your position before scanning anything
 
-Antes de barrer rangos, situate. Un par de lecturas baratas te dicen donde estas y hacia donde hay
-salida:
+Before sweeping ranges, situate yourself. A couple of cheap reads tell you where you are and where there is
+an exit:
 
-- **Tu subred y tu gateway**: `ip route` / `/proc/net/route`, `ip addr`. El `default via <gw>` es tu
-  unica salida L3; todo lo que no sea tu subred local sale por ahi.
-- **Tu vecindario L2**: `ip neigh` / `arp -a`. SOLO ve tu dominio de broadcast local. Si el objetivo
-  no esta aqui, ARP no te lo va a encontrar nunca (no cruza routers ni NAT).
-- **Resolucion y salida a internet**: `/etc/resolv.conf` (DNS que te sirven), `curl -s ifconfig.me`
-  o `cloudflare.com/cdn-cgi/trace` (tu IP publica efectiva). Util para entender por donde sales, NO
-  para encontrar un objetivo en LAN ajena.
+- **Your subnet and your gateway**: `ip route` / `/proc/net/route`, `ip addr`. The `default via <gw>` is your
+  only L3 exit; anything that is not your local subnet leaves through there.
+- **Your L2 neighborhood**: `ip neigh` / `arp -a`. It ONLY sees your local broadcast domain. If the target
+  is not here, ARP will never find it for you (it does not cross routers or NAT).
+- **Resolution and internet egress**: `/etc/resolv.conf` (the DNS served to you), `curl -s ifconfig.me`
+  or `cloudflare.com/cdn-cgi/trace` (your effective public IP). Useful to understand where you egress, NOT
+  to find a target on someone else's LAN.
 
-Con esto ya sabes: cuantos saltos de NAT tienes delante y si el objetivo cae dentro o fuera de tu
-alcance L3.
+With this you already know: how many NAT hops you have in front of you and whether the target falls inside or outside your
+L3 reach.
 
-## Entender NAT en capas (el caso del contenedor)
+## Understand NAT in layers (the container case)
 
-Si corres en un contenedor, lo normal es tener VARIAS capas de NAT entre tu y una LAN "de verdad":
+If you run inside a container, you will normally have SEVERAL layers of NAT between you and a "real" LAN:
 
 ```
-contenedor (tu)  ->  gateway de la red del contenedor  ->  [host / VM]  ->  router real  ->  internet
+container (you)  ->  container-network gateway  ->  [host / VM]  ->  real router  ->  internet
 ```
 
-Cada flecha que cruza un NAT es una frontera que NO puedes atravesar a nivel L2/L3 solo con escaneo:
-el NAT reescribe direcciones y no reenvia tu trafico arbitrario hacia la subred de detras. Reconocer
-en que capa estas es lo que te dice si un objetivo es alcanzable o no. Un `traceroute` a un destino
-de internet te muestra tus primeros saltos; si el segundo salto ya no responde (`* * *`), tienes un
-NAT/filtrado delante y la subred de mas alla NO esta a tu alcance directo.
+Every arrow that crosses a NAT is a boundary you CANNOT traverse at the L2/L3 level with scanning alone:
+the NAT rewrites addresses and does not forward your arbitrary traffic toward the subnet behind it. Recognizing
+which layer you are in is what tells you whether a target is reachable or not. A `traceroute` to an internet
+destination shows you your first hops; if the second hop already does not respond (`* * *`), you have a
+NAT/filter in front and the subnet beyond is NOT within your direct reach.
 
-## Validar hallazgos antes de construir sobre ellos
+## Validate findings before building on them
 
-Un hallazgo de descubrimiento NO es un hecho hasta que lo confirmas con una segunda senal
-independiente. Firewalls y NAT producen FALSOS POSITIVOS que arruinan el OODA si los tratas como
-reales:
+A discovery finding is NOT a fact until you confirm it with a second independent signal.
+Firewalls and NAT produce FALSE POSITIVES that wreck the OODA loop if you treat them as real:
 
-- `nmap -sn <rango>` que reporta "N hosts activos" puede ser el firewall respondiendo por toda la
-  subred. **Confirma** con un `ping` real o un puerto que responda de verdad antes de dar un host
-  por vivo. "Host up" sin paquete que lo corrobore = sospechoso.
-- Un puerto "open|filtered" (UDP, o TCP tras firewall) NO es un puerto abierto confirmado.
-- Si una subred entera aparece "llena de hosts" de golpe, desconfia: es el patron tipico de un
-  dispositivo que ACKea todo. Verifica uno antes de escanearlos todos.
+- `nmap -sn <range>` that reports "N active hosts" may be the firewall answering for the whole
+  subnet. **Confirm** with a real `ping` or a port that actually responds before calling a host
+  alive. "Host up" with no corroborating packet = suspicious.
+- An "open|filtered" port (UDP, or TCP behind a firewall) is NOT a confirmed open port.
+- If an entire subnet appears "full of hosts" all at once, be suspicious: it is the typical pattern of a
+  device that ACKs everything. Verify one before scanning them all.
 
-Regla: no bases el siguiente paso en un hallazgo que no has corroborado. Un falso positivo
-perseguido es un ciclo OODA tirado.
+Rule: do not base the next step on a finding you have not corroborated. A false positive
+chased is a wasted OODA cycle.
 
-## Pivoting cuando hay un intermediario
+## Pivoting when there is an intermediary
 
-Si descubres un servicio que puede reenviar trafico por ti (un proxy HTTP tipo Squid, un host con
-doble pata, un SSH accesible), esa es la via LEGITIMA de llegar mas lejos cuando el escaneo directo
-no cruza. Pruebalo de forma acotada antes de asumir nada: p. ej. `curl -x http://<proxy>:<puerto>
-<url-de-prueba>` para ver si el proxy te saca a otra red, o si solo repite tu misma salida. Un proxy
-que te devuelve TU MISMA IP publica no te esta pivotando a ningun sitio nuevo.
+If you discover a service that can forward traffic for you (an HTTP proxy such as Squid, a dual-homed
+host, a reachable SSH), that is the LEGITIMATE path to get further when direct scanning
+does not cross. Test it in a bounded way before assuming anything: e.g. `curl -x http://<proxy>:<port>
+<test-url>` to see if the proxy takes you out to another network, or just echoes your same egress. A proxy
+that returns YOUR SAME public IP is not pivoting you anywhere new.
 
-## Reconocer inalcanzabilidad (criterio de PARADA)
+## Recognize unreachability (the STOP criterion)
 
-Esta es la parte que mas importa, porque es donde el bucle se descarrila. Si tras unas pocas tacticas
-DISTINTAS (mapear ruta, ARP, traceroute, un intento de pivot) confirmas que:
+This is the part that matters most, because it is where the loop derails. If after a few DIFFERENT
+tactics (map the route, ARP, traceroute, a pivot attempt) you confirm that:
 
-- el objetivo esta detras de uno o mas NAT que no puedes cruzar, y
-- no tienes ningun intermediario que reenvie hacia su subred,
+- the target is behind one or more NATs you cannot cross, and
+- you have no intermediary that forwards toward its subnet,
 
-entonces el objetivo es **inalcanzable desde tu posicion**. Eso NO es un paso de progreso aunque cada
-intento te haya dado salida nueva: has aprendido sobre un terreno que no contiene la respuesta. PARA,
-consolida la topologia que SI descubriste, y DEVUELVE el control al operador explicando por que es
-inalcanzable y que necesitarias (que te den la IP, otra posicion de red, un pivot valido). No sigas
-barriendo subredes al azar: mas intentos no abriran una ruta que fisicamente no existe.
+then the target is **unreachable from your position**. That is NOT a progress step even if each
+attempt gave you new egress: you have learned about terrain that does not contain the answer. STOP,
+consolidate the topology you DID discover, and HAND control back to the operator explaining why it is
+unreachable and what you would need (be given the IP, another network position, a valid pivot). Do not keep
+sweeping subnets at random: more attempts will not open a route that physically does not exist.
 
 ## Pitfalls
 
-- **Confundir "descubri algo nuevo" con "avance hacia el objetivo".** Mapear la enesima subred de la
-  infra de contenedores no te acerca a un router en LAN ajena.
-- **Perseguir falsos positivos** del firewall/NAT sin confirmarlos con una segunda senal.
-- **Repetir la misma tactica** esperando otro resultado (otro traceroute, otro barrido del mismo
-  rango): si una via ya demostro no cruzar, repetirla no es progreso.
-- **Barrer rangos privados al azar** (192.168.x, 10.x) "por si suena": sin ruta L3 hacia ellos, no
-  salen de tu NAT.
+- **Confusing "I discovered something new" with "advance toward the target".** Mapping the Nth subnet of the
+  container infra does not get you closer to a router on someone else's LAN.
+- **Chasing firewall/NAT false positives** without confirming them with a second signal.
+- **Repeating the same tactic** expecting a different result (another traceroute, another sweep of the same
+  range): if a path already proved not to cross, repeating it is not progress.
+- **Sweeping private ranges at random** (192.168.x, 10.x) "just in case": without an L3 route to them, they
+  do not leave your NAT.
 
 ## Verification
 
-Antes de dar por buena la fase de recon L3, confirma: (a) situaste tu posicion (subred, gateway,
-capas de NAT) antes de barrer; (b) todo host/puerto que das por vivo esta corroborado por una segunda
-senal, no por un solo `nmap -sn`; (c) si el objetivo resulto inalcanzable, PARASTE y lo reportaste en
-vez de seguir descubriendo terreno irrelevante.
+Before considering the L3 recon phase done, confirm: (a) you situated your position (subnet, gateway,
+NAT layers) before sweeping; (b) every host/port you call alive is corroborated by a second
+signal, not by a single `nmap -sn`; (c) if the target turned out to be unreachable, you STOPPED and reported it instead
+of continuing to discover irrelevant terrain.

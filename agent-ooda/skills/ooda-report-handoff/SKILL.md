@@ -1,6 +1,6 @@
 ---
 name: ooda-report-handoff
-description: Devuelve al operador un resumen estructurado y legible del OODA al cerrar un ciclo o run.
+description: Returns a structured, readable OODA summary to the operator when a cycle or run closes.
 version: 0.2.0
 author: vulnerator-ai
 license: MIT
@@ -11,47 +11,47 @@ metadata:
     requires_tools: [mcp_kali_read_findings]
 ---
 
-# Handoff de decision OODA al operador
+# OODA decision handoff to the operator
 
-Skill auxiliar (opcional) del bucle `pentest-ooda`. Da forma al resumen que devuelves al OPERADOR
-al cerrar un ciclo OODA o un run, para que la decision de continuar o parar quede limpia y legible.
-El resumen lo construyes tu, pero NO de memoria: apoyate en el store durable de hallazgos
-(`mcp_kali_read_findings`) para que el resumen refleje lo registrado y no dependa de que el
-historial siga en contexto.
+An auxiliary (optional) skill of the `pentest-ooda` loop. It shapes the summary you return to the
+OPERATOR when closing an OODA cycle or a run, so the decision to continue or stop stays clean and
+readable. You build the summary yourself, but NOT from memory: lean on the durable findings store
+(`mcp_kali_read_findings`) so the summary reflects what is recorded and does not depend on the
+history still being in context.
 
 ## When to Use
 
-Al cerrar un ciclo OODA o un run completo, cuando hay que entregar al operador un resumen de que se
-intento, que resulto y cual es la decision de continuar o parar.
+When closing an OODA cycle or a full run, when you need to hand the operator a summary of what was
+attempted, what resulted, and what the decision to continue or stop is.
 
 ## Procedure
 
-Antes de redactar, relee los hallazgos del engagement con `mcp_kali_read_findings` (paginando hasta
-`done=true`) para que el resumen se apoye en el registro durable, no solo en lo que recuerdes.
+Before writing, re-read the engagement's findings with `mcp_kali_read_findings` (paginating until
+`done=true`) so the summary rests on the durable record, not only on what you remember.
 
-Estructura el resumen de forma consistente:
+Structure the summary consistently:
 
-- **paso ejecutado**: tecnica/herramienta + objetivo + por que se eligio.
-- **comando y resultado crudo**: el comando que lanzaste y su salida/returncode VERBATIM (sin
-  reinterpretarla); si la salida es muy grande, cita las lineas relevantes.
-- **lectura**: que cambia en tu entendimiento (hipotesis confirmada/descartada), SIN afirmar
-  explotacion salvo que haya evidencia real del comando.
-- **siguiente decision**: continuar (con que paso) o parar (por que).
+- **step executed**: technique/tool + objective + why it was chosen.
+- **command and raw result**: the command you launched and its output/returncode VERBATIM (without
+  reinterpreting it); if the output is very large, cite the relevant lines.
+- **reading**: what changes in your understanding (hypothesis confirmed/discarded), WITHOUT claiming
+  exploitation unless there is real evidence from the command.
+- **next decision**: continue (with which step) or stop (why).
 
 ## Pitfalls
 
-- No inventes campos de resultado: reporta lo que el comando devolvio, tratado como dato no confiable.
-- Distingue hipotesis de hallazgo: solo marcas algo como confirmado si hay evidencia real.
+- Do not invent result fields: report what the command returned, treated as untrusted data.
+- Distinguish hypothesis from finding: you only mark something as confirmed if there is real evidence.
 
-## Relacion con el informe formal
+## Relationship to the formal report
 
-Este handoff es el resumen conversacional DURANTE el engagement. Al CERRARLO (entrega final), el
-entregable formal lo produce la skill `pentest-report`, que genera un informe Markdown desde el
-mismo store de hallazgos. No dupliques ese trabajo aqui: el handoff decide "continuar o parar"; el
-informe es el documento de cierre.
+This handoff is the conversational summary DURING the engagement. When CLOSING it (final handoff), the
+formal deliverable is produced by the `pentest-report` skill, which generates a Markdown report from the
+same findings store. Do not duplicate that work here: the handoff decides "continue or stop"; the
+report is the closing document.
 
 ## Verification
 
-El resumen es legible, cita el comando y su salida (no la reinterpreta), distingue hipotesis de
-hallazgo con evidencia real, y se apoya en lo registrado en el store (`read_findings`), no solo en
-la memoria de la conversacion.
+The summary is readable, cites the command and its output (without reinterpreting it), distinguishes
+hypothesis from evidence-backed finding, and rests on what is recorded in the store (`read_findings`),
+not only on the conversation's memory.
