@@ -1,23 +1,23 @@
-# config.yaml — perfil Hermes del ejecutor OODA de vulnerator-ai (OODA DIRECTO a Kali).
-# Vive en el home del perfil default de Hermes (/opt/data/config.yaml dentro del contenedor
-# ooda-agent; ver docker-compose.yml).
+# config.yaml — Hermes profile of vulnerator-ai's OODA executor (DIRECT OODA to Kali).
+# It lives in the home of Hermes's default profile (/opt/data/config.yaml inside the
+# ooda-agent container; see docker-compose.yml).
 #
-# DISENO: Hermes es CLIENTE de dos servidores MCP y ejecuta las tools DIRECTAMENTE: el de la Kali
-# (`kali`, tools de pentest CLI) y el del navegador (`playwright`, Chromium headless para la parte
-# web). No hay core, API ni UI de por medio: no hay gates (scope/consentimiento/intrusividad/audit).
-# Toda la superficie de Hermes son esos dos MCP (cero toolsets nativos), y la responsabilidad del
-# alcance recae en el operador (ver ADVERTENCIA del docker-compose.yml).
+# DESIGN: Hermes is a CLIENT of two MCP servers and runs the tools DIRECTLY: the Kali's
+# (`kali`, CLI pentest tools) and the browser's (`playwright`, headless Chromium for the web
+# side). There is no core, API or UI in between: there are no gates (scope/consent/intrusiveness/audit).
+# Hermes's entire surface is those two MCPs (zero native toolsets), and the responsibility for the
+# scope rests with the operator (see the WARNING in docker-compose.yml).
 #
-# VERIFICADO contra la doc oficial de Hermes:
+# VERIFIED against the official Hermes docs:
 #   - mcp_servers (HTTP + tools.include/exclude + prompts/resources):
 #     https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md
-#   - perfiles / config por perfil:
+#   - profiles / per-profile config:
 #     https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md
 
-# --- Modelo (proveedor LLM = OpenRouter) ------------------------------------
-# La key del LLM la lee Hermes de la variable de entorno OPENROUTER_API_KEY (NO HERMES_LLM_API_KEY):
-# el compose la inyecta tal cual en el proceso y Hermes la toma de ahi. SIN `hermes setup`
-# interactivo y SIN secreto en claro en el repo.
+# --- Model (LLM provider = OpenRouter) --------------------------------------
+# Hermes reads the LLM key from the OPENROUTER_API_KEY environment variable (NOT HERMES_LLM_API_KEY):
+# the compose injects it as-is into the process and Hermes picks it up from there. NO interactive
+# `hermes setup` and NO cleartext secret in the repo.
 # --- Skin / branding --------------------------------------------------------
 # Custom skin for Vulnerator. Activates the cyber-red theme, "Vulnerator"
 # agent name, ⚡ prompt symbol, and custom ASCII banner in the TUI and dashboard.
@@ -27,65 +27,65 @@ display:
   skin: "vulnerator"
 
 model:
-  # mistral-large-4-0: modelo preparado para el encuadre ofensivo del pentest autorizado. Claude
-  # (anthropic/claude-sonnet-*) rechaza el encuadre ofensivo (el safety filter de OpenRouter/
-  # Anthropic devuelve "violative cyber content" y no responde). Mistral large no rehusa el pentest
-  # autorizado, por eso es el modelo del conductor OODA.
-  # NOTA: este valor es el DEFAULT de fallback. Se puede sobreescribir en tiempo de arranque con la
-  # variable de entorno OPENROUTER_MODEL (ver docker-compose.yml / .env.example): si OPENROUTER_MODEL
-  # esta definida y no vacia, el arranque hace `hermes config set model.default <valor>`; si esta
-  # vacia o sin definir, se usa este valor tal cual.
-  # INFERENCIA LOCAL/REMOTA (opcional): si se define OLLAMA_BASE_URL en el .env, el arranque
-  # selecciona un endpoint Ollama (OpenAI-compatible) en tiempo de ejecucion via
+  # mistral-large-4-0: a model suited to the authorized-pentest offensive framing. Claude
+  # (anthropic/claude-sonnet-*) rejects the offensive framing (the OpenRouter/Anthropic safety
+  # filter returns "violative cyber content" and does not respond). Mistral Large does not refuse the
+  # authorized pentest, which is why it is the OODA driver's model.
+  # NOTE: this value is the fallback DEFAULT. It can be overridden at startup with the
+  # OPENROUTER_MODEL environment variable (see docker-compose.yml / .env.example): if OPENROUTER_MODEL
+  # is defined and non-empty, startup runs `hermes config set model.default <value>`; if it is
+  # empty or undefined, this value is used as-is.
+  # LOCAL/REMOTE INFERENCE (optional): if OLLAMA_BASE_URL is defined in the .env, startup
+  # selects an Ollama endpoint (OpenAI-compatible) at runtime via
   # `hermes config set model.provider custom` + `model.base_url <OLLAMA_BASE_URL>` +
-  # `model.default <OLLAMA_MODEL>`, y Hermes usa Ollama en vez de OpenRouter. Si OLLAMA_BASE_URL
-  # esta vacia/sin definir, el fallback es OpenRouter + este model.default (sin cambios).
+  # `model.default <OLLAMA_MODEL>`, and Hermes uses Ollama instead of OpenRouter. If OLLAMA_BASE_URL
+  # is empty/undefined, the fallback is OpenRouter + this model.default (unchanged).
   default: "mistralai/mistral-large-4-0"
 
-# --- Fallback automatico (Hermes native) -------------------------------------
-# CADENA DE FALLBACK: si el modelo primario falla (rate-limit 429, server error 500/502/503,
-# auth failure 401/403), Hermes cambia AUTOMATICAMENTE al fallback mid-session sin perder
-# el contexto de la conversacion. El fallback es PER-TURN: cada mensaje nuevo intenta el
-# primario de nuevo; si vuelve a fallar, reactiva el fallback solo para ese turno.
+# --- Automatic fallback (Hermes native) -------------------------------------
+# FALLBACK CHAIN: if the primary model fails (rate-limit 429, server error 500/502/503,
+# auth failure 401/403), Hermes switches AUTOMATICALLY to the fallback mid-session without losing
+# the conversation context. The fallback is PER-TURN: each new message attempts the
+# primary again; if it fails again, it re-activates the fallback just for that turn.
 #
-# VENTAJAS GLM-5.3 Flash vs Mistral Large 4:
-#   - Mismo Cyber Index (50% ambos en Artificial Analysis)
-#   - 20x mas barato: $0.07/M in, $0.21/M out (vs $1.36/$4.18)
-#   - Probado en produccion real: 0-days en navegador, Hugging Face incident response
-#   - Multimodal: acepta imagenes (util para screenshots de targets web)
+# GLM-5.3 Flash ADVANTAGES vs Mistral Large 4:
+#   - Same Cyber Index (both 50% on Artificial Analysis)
+#   - 20x cheaper: $0.07/M in, $0.21/M out (vs $1.36/$4.18)
+#   - Proven in real production: 0-days in the browser, Hugging Face incident response
+#   - Multimodal: accepts images (useful for screenshots of web targets)
 #   - Context: 1M tokens
-#   - Safeguards bypasseables (pero en pentest autorizado es ventaja, no problema)
-#   - CyberGym 84.5% (top score), ExploitBench 54.4%, caso real end-to-end exploits
+#   - Bypassable safeguards (but in an authorized pentest that is an advantage, not a problem)
+#   - CyberGym 84.5% (top score), ExploitBench 54.4%, real end-to-end exploit case
 #
-# DESVENTAJAS:
-#   - NexBench 29/100 (puesto 13): CyberGym no se traduce a pentesting autonomo largo
-#   - Menos data publica de refusal rates en contexto corporativo (Mistral mas probado)
+# DISADVANTAGES:
+#   - NexBench 29/100 (rank 13): CyberGym does not translate to long autonomous pentesting
+#   - Less public data on refusal rates in a corporate context (Mistral more battle-tested)
 #
-# ATENCION PROMPT CACHE: cuando el fallback se activa, el nuevo proveedor:modelo NO tiene el
-# prefix cacheado de tu conversacion, asi que el siguiente request re-lee toda la historia a
-# precio completo de input tokens (no 75-90% descuento de cache). Lo mismo aplica cuando el
-# turno termina y se restaura el primario. Es el costo de mantenerse vivo durante un outage.
+# PROMPT CACHE WARNING: when the fallback activates, the new provider:model does NOT have the
+# cached prefix of your conversation, so the next request re-reads the whole history at
+# full input-token price (not the 75-90% cache discount). The same applies when the
+# turn ends and the primary is restored. It is the cost of staying alive during an outage.
 #
-# SINTAXIS: lista `fallback_providers` (no singular `fallback_model`). Cada entrada necesita
-# `provider` y `model`. Ver https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers
+# SYNTAX: a `fallback_providers` list (not the singular `fallback_model`). Each entry needs
+# `provider` and `model`. See https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers
 fallback_providers:
   - provider: openrouter
     model: z-ai/glm-5.3-flash
 
-# --- Primer servidor MCP: la Kali (contenedor `kali`) -----------------------
-# Hermes es CLIENTE de este MCP: ejecuta las tools de pentest CLI DIRECTO sobre la Kali. Es la via
-# principal al target (el navegador va por el segundo MCP, `playwright`, mas abajo). Sintaxis
-# verificada en mcp.md (HTTP servers + Per-server filtering).
+# --- First MCP server: the Kali (`kali` container) --------------------------
+# Hermes is a CLIENT of this MCP: it runs the CLI pentest tools DIRECTLY on the Kali. It is the
+# primary path to the target (the browser goes through the second MCP, `playwright`, below). Syntax
+# verified in mcp.md (HTTP servers + Per-server filtering).
 #
-# NOMBRE DEL SERVER = `kali`. Hermes registra las tools MCP como `mcp_<server>_<tool>`, asi que las
-# tools efectivas son `mcp_kali_<tool>` (p. ej. `mcp_kali_kali_run`). El filtro `tools.include` se
-# aplica sobre el nombre del tool TAL COMO lo expone el servidor (`kali_run`, `iam_enum`, ...), no
-# sobre el nombre efectivo.
+# SERVER NAME = `kali`. Hermes registers the MCP tools as `mcp_<server>_<tool>`, so the
+# effective tools are `mcp_kali_<tool>` (e.g. `mcp_kali_kali_run`). The `tools.include` filter is
+# applied over the tool name AS the server exposes it (`kali_run`, `iam_enum`, ...), not
+# over the effective name.
 mcp_servers:
   kali:
-    # Endpoint del servidor kali-mcp (streamable-HTTP sobre `/`, red interna del compose). SIN
-    # headers ni token: el servidor kali-mcp no autentica; la seguridad del endpoint es el
-    # aislamiento de la red interna de docker.
+    # Endpoint of the kali-mcp server (streamable-HTTP over `/`, the compose internal network). NO
+    # headers or token: the kali-mcp server does not authenticate; the endpoint's security is the
+    # isolation of the docker internal network.
     url: "http://kali:8900"
     tools:
       # POSTURE (the MCP SERVER is the SOURCE OF TRUTH: "what the server exposes = what
@@ -99,55 +99,55 @@ mcp_servers:
       # If one wanted to review tool by tool again, the way is to RE-ADD an `include:` with the
       # exact whitelist of names (as the server exposes them) under this same `tools:` key.
       # It is NOT done now: the source of truth is the server.
-      # Desactiva los wrappers de utilidad que Hermes anadiria (list_prompts/get_prompt,
-      # list_resources/read_resource). Verificado en mcp.md ("Filter utility tools too").
+      # Disables the utility wrappers Hermes would add (list_prompts/get_prompt,
+      # list_resources/read_resource). Verified in mcp.md ("Filter utility tools too").
       prompts: false
       resources: false
 
-  # --- Segundo MCP: el navegador (contenedor `playwright-mcp`) ----------------
-  # Da a Hermes un navegador REAL (Chromium headless) para la parte WEB del pentest, por
-  # MCP. NO reactiva ningun toolset nativo (browser/web siguen desactivados abajo): la
-  # superficie web es `mcp_playwright_*`, no el toolset `browser` de Hermes. Asi la parte
-  # web NO queda limitada a `kali_run`: las tools CLI (nmap/whatweb/nuclei/ffuf/sqlmap) van
-  # por la Kali y la navegacion/DOM/interaccion van por este MCP. Lo usa la skill
-  # `web-pentest`. Endpoint streamable-HTTP en `/mcp` (imagen oficial microsoft/playwright).
+  # --- Second MCP: the browser (`playwright-mcp` container) -------------------
+  # Gives Hermes a REAL browser (headless Chromium) for the WEB side of the pentest, over
+  # MCP. It does NOT re-enable any native toolset (browser/web stay disabled below): the
+  # web surface is `mcp_playwright_*`, not Hermes's `browser` toolset. That way the web
+  # side is NOT limited to `kali_run`: the CLI tools (nmap/whatweb/nuclei/ffuf/sqlmap) go
+  # through the Kali and navigation/DOM/interaction go through this MCP. The `web-pentest`
+  # skill uses it. Streamable-HTTP endpoint at `/mcp` (official microsoft/playwright image).
   playwright:
     url: "http://playwright-mcp:8931/mcp"
-    # SIN tools.include: se exponen las tools del navegador que trae la imagen (navigate,
-    # click, type, snapshot, evaluate, ...). El nombre efectivo que vera el modelo es
-    # `mcp_playwright_<tool>`. Se filtran los wrappers de utilidad igual que en kali.
+    # NO tools.include: the browser tools the image ships are exposed (navigate,
+    # click, type, snapshot, evaluate, ...). The effective name the model sees is
+    # `mcp_playwright_<tool>`. The utility wrappers are filtered the same as on kali.
     tools:
       prompts: false
       resources: false
 
-# --- Toolsets: SOLO los dos MCP (Kali + navegador) --------------------------
-# OBJETIVO: que la superficie de Hermes sean EXCLUSIVAMENTE los dos MCP (`kali` + `playwright`) —
-# nada de terminal/code_execution/file/browser/web nativos (ensucian el razonamiento del bucle y
-# reintroducen superficie que no queremos). El navegador llega por MCP, NO por el toolset `browser`.
+# --- Toolsets: ONLY the two MCPs (Kali + browser) ---------------------------
+# GOAL: that Hermes's surface be EXCLUSIVELY the two MCPs (`kali` + `playwright`) —
+# nothing of native terminal/code_execution/file/browser/web (they clutter the loop's reasoning and
+# reintroduce surface we do not want). The browser arrives over MCP, NOT via the `browser` toolset.
 #
-# `toolsets:` es una LISTA de bundles (toolsets-reference.md), NO `toolsets.enabled` (esa llave no
-# existe y Hermes la ignora -> caeria al platform toolset por defecto `hermes-api-server`, que trae
-# file/terminal/web/browser/code_execution...). Cada servidor MCP genera un toolset dinamico
-# `mcp-<server>` (aqui `mcp-kali` y `mcp-playwright`), referenciable por el nombre del server. Al
-# listar SOLO estos dos, la unica superficie son las tools de ambos MCP (ya filtradas por tools).
+# `toolsets:` is a LIST of bundles (toolsets-reference.md), NOT `toolsets.enabled` (that key does
+# not exist and Hermes ignores it -> it would fall back to the default platform toolset `hermes-api-server`,
+# which brings file/terminal/web/browser/code_execution...). Each MCP server generates a dynamic toolset
+# `mcp-<server>` (here `mcp-kali` and `mcp-playwright`), referenceable by the server name. By
+# listing ONLY these two, the only surface is the tools of both MCPs (already filtered by tools).
 toolsets:
-  - kali                 # MCP de la Kali (dinamico `mcp-kali`): tools de pentest CLI.
-  - playwright           # MCP del navegador (dinamico `mcp-playwright`): web real. CERO tools nativas.
-  - todo                 # todo_list: estado vivo del bucle OODA, compresion-resistente (ver SOUL.md).
+  - kali                 # the Kali's MCP (dynamic `mcp-kali`): CLI pentest tools.
+  - playwright           # the browser's MCP (dynamic `mcp-playwright`): real web. ZERO native tools.
+  - todo                 # todo_list: the OODA loop's live state, compaction-resistant (see SOUL.md).
   - kanban               # kanban_*: durable task board, shared SQLite, multi-profile coordination.
 
-# Defensa en profundidad (agent.disabled_toolsets, toolsets-reference.md): aunque `toolsets: [kali]`
-# ya excluye lo demas, se desactivan EXPLICITAMENTE los bundles nativos, por si un default de
-# plataforma los reintrodujera. Deben desaparecer del razonamiento del conductor OODA.
+# Defense in depth (agent.disabled_toolsets, toolsets-reference.md): although `toolsets: [kali]`
+# already excludes the rest, the native bundles are EXPLICITLY disabled, in case a platform
+# default reintroduced them. They must disappear from the OODA driver's reasoning.
 #
-# EXCEPCION: `delegation` SI esta habilitado (NO esta en esta lista). El conductor OODA necesita
-# `delegate_task` para la HIGIENE DE CONTEXTO: puede delegar una rama de exploracion larga y acotada
-# (p. ej. "enumera todo este /24 y resume") a un SUBAGENTE con contexto FRESCO, que hereda los
-# toolsets del padre (`kali`+`playwright` -> `mcp_kali_*`/`mcp_playwright_*`) y SOLO devuelve su
-# resumen final al conductor. Asi el
-# contexto del bucle OODA no se infla con la salida cruda de ramas largas. Ver skill `pentest-ooda`
-# (seccion de delegacion). Verificado: delegation.md (delegate_task = contexto aislado + toolset
-# heredado + solo el resumen vuelve al padre).
+# EXCEPTION: `delegation` IS enabled (it is NOT in this list). The OODA driver needs
+# `delegate_task` for CONTEXT HYGIENE: it can delegate a long, bounded exploration branch
+# (e.g. "enumerate this whole /24 and summarize") to a SUBAGENT with FRESH context, which inherits the
+# parent's toolsets (`kali`+`playwright` -> `mcp_kali_*`/`mcp_playwright_*`) and ONLY returns its
+# final summary to the driver. That way the
+# OODA loop's context is not bloated with the raw output of long branches. See the `pentest-ooda` skill
+# (delegation section). Verified: delegation.md (delegate_task = isolated context + inherited
+# toolset + only the summary returns to the parent).
 agent:
   disabled_toolsets:
     - code_execution
@@ -160,45 +160,45 @@ agent:
     - memory
     - skills
 
-# Progressive tool disclosure (Tool Search bridge): por defecto Hermes DIFIERE las tools MCP y
-# expone unos tools-puente (`tool_describe`/`tool_search`) para cargar su esquema bajo demanda, lo
-# que ensucia el log. Con pocas tools MCP no hace falta: lo DESACTIVAMOS para que Hermes vea las
-# tools de la Kali directamente (toolsets-reference.md / tool-search.md).
+# Progressive tool disclosure (Tool Search bridge): by default Hermes DEFERS the MCP tools and
+# exposes bridge tools (`tool_describe`/`tool_search`) to load their schema on demand, which
+# clutters the log. With few MCP tools it is not needed: we DISABLE it so Hermes sees the
+# Kali's tools directly (toolsets-reference.md / tool-search.md).
 tools:
   tool_search:
     enabled: false
 
-# --- Backend de terminal ----------------------------------------------------
-# Hermes NO usa terminal nativa (el toolset `terminal` esta desactivado arriba): ejecuta en la Kali
-# a traves del MCP (kali_run). Se deja `local` por si la imagen lo exige al arrancar. OJO: `local`
-# NO es sandbox (profiles.md).
+# --- Terminal backend -------------------------------------------------------
+# Hermes does NOT use a native terminal (the `terminal` toolset is disabled above): it executes on the
+# Kali through the MCP (kali_run). `local` is left in case the image requires it at startup. NOTE: `local`
+# is NOT a sandbox (profiles.md).
 terminal:
   backend: "local"
 
-# --- Delegación: concurrencia elevada para pentests de red grandes ----------
-# El conductor OODA usa delegate_task para HIGIENE DE CONTEXTO (ver arriba). Por defecto Hermes
-# limita a 10 tareas concurrentes; para pentests de redes grandes (/24, 254 hosts) se sube a 50
-# (validado en el refactor de 1,393 agentes de Nous: 218 workers concurrentes sin problemas).
+# --- Delegation: elevated concurrency for large network pentests ------------
+# The OODA driver uses delegate_task for CONTEXT HYGIENE (see above). By default Hermes
+# limits to 10 concurrent tasks; for large-network pentests (/24, 254 hosts) it is raised to 50
+# (validated in Nous's 1,393-agent refactor: 218 concurrent workers without issues).
 delegation:
   max_concurrent_children: 50
 
-# --- Memoria / aprendizaje --------------------------------------------------
-# Efimero por engagement: el perfil default se recrea en cada arranque copiando esta plantilla
-# declarativa (ver docker-compose.yml command), asi la memoria/skills aprendidas no se heredan entre
-# engagements aunque el volumen con nombre persista fisicamente.
+# --- Memory / learning ------------------------------------------------------
+# Ephemeral per engagement: the default profile is recreated on each startup by copying this
+# declarative template (see docker-compose.yml command), so learned memory/skills are not inherited between
+# engagements even though the named volume persists physically.
 
-# --- Plataforma API server --------------------------------------------------
-# El API server OpenAI-compatible de Hermes (/v1/runs, /v1/runs/{id}/events, /health) permite
-# disparar y observar a Hermes por HTTP. VERIFICADO contra la imagen: hay que DECLARAR la plataforma
-# aqui (platforms.api_server) para que el gateway la arranque; no basta con las env vars. La `key`
-# NO se versiona: la inyecta el arranque (docker-compose command) desde HERMES_API_SERVER_KEY.
+# --- API server platform ----------------------------------------------------
+# Hermes's OpenAI-compatible API server (/v1/runs, /v1/runs/{id}/events, /health) lets you
+# trigger and observe Hermes over HTTP. VERIFIED against the image: the platform must be DECLARED
+# here (platforms.api_server) for the gateway to start it; env vars alone are not enough. The `key`
+# is NOT versioned: startup injects it (docker-compose command) from HERMES_API_SERVER_KEY.
 platforms:
   api_server:
     enabled: true
-    host: "0.0.0.0"   # alcanzable por la red interna del compose
-    port: 8642        # NO publicado al host (sin ports: en el compose); solo red interna
+    host: "0.0.0.0"   # reachable over the compose internal network
+    port: 8642        # published to the host via docker-compose.yml ports: (and reachable on the internal network)
 
-# --- Dashboard web ----------------------------------------------------------
+# --- Web dashboard ----------------------------------------------------------
 # Hermes' built-in web dashboard. Binds to 0.0.0.0 (port 9119, published to the host via
 # docker-compose.yml ports:) only when an auth provider is registered. We use basic_auth so
 # the container can be reached from the browser without entering the TUI.
@@ -216,6 +216,31 @@ dashboard:
   # Other built-in options: cyberpunk (green matrix), midnight, mono, nous-blue, rose.
   theme: "ember"
 
-# --- Mensajeria / cron ------------------------------------------------------
-# NO conectar bots de mensajeria ni cron: la mensajeria es un vector de entrada no confiable. Solo
-# se declara la plataforma api_server de arriba.
+# --- Webapp (the Desktop workspace in a browser, Hermes >= 0.23) ------------
+# The gateway can serve the full Desktop workspace (sessions, profiles, Capabilities, Artifacts,
+# the terminal rail, ...) to a browser on its own listener. This is NOT the web dashboard above: the
+# dashboard is an admin panel, the Webapp is the Desktop UI itself. Enabled here; the gateway serves
+# it on port 9120 (published to the host via docker-compose.yml ports:). With host 0.0.0.0 the
+# gateway REQUIRES the dashboard sign-in gate, so access reuses the dashboard basic_auth account
+# (admin / vulnerator) — change it in the `dashboard:` block above.
+#
+# ACCESS: browse to http://localhost:9120 and sign in with the dashboard account. If the bundle has
+# not been built yet (status says so), build it once from the host with:
+#   docker compose exec ooda-agent hermes webapp --no-open
+# then reload. The gateway reads these settings at startup; after changing them restart it
+# (the compose startup already runs `hermes gateway run`).
+#
+# REQUIRES Hermes >= 0.23 (the Webapp feature). The ooda-agent image is `nousresearch/hermes-agent`
+# with no tag (`latest`), which now resolves to 0.23.x — a `docker compose pull` picks it up.
+#
+# SECURITY: a signed-in Webapp user can run arbitrary commands as the OS account running Hermes and
+# drive the (no-guardrails) agent. Keep port 9120 on loopback / a trusted host only, use a strong
+# password, and never expose it to an untrusted network (prefer an SSH tunnel or a trusted VPN).
+webapp:
+  enabled: true
+  host: "0.0.0.0"   # reachable from the host via the published port; forces the dashboard sign-in gate
+  port: 9120
+
+# --- Messaging / cron -------------------------------------------------------
+# Do NOT connect messaging bots or cron: messaging is an untrusted input vector. Only
+# the api_server platform above is declared.
