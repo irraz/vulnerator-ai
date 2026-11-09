@@ -43,6 +43,13 @@ VALID_STATES = ("hypothesis", "partial", "confirmed", "discarded")
 # Fases del bucle OODA (etiqueta libre si no encaja ninguna).
 VALID_PHASES = ("observe", "orient", "decide", "act")
 
+# Buckets canónicos de severidad del hallazgo (OPCIONAL). Es el contrato EXACTO que el
+# plugin privado CTEM consume para ordenar los findings de forma fiable: clave `severity`
+# de primer nivel, string en minúsculas, uno de estos cinco y solo estos cinco. Si el
+# finding no la trae, el consumidor cae a su derivación best-effort del título — por eso
+# el campo es opcional y retrocompatible (no se exige nunca).
+VALID_SEVERITIES = ("critical", "high", "medium", "low", "info")
+
 # Umbral minimo de bytes para considerar que la salida verbatim de una evidencia es real
 # (no un marcador vacio tipo "ok"/"200"). No garantiza que sea cruda, pero descarta lo
 # obviamente insuficiente para contrastar un hallazgo confirmado.
@@ -119,14 +126,16 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
       - ``title`` no vacío (resumen humano del hallazgo).
       - ``state`` ∈ VALID_STATES.
       - ``phase`` ∈ VALID_PHASES si viene (se tolera ausente/libre, se guarda verbatim).
+      - ``severity`` ∈ VALID_SEVERITIES si viene (OPCIONAL; ausente es válido y el
+        consumidor deriva best-effort). Un valor fuera de los cinco buckets se rechaza.
       - si ``state`` es ``confirmed``: ``evidence`` debe ser REPRODUCIBLE (ver
         ``_validate_confirmed_evidence``). Un hallazgo sin evidencia contrastable no puede
         marcarse confirmado — bájalo a ``partial``/``hypothesis``.
 
     Rellena ``id`` (uuid4 hex si falta) y ``recorded_at`` (timestamp del servidor,
     autoritativo: NO se confía en un timestamp provisto por el agente). El resto de
-    campos (target, technique_id, evidence, confidence, change) se guardan tal cual si
-    vienen, para no acoplar el esquema a un consumidor concreto.
+    campos (target, technique_id, severity, category, evidence, confidence, change) se
+    guardan tal cual si vienen, para no acoplar el esquema a un consumidor concreto.
     """
     if not isinstance(finding, dict):
         raise FindingStoreError("finding inválido: se espera un objeto JSON.")
@@ -147,6 +156,16 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
         raise FindingStoreError(
             "finding inválido: 'phase' debe ser uno de %r si se indica (recibido %r)."
             % (list(VALID_PHASES), phase)
+        )
+
+    # Severidad OPCIONAL y retrocompatible: ausente es válido (el consumidor deriva). Si
+    # viene, DEBE ser uno de los cinco buckets canónicos en minúscula — si no, fail-closed
+    # (no se guarda "a medias"). Si valida, se persiste verbatim junto al resto de campos.
+    severity = finding.get("severity")
+    if severity is not None and severity not in VALID_SEVERITIES:
+        raise FindingStoreError(
+            "finding inválido: 'severity' debe ser uno de %r si se indica (recibido %r)."
+            % (list(VALID_SEVERITIES), severity)
         )
 
     # Un hallazgo CONFIRMADO exige evidencia reproducible (trazabilidad): fail-closed.

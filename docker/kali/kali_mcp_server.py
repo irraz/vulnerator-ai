@@ -814,6 +814,8 @@ def record_finding(
     phase: str = "",
     technique_id: str = "",
     target: str = "",
+    severity: str = "",
+    category: str = "",
     evidence: dict[str, Any] | None = None,
     confidence: str = "",
     change: dict[str, Any] | None = None,
@@ -850,6 +852,19 @@ def record_finding(
         phase: fase OODA (``observe``/``orient``/``decide``/``act``); opcional.
         technique_id: ID MITRE ATT&CK (p. ej. ``T1078``) si aplica; opcional.
         target: host/puerto/recurso/ARN afectado; opcional.
+        severity: severidad del hallazgo; OPCIONAL pero recomendada al CONFIRMAR. String en
+            minúscula, uno de EXACTAMENTE estos cinco buckets: ``critical`` | ``high`` |
+            ``medium`` | ``low`` | ``info`` (no ``informational``, no ``warning``, no CVSS
+            numérico). Permite que el informe ordene los hallazgos de forma fiable; si se
+            omite, el consumidor la deriva best-effort del título. Mapeo: si la fuente ya da
+            severidad (p. ej. ``nuclei info.severity``), mapéala al bucket; si no, criterio del
+            analista (exposición de auth/IdP = ``high``; entorno de pre/producción expuesto o
+            API sin auth = ``medium``; cabeceras de seguridad / info disclosure / TLS =
+            ``low``; anomalías de disponibilidad = ``info``). Un valor fuera de los cinco se
+            RECHAZA fail-closed.
+        category: clase del hallazgo, string libre; opcional (p. ej. ``security headers``,
+            ``auth/idp``, ``cors``, ``non-production``, ``info disclosure``, ``tls``,
+            ``availability``). Si se omite, el consumidor la deriva del título.
         evidence: dict con la evidencia REPRODUCIBLE. Para ``confirmed`` es OBLIGATORIO y
             debe ser una de estas dos formas:
             (1) ``{"command": <argv exacto re-ejecutable>, "output": <salida VERBATIM>,
@@ -875,6 +890,10 @@ def record_finding(
         finding["technique_id"] = technique_id
     if target:
         finding["target"] = target
+    if severity:
+        finding["severity"] = severity
+    if category:
+        finding["category"] = category
     if evidence is not None:
         finding["evidence"] = evidence
     if confidence:

@@ -87,6 +87,32 @@ def test_append_rejects_invalid_without_writing(staging, bad):
     assert not (staging / "eng-bad" / finding_store.FINDINGS_NAME).exists()
 
 
+@pytest.mark.parametrize("sev", ["critical", "high", "medium", "low", "info"])
+def test_append_accepts_canonical_severity(staging, sev):
+    rec = finding_store.append("eng-sev", _minimal(title=f"f-{sev}", severity=sev))
+    assert rec["severity"] == sev
+
+
+def test_append_without_severity_is_valid_and_omits_field(staging):
+    # Opcional y retrocompatible: ausente sigue siendo válido y no se inventa el campo.
+    rec = finding_store.append("eng-sev", _minimal())
+    assert "severity" not in rec
+
+
+@pytest.mark.parametrize("bad_sev", ["informational", "warning", "HIGH", "7.5", "none", ""])
+def test_append_rejects_non_canonical_severity(staging, bad_sev):
+    # Fuera de los cinco buckets canónicos -> fail-closed, no se escribe nada.
+    with pytest.raises(finding_store.FindingStoreError):
+        finding_store.append("eng-sev-bad", _minimal(severity=bad_sev))
+    assert not (staging / "eng-sev-bad" / finding_store.FINDINGS_NAME).exists()
+
+
+def test_append_keeps_category_verbatim(staging):
+    # category es string libre de primer nivel: se guarda tal cual (sin validar).
+    rec = finding_store.append("eng-cat", _minimal(severity="high", category="auth/idp"))
+    assert rec["category"] == "auth/idp"
+
+
 def test_append_keeps_evidence_and_change_verbatim(staging):
     evidence = {"command": "nmap -sV 10.0.0.5", "returncode": 0, "output": "22/tcp open ssh OpenSSH 8.9p1"}
     change = {"tag": "vulnerator-ai", "revert": "aws iam delete-user --user-name x"}
