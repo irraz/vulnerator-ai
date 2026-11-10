@@ -48,13 +48,31 @@ class _Execution:
     (u otro hilo) lee por cursor.
     """
 
-    __slots__ = ("_lines", "_seq", "_done", "_lock")
+    __slots__ = ("_lines", "_seq", "_done", "_lock", "_sink")
 
     def __init__(self) -> None:
         self._lines: deque[dict[str, Any]] = deque(maxlen=RING_MAXLEN)
         self._seq = 0
         self._done = False
         self._lock = threading.Lock()
+        # Sink OPCIONAL de salida COMPLETA (auditoría): un file handle de texto en modo
+        # append. El ring está capado a RING_MAXLEN (protección de contexto del LLM); el
+        # sink NO está capado, así captura el stdout/stderr ÍNTEGRO. None = sin sink
+        # (comportamiento de siempre). Protegido por el MISMO lock que el ring para que
+        # stdout/stderr de ambos pumps se serialicen en el mismo orden que en el ring.
+        self._sink: Any = None
+
+    def attach_sink(self, handle: Any) -> None:
+        """Adjunta (o reemplaza) el file handle del sink de salida completa."""
+        with self._lock:
+            self._sink = handle
+
+    def detach_sink(self) -> Any:
+        """Separa el sink y devuelve su handle (o None) para que el caller lo cierre."""
+        with self._lock:
+            handle = self._sink
+            self._sink = None
+            return handle
 
     def append(self, stream: str, text: str) -> None:
         with self._lock:
@@ -67,6 +85,14 @@ class _Execution:
                     "text": text,
                 }
             )
+            # Vuelca la MISMA línea al sink de salida completa (si hay), bajo el lock para
+            # preservar el orden. Best-effort: un fallo de escritura del sink NUNCA rompe
+            # la captura al ring ni la ejecución del comando.
+            if self._sink is not None:
+                try:
+                    self._sink.write("[%s] %s\n" % (stream, text))
+                except Exception:  # noqa: BLE001 - sink best-effort
+                    pass
 
     def mark_done(self) -> None:
         with self._lock:
@@ -157,6 +183,46 @@ def read(execution_id: str, cursor: int = 0) -> dict[str, Any]:
         return {"lines": [], "next_cursor": cursor, "done": False}
     lines, next_cursor, done = execution.read(cursor)
     return {"lines": lines, "next_cursor": next_cursor, "done": done}
+
+
+# --- Sink de salida COMPLETA (auditoría durable) -----------------------------
+# El ring buffer está capado a RING_MAXLEN líneas (protección de contexto del LLM). Para
+# auditoría/reproducción hace falta el stdout/stderr ÍNTEGRO: estas dos funciones adjuntan
+# un fichero sink a la ejecución ANTES de arrancar el subproceso y lo cierran al terminar.
+# `_Execution.append` escribe cada línea al sink EN PARALELO al ring (mismo lock). Otros
+# llamadores de `run_tool_streaming` que no usen esto no cambian en absoluto (sink = None).
+
+
+def open_raw_sink(execution_id: str, path: str) -> Any:
+    """Adjunta un fichero sink de salida COMPLETA a la ejecución (best-effort).
+
+    Abre ``path`` en modo append de texto y lo adjunta al ``_Execution`` del
+    ``execution_id`` (creándolo si no existe). A partir de aquí cada línea volcada al ring
+    se escribe TAMBIÉN al sink, sin el tope ``RING_MAXLEN``. Devuelve el handle, o ``None``
+    si no se pudo abrir (fail-open: la ejecución sigue, solo sin auditoría de salida).
+    """
+    execution = _get_execution(execution_id)
+    try:
+        handle = open(path, "a", encoding="utf-8")
+    except OSError:
+        return None
+    execution.attach_sink(handle)
+    return handle
+
+
+def close_raw_sink(execution_id: str) -> None:
+    """Separa y cierra (flush incluido) el sink de la ejecución. No-op si no había sink."""
+    with _registry_lock:
+        execution = _executions.get(execution_id)
+    if execution is None:
+        return
+    handle = execution.detach_sink()
+    if handle is not None:
+        try:
+            handle.flush()
+            handle.close()
+        except Exception:  # noqa: BLE001 - cierre best-effort
+            pass
 
 
 # --- Estado de ejecución en segundo plano (por execution_id) -----------------

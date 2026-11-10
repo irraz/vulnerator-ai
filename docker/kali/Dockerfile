@@ -169,6 +169,11 @@ COPY docker/kali/aws_iam_simulate.py ./aws_iam_simulate.py
 # Runner de SHELL CRUDA (tool `kali_exec`): ejecuta un comando arbitrario de la Kali vía
 # `sh -c` reutilizando tool_streaming (STDLIB PURA). Lo importa kali_mcp_server.
 COPY docker/kali/shell_exec.py ./shell_exec.py
+# Log durable de auditoría de ejecuciones de shell (session.jsonl por engagement): persiste
+# el comando exacto + salida ÍNTEGRA + returncode de cada kali_run/kali_exec. STDLIB PURA
+# (reutiliza el confinamiento de rutas de artifact_store). Lo importa shell_exec; sin este
+# COPY el servidor aborta al arrancar con ModuleNotFoundError.
+COPY docker/kali/session_log.py ./session_log.py
 # Cliente de la API de DNSDumpster (tool `dns_recon`): recon DNS + superficie de ataque de
 # un dominio (hosts/IPs/ASN/PTR/banners) con rate limit y paginación. STDLIB PURA (urllib).
 # Lo importa kali_mcp_server (import dnsdumpster_client); sin este COPY el servidor aborta

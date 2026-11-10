@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import sys
 import threading
 import time
@@ -349,7 +348,6 @@ def test_read_findings_byte_budget_caps_page() -> None:
         guard += 1
         assert guard < 100
         # Ninguna página (con >1 finding) supera el presupuesto de bytes.
-        page_bytes = len(json.dumps(page["findings"]).encode("utf-8"))
         if len(page["findings"]) > 1:
             # El array JSON añade comas/corchetes; comparamos la suma de ítems.
             items_bytes = sum(
@@ -412,3 +410,57 @@ def test_read_findings_cursor_at_tail_empty_done() -> None:
     first = tool_streaming.read_findings(empty_id, 0)
     assert first["findings"] == []
     assert first["done"] is True
+
+
+# --- Sink de salida COMPLETA (auditoría, bypass del tope RING_MAXLEN) --------
+
+
+def test_raw_sink_captures_all_lines_beyond_ring_cap(tmp_path) -> None:
+    """El sink recibe TODAS las líneas; el ring solo las últimas RING_MAXLEN."""
+    execution_id = _new_id()
+    sink_path = tmp_path / "raw.out"
+    total = tool_streaming.RING_MAXLEN + 100  # supera el tope del ring a propósito
+
+    tool_streaming.open_raw_sink(execution_id, str(sink_path))
+    for i in range(total):
+        tool_streaming.append(execution_id, "stdout", f"line-{i}")
+    tool_streaming.close_raw_sink(execution_id)
+
+    # El sink tiene TODAS las líneas, en orden, íntegras.
+    sink_lines = sink_path.read_text(encoding="utf-8").splitlines()
+    assert len(sink_lines) == total
+    assert sink_lines[0] == "[stdout] line-0"
+    assert sink_lines[-1] == f"[stdout] line-{total - 1}"
+
+    # El ring, en cambio, está capado: solo las últimas RING_MAXLEN (protección de contexto).
+    page = tool_streaming.read(execution_id, 0)
+    assert len(page["lines"]) == tool_streaming.RING_MAXLEN
+    assert page["lines"][0]["text"] == f"line-{total - tool_streaming.RING_MAXLEN}"
+    assert page["lines"][-1]["text"] == f"line-{total - 1}"
+
+
+def test_sink_absent_append_writes_no_file(tmp_path) -> None:
+    """Sin open_raw_sink, append funciona igual y no crea ningún fichero de sink."""
+    execution_id = _new_id()
+    tool_streaming.append(execution_id, "stdout", "no-sink-line")
+    page = tool_streaming.read(execution_id, 0)
+    assert [line["text"] for line in page["lines"]] == ["no-sink-line"]
+    # No se creó nada en el tmp (no había sink abierto).
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_close_raw_sink_unknown_execution_is_noop() -> None:
+    """close_raw_sink de un execution_id desconocido no revienta."""
+    tool_streaming.close_raw_sink("does-not-exist-sink")  # no debe lanzar
+
+
+def test_open_raw_sink_bad_path_returns_none_fail_open(tmp_path) -> None:
+    """Un path imposible -> open_raw_sink devuelve None (fail-open) sin romper append."""
+    execution_id = _new_id()
+    bad = tmp_path / "no-such-dir" / "raw.out"  # el dir intermedio no existe
+    handle = tool_streaming.open_raw_sink(execution_id, str(bad))
+    assert handle is None
+    # append sigue funcionando (al ring), solo que sin sink.
+    tool_streaming.append(execution_id, "stdout", "still-works")
+    page = tool_streaming.read(execution_id, 0)
+    assert [line["text"] for line in page["lines"]] == ["still-works"]
