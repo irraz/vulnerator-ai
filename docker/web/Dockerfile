@@ -22,13 +22,6 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /opt/vulnerator-web
 
-# Dependencias de sistema de WeasyPrint (render HTML->PDF del informe): pango/cairo/gdk-pixbuf
-# + fuentes. Sin estas libs, `import weasyprint` falla en tiempo de ejecucion.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-      libjpeg62-turbo fonts-dejavu-core shared-mime-info \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY docker/web/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 

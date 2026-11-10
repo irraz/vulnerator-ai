@@ -137,11 +137,8 @@ ese margen para dejar la UI pre-autenticada y sin onboarding (lo hace solo, ver 
 La consola está en **http://localhost:9100**.
 
 - **Login propio** (usuario `admin` / contraseña `vulnerator`, o lo que pongas en
-  `VULNERATOR_WEB_USER`/`PASSWORD`).
-- **Enlace de un solo uso** (abre con la sesión ya iniciada):
-  ```sh
-  docker compose exec vulnerator-web python3 web_app.py magic-link --next "/#pantallas"
-  ```
+  `VULNERATOR_WEB_USER`/`PASSWORD`). Para acceso sin credenciales en una máquina controlada,
+  `VULNERATOR_WEB_AUTH=0`.
 
 Pestañas:
 - **Terminal** — el bucle OODA en vivo: fases, razonamiento, cada comando con su salida.

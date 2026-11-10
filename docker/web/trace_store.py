@@ -385,14 +385,28 @@ class TraceStore:
             rows = self._db.execute(sql, params).fetchall()
         return [row_to_event(r, text_limit) for r in rows]
 
-    def tail_events(self, session_id: str, limit: int = 400,
+    def tail_events(self, session_id: Optional[str] = None, limit: int = 400, *,
+                    kinds: Optional[Iterable[str]] = None,
                     text_limit: Optional[int] = None) -> list[dict[str, Any]]:
-        """Los últimos ``limit`` eventos de una sesión, en orden ascendente."""
+        """Los últimos ``limit`` eventos (orden ascendente), filtrables por sesión y/o tipo. El
+        recorte se hace en SQL (``ORDER BY seq DESC LIMIT``), sin traer toda la tabla a memoria."""
+        where: list[str] = []
+        params: list[Any] = []
+        if session_id:
+            where.append("session_id = ?")
+            params.append(session_id)
+        kinds = [k for k in (kinds or []) if k in em.KINDS]
+        if kinds:
+            where.append("kind IN (%s)" % ",".join("?" for _ in kinds))
+            params.extend(kinds)
+        inner = "SELECT * FROM events"
+        if where:
+            inner += " WHERE " + " AND ".join(where)
+        inner += " ORDER BY seq DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 5000)))
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM (SELECT * FROM events WHERE session_id=? ORDER BY seq DESC LIMIT ?)"
-                " ORDER BY seq ASC",
-                (session_id, max(1, min(int(limit), 5000))),
+                "SELECT * FROM (%s) ORDER BY seq ASC" % inner, params
             ).fetchall()
         return [row_to_event(r, text_limit) for r in rows]
 

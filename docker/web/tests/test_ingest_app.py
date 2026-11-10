@@ -255,25 +255,6 @@ def test_login_rejects_open_redirect(client):
         assert r.headers["location"] == "/"
 
 
-def test_magic_link_is_single_use(client):
-    token = web_app.make_magic_token(_key())
-    r = client.get("/auth/magic", params={"t": token, "next": "/#pocs"}, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/#pocs"
-    assert web_app.SESSION_COOKIE in r.cookies
-    client.cookies.clear()
-    again = client.get("/auth/magic", params={"t": token}, follow_redirects=False)
-    assert again.headers["location"] == "/login?expired=1"
-
-
-def test_magic_link_expired_or_forged(client):
-    old = web_app.make_magic_token(_key(), now=1_000.0)
-    r = client.get("/auth/magic", params={"t": old}, follow_redirects=False)
-    assert r.headers["location"] == "/login?expired=1"
-    forged = web_app.make_magic_token(b"otra-clave")
-    r = client.get("/auth/magic", params={"t": forged}, follow_redirects=False)
-    assert r.headers["location"] == "/login?expired=1"
-
-
 def test_session_cookie_signature_and_expiry():
     key = _key()
     good = web_app.make_session_cookie(key, "admin")

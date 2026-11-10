@@ -1,10 +1,12 @@
-"""Genera el informe de pentest (MD / TXT / HTML / PDF) a partir de los PoC del store,
+"""Genera el informe de pentest (MD / TXT / HTML) a partir de los PoC del store,
 con comando exacto, salida de evidencia y VERBATIM crudo de cada hallazgo."""
 from __future__ import annotations
 import html as _html
 import json
 import re
 import datetime
+
+import event_model as em
 
 SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 SEV_ES = {"critical": "CRÍTICA", "high": "ALTA", "medium": "MEDIA", "low": "BAJA", "info": "INFO"}
@@ -27,25 +29,22 @@ def derive_sev(title: str):
 
 
 def clean_output(raw):
-    """Intenta extraer el stdout real del wrapper <untrusted_tool_result>{...json...}.
-    Si no puede, devuelve el crudo tal cual (sigue siendo verbatim)."""
+    """Extrae el stdout real de la salida de una tool MCP. Reutiliza el ÚNICO desenvolvedor
+    (``event_model.tool_output_text``); el regex queda solo como RESPALDO para salidas con un
+    prefijo tipo ``<untrusted_tool_result>{...}`` que el desenvolvedor estricto (pide JSON al
+    inicio) no cubre. Si nada aplica, devuelve el crudo tal cual (sigue siendo verbatim)."""
     if not raw:
         return ""
     s = str(raw)
-    try:
+    out = em.tool_output_text(s)
+    if out != s:
+        return out
+    try:  # respaldo: aísla el JSON embebido tras un prefijo y vuelve a pasarlo por el mismo helper
         m = re.search(r"\{.*\}", s, re.S)
         if m:
-            obj = json.loads(m.group(0))
-            inner = obj.get("result")
-            if isinstance(inner, str):
-                try:
-                    inner = json.loads(inner)
-                except Exception:
-                    return inner
-            if isinstance(inner, dict):
-                out = inner.get("output")
-                if isinstance(out, str) and out.strip():
-                    return out
+            inner = em.tool_output_text(m.group(0))
+            if inner and inner != m.group(0):
+                return inner
     except Exception:
         pass
     return s
@@ -56,19 +55,15 @@ def _norm_key(s):
 
 
 def ai_lookup(title, ai_sev):
-    """Busca el veredicto de severidad de la IA para un título. Exacto → normalizado → prefijo."""
+    """Veredicto de severidad de la IA para un título. Match EXACTO → normalizado (ignora
+    espacios/mayúsculas). SIN difuso: nunca presta la severidad de un hallazgo a otro de título
+    parecido (el prompt obliga a la IA a usar el TÍTULO EXACTO, así que el difuso solo metía cruces)."""
     if not ai_sev:
         return None
     if title in ai_sev:
         return ai_sev[title]
     nk = _norm_key(title)
-    norm = {_norm_key(k): v for k, v in ai_sev.items()}
-    if nk in norm:
-        return norm[nk]
-    for k, v in norm.items():
-        if k and (k[:60] == nk[:60] or k in nk or nk in k):
-            return v
-    return None
+    return {_norm_key(k): v for k, v in ai_sev.items()}.get(nk)
 
 
 def _coerce_sev(entry):
@@ -81,6 +76,28 @@ def _coerce_sev(entry):
     return None, None, ""
 
 
+def severity_for(title, ai_sev=None):
+    """ÚNICA fuente de verdad de la severidad de un hallazgo (la usan la consola y el informe).
+
+    Base: regex del título (``derive_sev``). Si la IA lo calificó (``severities.json``), su veredicto
+    MANDA y aporta su propio CVSS y su justificación. Devuelve ``(sev, sev_by, score, rationale)``,
+    donde ``sev_by`` es ``"ia"`` o ``"regex"`` y ``score`` es el CVSS (el de la IA si lo dio).
+    """
+    sev, score = derive_sev(title)
+    sev_by, rationale = "regex", ""
+    hit = ai_lookup(title, ai_sev)
+    if hit is not None:
+        ai_s, ai_cvss, ai_rat = _coerce_sev(hit)
+        if ai_s:
+            sev, sev_by, rationale = ai_s, "ia", ai_rat
+            if ai_cvss is not None:
+                try:
+                    score = float(ai_cvss)
+                except Exception:
+                    pass
+    return sev, sev_by, score, rationale
+
+
 def normalize(pocs, ai_sev=None):
     """pocs: lista de PoC completos. ai_sev: mapa título→severidad de la IA (manda sobre el regex)."""
     out = []
@@ -90,21 +107,7 @@ def normalize(pocs, ai_sev=None):
         ex = rep.get("execution", {}) or {}
         ev = f.get("evidence", {}) or {}
         title = f.get("title", "")
-        sev, score = derive_sev(title)
-        rationale = ""
-        sev_by = "regex"
-        hit = ai_lookup(title, ai_sev)
-        if hit is not None:
-            ai_s, ai_cvss, ai_rat = _coerce_sev(hit)
-            if ai_s:
-                sev = ai_s
-                sev_by = "ia"
-                rationale = ai_rat
-                if ai_cvss is not None:
-                    try:
-                        score = float(ai_cvss)
-                    except Exception:
-                        pass
+        sev, sev_by, score, rationale = severity_for(title, ai_sev)
         out.append({
             "sev_by": sev_by,
             "rationale": rationale,
@@ -237,7 +240,7 @@ def render_txt(findings, engagement="engagement", narrative="", operator="", cli
     return "\n".join(L)
 
 
-# ─────────────────────────────────────────── HTML (vista + fuente del PDF)
+# ─────────────────────────────────────────── HTML (vista)
 def render_html(findings, engagement="engagement", narrative="", operator="", client=""):
     c = _counts(findings)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -330,6 +333,3 @@ def render_html(findings, engagement="engagement", narrative="", operator="", cl
 </body></html>"""
 
 
-def render_pdf(findings, **kw):
-    from weasyprint import HTML
-    return HTML(string=render_html(findings, **kw)).write_pdf()

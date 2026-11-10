@@ -163,7 +163,6 @@
     pocs: [],
     pocSelected: null,
     pocSev: "all",         // filtro de severidad: all|critical|high|medium|low|info
-    aiSev: {},             // veredicto de severidad de la IA: título -> {severity,cvss,rationale}
     knownPocs: null,       // Map id -> store_status (null hasta la primera carga)
     player: null,
   };
@@ -205,6 +204,10 @@
       const st = await api("/api/status");
       S.status = st;
       skew = st.now - Date.now() / 1000;
+      // Modo solo-observación: si el disparador de informe está desactivado en el backend
+      // (VULNERATOR_WEB_ALLOW_TRIGGER=0), ocultamos el botón "Generar informe".
+      const gbtn = $("poc-genreport");
+      if (gbtn) gbtn.hidden = (st.allow_trigger === false);
       const ing = st.ingest || {};
       const ver = ing.hermes_version ? "v" + String(ing.hermes_version).replace(/^v/, "") : "?";
       setPill("pill-hermes", ing.ok ? "ok" : "err", ver,
@@ -1849,51 +1852,11 @@
     } catch (_) { /* reintenta en el siguiente ciclo */ }
   }
 
-  // Severidad derivada del título del hallazgo (el modelo no la trae estructurada):
-  // 1º por CVSS numérico, 2º por palabra explícita (ES/EN); si no hay nada -> "info".
+  // Severidad: la resuelve el BACKEND (report.severity_for) y la manda con cada PoC
+  // (p.sev / p.sev_by / p.score / p.rationale). El front solo la PINTA — una sola fuente de verdad.
   const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
   const SEV_LABEL = { critical: "CRÍTICA", high: "ALTA", medium: "MEDIA", low: "BAJA", info: "INFO" };
   const SEV_ORDER = ["critical", "high", "medium", "low", "info"];
-  function aiSevLookup(title) {
-    const m = S.aiSev;
-    if (!m || typeof m !== "object") return null;
-    if (m[title]) return m[title];
-    const nk = (title || "").replace(/\s+/g, " ").trim().toLowerCase();
-    for (const k in m) {
-      const kk = k.replace(/\s+/g, " ").trim().toLowerCase();
-      if (kk === nk || kk.slice(0, 60) === nk.slice(0, 60) || kk.indexOf(nk) >= 0 || nk.indexOf(kk) >= 0) return m[k];
-    }
-    return null;
-  }
-
-  async function loadSeverities() {
-    try {
-      const d = await api("/api/severities");
-      S.aiSev = d && typeof d === "object" ? d : {};
-      if (S.view === "pocs") renderPocList();
-    } catch (_) { /* reintenta */ }
-  }
-
-  function pocSeverity(p) {
-    const hit = aiSevLookup(p.title || "");
-    if (hit) {
-      const s = (typeof hit === "string" ? hit : (hit.severity || hit.sev || "")).toLowerCase();
-      if (SEV_RANK[s] !== undefined) {
-        p._sevBy = "ia";
-        p._rationale = (typeof hit === "object" && hit.rationale) ? hit.rationale : "";
-        return s;
-      }
-    }
-    p._sevBy = "regex"; p._rationale = "";
-    const t = (p.title || "").toUpperCase();
-    const m = t.match(/CVSS\s*(\d{1,2}(?:\.\d)?)/);
-    const score = m ? parseFloat(m[1]) : null;
-    if (/\bCRIT[IÍ]CA\b|\bCRITICAL\b/.test(t) || (score != null && score >= 9.0)) return "critical";
-    if (/\bHIGH\b|\bALTA\b/.test(t) || (score != null && score >= 7.0)) return "high";
-    if (/\bMEDIUM\b|\bMEDIA\b/.test(t) || (score != null && score >= 4.0)) return "medium";
-    if (/\bLOW\b|\bBAJA\b/.test(t) || (score != null && score > 0)) return "low";
-    return "info";
-  }
 
   function renderPocList() {
     const ul = $("poc-list");
@@ -1904,7 +1867,10 @@
 
     // severidad por item + conteo por nivel (sobre la base ya filtrada)
     const counts = { all: base.length, critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-    for (const p of base) { p._sev = pocSeverity(p); counts[p._sev]++; }
+    for (const p of base) {
+      p._sev = p.sev || "info"; p._sevBy = p.sev_by || "regex"; p._rationale = p.rationale || "";
+      counts[p._sev]++;
+    }
     for (const sev of ["all", ...SEV_ORDER]) {
       const el = document.querySelector('.sevfilter__n[data-n="' + sev + '"]');
       if (el) el.textContent = counts[sev];
@@ -1977,7 +1943,7 @@
         const rr = await fetch("/api/report.html", { cache: "no-store" });
         if (rr.ok) {
           clearInterval(iv);
-          loadSeverities();
+          loadPocs();  // re-trae los PoC con la severidad (IA) ya aplicada por el backend
           toast("ok", "Informe listo", "Pulsa aquí para abrir pentest-report.html.", () => window.open("/api/report.html", "_blank"));
         }
       } catch (_) { /* reintenta en el siguiente ciclo */ }
@@ -1994,7 +1960,6 @@
       h("div", { class: "report-frame__bar" },
         h("span", { class: "muted", style: { fontSize: "11px" } }, "Informe completo — reproducción y verbatim"),
         h("a", { class: "repbtn", href: "/api/report.html", target: "_blank" }, "Abrir en pestaña"),
-        h("a", { class: "repbtn", href: "/api/report.pdf?dl=1" }, "PDF"),
         h("a", { class: "repbtn", href: "/api/report.md?dl=1" }, "MD"),
         h("a", { class: "repbtn", href: "/api/report.txt?dl=1" }, "TXT")),
       h("iframe", { class: "report-frame", src: "/api/report.html?ts=" + Date.now() }));
@@ -2470,11 +2435,9 @@
     }
     showView(location.hash.slice(1) || "terminal");
     openStream(S.status ? S.status.max_seq : 0);
-    loadSeverities();
     setInterval(loadSessions, 3000);
     setInterval(loadStatus, 5000);
     setInterval(loadPocs, 8000);
-    setInterval(loadSeverities, 15000);
     setInterval(() => { if (S.view === "traces" && traceDirty) loadTrace(); }, 2000);
   }
   boot();

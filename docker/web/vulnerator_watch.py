@@ -38,6 +38,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
 
+import event_model as em
+
 PHASE_COLORS = {"OBSERVE": "38;5;110", "ORIENT": "38;5;169", "DECIDE": "38;5;179",
                 "ACT": "38;5;167", "REPORT": "38;5;248"}
 CAT_COLORS = {"shell": "1;37", "browser": "38;5;116", "web": "38;5;169", "finding": "1;92",
@@ -63,32 +65,9 @@ class Painter:
 
 
 def output_text(text: str) -> str:
-    """Salida útil de una tool (``output`` de kali_run, stdout/stderr o el texto)."""
-    s = (text or "").strip()
-    if s[:1] in "{[":
-        try:
-            doc: Any = json.loads(s)
-        except ValueError:
-            return text
-        for _ in range(3):
-            if isinstance(doc, dict) and set(doc) <= {"result", "structuredContent", "content", "isError"}:
-                doc = doc.get("structuredContent") or doc.get("result") or doc.get("content")
-                continue
-            if isinstance(doc, list) and len(doc) == 1 and isinstance(doc[0], dict) and doc[0].get("type") == "text":
-                try:
-                    doc = json.loads(doc[0].get("text") or "")
-                    continue
-                except ValueError:
-                    return doc[0].get("text") or ""
-            break
-        if isinstance(doc, dict):
-            if isinstance(doc.get("output"), str):
-                return doc["output"]
-            parts = [doc[k] for k in ("stdout", "stderr") if isinstance(doc.get(k), str) and doc.get(k)]
-            if parts:
-                return "\n".join(parts)
-            return json.dumps(doc, ensure_ascii=False)
-    return text or ""
+    """Salida útil de una tool (``output`` de kali_run, stdout/stderr o el texto). Delega en el
+    ÚNICO desenvolvedor (``event_model.tool_output_text``) para no duplicar la lógica."""
+    return em.tool_output_text(text)
 
 
 def fmt_dur(seconds: Optional[float]) -> str:

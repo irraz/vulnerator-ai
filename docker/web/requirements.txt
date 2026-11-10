@@ -23,7 +23,3 @@ anyio>=4.15.1
 # websockets: para que el proxy de la UI de Caido (caido_proxy.py) puentee las suscripciones
 # GraphQL-over-WS y el historial se actualice EN VIVO. También habilita el soporte WS de uvicorn.
 websockets>=13.0,<16
-
-# weasyprint: render HTML->PDF del informe de pentest (/api/report.pdf). Necesita libs de
-# sistema (pango/cairo/gdk-pixbuf) instaladas en el Dockerfile. Verificado 67.0.
-weasyprint>=63.0,<68

@@ -16,9 +16,12 @@ Sirve una consola de operador (``static/``) y su API:
   GET /api/web                               tráfico web capturado por Caido
   GET /api/stream                            SSE en vivo (reanudable con Last-Event-ID)
 
-OBSERVADOR: no lanza, dirige ni para runs. La lógica vive en módulos stdlib-puros
-(``event_model``, ``trace_store``, ``poc_replay``, ``ooda_parse``) cubiertos por tests; aquí
-solo hay HTTP, auth y cableado.
+OBSERVADOR por diseño: lee la API de sesiones de Hermes y el historial de Caido y los muestra; no
+dirige ni para runs. La ÚNICA acción que puede iniciar, bajo demanda del operador, es generar el
+informe formal (botón "Generar informe" -> POST /api/report); se desactiva con
+VULNERATOR_WEB_ALLOW_TRIGGER=0 (consola en modo solo-observación). La lógica vive en módulos
+stdlib-puros (``event_model``, ``trace_store``, ``poc_replay``, ``ooda_parse``) cubiertos por
+tests; aquí solo hay HTTP, auth y cableado.
 
 Seguridad:
   - Basic auth obligatoria (comparación en tiempo constante); FAIL-CLOSED: el proceso no
@@ -37,7 +40,6 @@ import contextlib
 import hashlib
 import hmac
 import json
-import secrets
 import os
 import re
 import sys
@@ -103,6 +105,10 @@ class Settings:
         self.background = True
         # Acceso sin credenciales (oficial): VULNERATOR_WEB_AUTH=0 desactiva el Basic auth.
         self.auth_enabled = _env("VULNERATOR_WEB_AUTH", "1").lower() not in ("0", "false", "no", "off")
+        # Disparador de informe (POST /api/report): es la ÚNICA acción que la consola puede iniciar
+        # sobre Hermes. ON por defecto; VULNERATOR_WEB_ALLOW_TRIGGER=0 lo desactiva y deja la consola
+        # en modo SOLO-OBSERVACIÓN (el botón "Generar informe" se oculta y la ruta responde 403).
+        self.allow_trigger = _env("VULNERATOR_WEB_ALLOW_TRIGGER", "1").lower() not in ("0", "false", "no", "off")
         # Informe: lee los artefactos del engagement (severities.json / pentest-report.md) del
         # volumen compartido kali-artifacts montado aquí en modo lectura.
         self.artifacts_dir = _env("VULNERATOR_WEB_ARTIFACTS_DIR", "/artifacts")
@@ -126,9 +132,8 @@ class Settings:
 # --------------------------------------------------------------------------- sesión
 SESSION_COOKIE = "vweb_session"
 SESSION_TTL_S = 12 * 3600
-MAGIC_TTL_S = 120
-# Rutas sin auth: vida del proceso, login/enlace mágico y estáticos (no son secretos).
-_OPEN_EXACT = ("/healthz", "/login", "/logout", "/auth/magic")
+# Rutas sin auth: vida del proceso, login/logout y estáticos (no son secretos).
+_OPEN_EXACT = ("/healthz", "/login", "/logout")
 _OPEN_PREFIX = ("/static/",)
 
 
@@ -175,12 +180,6 @@ def check_session_cookie(key: bytes, token: str, now: Optional[float] = None) ->
         return int(exp) > (now or time.time())
     except ValueError:
         return False
-
-
-def make_magic_token(key: bytes, now: Optional[float] = None) -> str:
-    """Enlace de un solo uso (``MAGIC_TTL_S``) para abrir la GUI con la sesión ya iniciada."""
-    exp = int((now or time.time()) + MAGIC_TTL_S)
-    return sign(key, "magic", "%d|%s" % (exp, secrets.token_urlsafe(12)))
 
 
 def safe_next(target: Optional[str]) -> str:
@@ -310,9 +309,24 @@ def _pocs_for(app_state, sid: str) -> list[dict[str, Any]]:
     last = events[-1]["seq"] if events else 0
     cached = app_state.poc_cache.get(sid)
     if cached and cached[0] == last:
-        return cached[1]
-    pocs = poc_replay.build_pocs(events)
-    app_state.poc_cache[sid] = (last, pocs)
+        pocs = cached[1]
+    else:
+        pocs = poc_replay.build_pocs(events)
+        app_state.poc_cache[sid] = (last, pocs)
+    # Severidad: ÚNICA fuente de verdad (report.severity_for), resuelta aquí para TODO consumidor
+    # (consola, informe, contadores, filtro). Se aplica en cada llamada para reflejar el
+    # severities.json ACTUAL de la IA sin invalidar la caché de build_pocs. El engagement se deriva
+    # en sitio desde los propios PoC (NO con _engagement(), que llamaría de vuelta a _pocs_for).
+    eng = ""
+    for p in pocs:
+        eid = (p.get("finding") or {}).get("engagement_id")
+        if eid:
+            eng = eid
+            break
+    ai = _load_severities(app_state.settings, eng or app_state.settings.engagement)
+    for p in pocs:
+        title = (p.get("finding") or {}).get("title", "")
+        p["sev"], p["sev_by"], p["score"], p["rationale"] = report.severity_for(title, ai)
     return pocs
 
 
@@ -380,26 +394,6 @@ async def logout(request: Request) -> Response:
     return resp
 
 
-async def magic_login(request: Request) -> Response:
-    """Canjea un enlace mágico de un solo uso por la cookie de sesión."""
-    st = _state(request)
-    s: Settings = st.settings
-    key = session_key(s.user, s.password, s.hermes_key)
-    token = request.query_params.get("t") or ""
-    payload = verify(key, "magic", token)
-    target = safe_next(request.query_params.get("next"))
-    if payload:
-        exp, _, nonce = payload.partition("|")
-        try:
-            fresh = int(exp) > time.time()
-        except ValueError:
-            fresh = False
-        if fresh and nonce not in st.used_magic:
-            st.used_magic.add(nonce)
-            return _set_session(RedirectResponse(target, status_code=303), s)
-    return RedirectResponse("/login?expired=1", status_code=303)
-
-
 async def index(request: Request) -> Response:
     return FileResponse(STATIC / "index.html", media_type="text/html; charset=utf-8")
 
@@ -414,6 +408,7 @@ async def api_status(request: Request) -> Response:
         probe_ui(st, "caido_director", s.caido_director_internal if s.caido_director_port else ""))
     return JSONResponse({
         "now": time.time(),
+        "allow_trigger": s.allow_trigger,
         "ingest": st.ingestor.status,
         "caido": st.caido.status if st.caido else {"enabled": False},
         "max_seq": st.store.max_seq(),
@@ -517,6 +512,9 @@ async def api_pocs(request: Request) -> Response:
                 "target": f.get("target"), "technique_id": f.get("technique_id"),
                 "store_status": poc["store_status"], "confirmed": poc["confirmed"],
                 "phase": poc.get("phase"), "step": poc.get("step"),
+                # Severidad ya resuelta en el backend (ver _pocs_for): el front solo la pinta.
+                "sev": poc.get("sev"), "sev_by": poc.get("sev_by"),
+                "score": poc.get("score"), "rationale": poc.get("rationale"),
             })
     out.sort(key=lambda p: p.get("ts") or 0, reverse=True)
     return JSONResponse({"data": out})
@@ -535,7 +533,9 @@ REPORT_INPUT = (
     "parches son de severidad alta o media aunque el titulo no lleve CVSS. Escribe con kali_run el fichero "
     "/artifacts/{eng}/severities.json con un objeto JSON valido (comillas dobles) que mapea el TITULO EXACTO "
     "de cada hallazgo (verbatim, tal cual esta registrado) a "
-    '{"severity":"critical|high|medium|low|info","cvss":<numero o null>,"rationale":"<justificacion breve>"}. '
+    '{"severity":"critical|high|medium|low|info","cvss":<numero 0.0-10.0>,"rationale":"<justificacion breve>"}. '
+    "El CVSS es OBLIGATORIO (nunca null): asigna la nota que corresponda y que sea COHERENTE con la "
+    "severidad — critical 9.0-10.0, high 7.0-8.9, medium 4.0-6.9, low 0.1-3.9, info 0.0. "
     "Incluye TODOS los hallazgos.\n\n"
     "PASO 2 — INFORME: genera el informe formal (skill pentest-report, base report_gen.py) usando esas "
     "severidades. Para cada hallazgo: severidad, vector, version afectada, version parcheada y recomendacion. "
@@ -598,7 +598,7 @@ async def api_severities(request: Request) -> Response:
 
 async def api_report(request: Request) -> Response:
     ext = request.path_params.get("ext", "")
-    if ext not in ("md", "txt", "html", "pdf"):
+    if ext not in ("md", "txt", "html"):
         return _bad("formato no soportado", 404)
     st = _state(request)
     settings = st.settings
@@ -615,11 +615,6 @@ async def api_report(request: Request) -> Response:
     def cd(fn):
         return {"Content-Disposition": 'attachment; filename="%s"' % fn} if dl else {}
 
-    if ext == "pdf":
-        loop = asyncio.get_event_loop()
-        pdf = await loop.run_in_executor(None, lambda: report.render_pdf(findings, **kw))
-        return Response(pdf, media_type="application/pdf",
-                        headers=cd("pentest-report-%s.pdf" % (eng or "engagement")))
     if ext == "md":
         return Response(report.render_md(findings, **kw),
                         media_type="text/markdown; charset=utf-8", headers=cd("pentest-report.md"))
@@ -633,6 +628,9 @@ async def api_report(request: Request) -> Response:
 async def api_report_trigger(request: Request) -> Response:
     st = _state(request)
     settings = st.settings
+    if not settings.allow_trigger:
+        return _bad("Disparador de informe desactivado (VULNERATOR_WEB_ALLOW_TRIGGER=0): "
+                    "consola en modo solo-observación.", 403)
     if not settings.hermes_key:
         return _bad("sin HERMES_API_SERVER_KEY: no se puede lanzar el informe", 503)
     try:
@@ -669,8 +667,7 @@ async def api_web(request: Request) -> Response:
     q = request.query_params
     store: TraceStore = _state(request).store
     if q.get("tail"):
-        evs = store.events(0, kinds=[em.KIND_WEB], limit=1_000_000)
-        evs = evs[-_int(q.get("tail"), 200, 1, 2000):]
+        evs = store.tail_events(limit=_int(q.get("tail"), 200, 1, 2000), kinds=[em.KIND_WEB])
     else:
         evs = store.events(_int(q.get("after"), 0), kinds=[em.KIND_WEB],
                            limit=_int(q.get("limit"), 500, 1, 5000))
@@ -740,8 +737,9 @@ async def lifespan(app: Starlette):
             )
             tasks.append(asyncio.create_task(app.state.caido.run(), name="caido-feed"))
     # Segundo servidor en el mismo proceso: la UI de Caido pre-autenticada como invitado,
-    # servida desde nuestro origen para poder inyectar el token (ver caido_proxy.py).
-    if s.caido_proxy_port and s.background:
+    # servida desde nuestro origen para poder inyectar el token (ver caido_proxy.py). Gobernado
+    # por el MISMO interruptor que el feed (CAIDO_FEED): =0 apaga TODO lo de Caido (feed + proxy).
+    if s.caido_proxy_port and s.caido_feed and s.background:
         try:
             import uvicorn
             from caido_proxy import create_caido_proxy_app
@@ -768,7 +766,6 @@ def create_app(settings: Optional[Settings] = None) -> Starlette:
         Route("/", index),
         Route("/login", login_page, methods=["GET", "POST"]),
         Route("/logout", logout),
-        Route("/auth/magic", magic_login),
         Route("/api/status", api_status),
         Route("/api/sessions", api_sessions),
         Route("/api/sessions/{sid}", api_session),
@@ -787,34 +784,13 @@ def create_app(settings: Optional[Settings] = None) -> Starlette:
     ]
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.settings = settings
-    app.state.used_magic = set()
     app.add_middleware(SecurityMiddleware, user=settings.user, password=settings.password,
                        key=session_key(settings.user, settings.password, settings.hermes_key),
                        enabled=settings.auth_enabled)
     return app
 
 
-def magic_link_cli(argv: list[str]) -> int:
-    """``python3 web_app.py magic-link [--base URL] [--next /#vista]``: imprime un enlace de
-    un solo uso (caduca en ``MAGIC_TTL_S``) para abrir la GUI con la sesión ya iniciada."""
-    import argparse
-    ap = argparse.ArgumentParser(prog="web_app.py magic-link")
-    ap.add_argument("--base", default=os.environ.get("VULNERATOR_WEB_PUBLIC_URL", "http://localhost:9100"))
-    ap.add_argument("--next", default="/")
-    args = ap.parse_args(argv)
-    s = Settings()
-    if s.validate():
-        sys.stderr.write("faltan credenciales (VULNERATOR_WEB_PASSWORD / HERMES_API_SERVER_KEY)\n")
-        return 2
-    from urllib.parse import quote
-    token = make_magic_token(session_key(s.user, s.password, s.hermes_key))
-    print("%s/auth/magic?t=%s&next=%s" % (args.base.rstrip("/"), token, quote(safe_next(args.next), safe="/")))
-    return 0
-
-
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] == "magic-link":
-        sys.exit(magic_link_cli(sys.argv[2:]))
     settings = Settings()
     problems = settings.validate()
     if problems:

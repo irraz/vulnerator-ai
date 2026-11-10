@@ -296,30 +296,30 @@ services:
     # "everything goes through MCP" principle. The web part is NOT limited to kali_run: nmap/whatweb/nuclei/
     # ffuf/sqlmap go through the Kali (kali_run) and navigation/DOM/XSS go through this MCP.
     image: mcr.microsoft.com/playwright/mcp
-    # HTTP (streamable-http) on :8931, MCP endpoint at /mcp. Instead of launching its OWN
-    # headless Chromium, it DRIVES the VISIBLE browser of the `browser-view` service over CDP
-    # (--cdp-endpoint), so the operator can watch the agent navigate live (noVNC embedded in
-    # vulnerator-web). The browser-launch flags (--headless/--browser/--no-sandbox/--isolated)
-    # no longer apply: the browser is external. To revert to the self-contained headless
-    # browser, restore those flags and drop --cdp-endpoint + the depends_on below.
+    # HTTP (streamable-http) on :8931, MCP endpoint at /mcp. DEFAULT: self-contained HEADLESS
+    # Chromium (--headless/--no-sandbox/--isolated), internal network only — the agent/API path
+    # runs ALONE, with no screens and no dependency on any other container. --isolated gives each
+    # session its own ephemeral profile (no shared-profile lock "Browser is already in use" mid-run).
+    # To WATCH the agent browse live, enable the `web` profile and drive the visible browser over
+    # CDP instead: swap the --headless/--browser/chromium/--no-sandbox/--isolated flags for
+    # `--cdp-endpoint http://browser-view:9222` and add `depends_on: browser-view (service_healthy)`.
     entrypoint: ["node"]
     command:
       - /app/cli.js
-      - --cdp-endpoint
-      - "http://browser-view:9222"
+      - --headless
+      - --browser
+      - chromium
+      - --no-sandbox
+      - --isolated
       - --port
       - "8931"
       - --host
       - "0.0.0.0"
-      # Anti-DNS-rebinding of the MCP server itself (unchanged): only the internal DNS name is
-      # allowed as inbound Host, from which ooda-agent connects.
+      # Anti-DNS-rebinding of the MCP server itself: only the internal DNS name is allowed as
+      # inbound Host, from which ooda-agent connects.
       - --allowed-hosts
       - "playwright-mcp:8931"
     init: true
-    depends_on:
-      # The external visible browser must be up (CDP + noVNC) before this driver connects.
-      browser-view:
-        condition: service_healthy
     # HEALTHCHECK: the MCP endpoint responds on :8931 (a live process responds to the
     # HTTP handshake), so that ooda-agent can depend on it with condition: service_healthy.
     healthcheck:
@@ -422,6 +422,9 @@ services:
         - linux/arm64
         - linux/amd64
     image: vulnerator-ai-web:dev
+    # OPT-IN: only starts with the `web` profile (`docker compose --profile web up -d`).
+    # The default stack (no profile) is the minimal agent/API path — no console, no screens.
+    profiles: ["web"]
     environment:
       HERMES_API_BASE_URL: "http://ooda-agent:8642"
       # Read-only use of Hermes' session API; same Bearer as the rest of the stack (fail-closed).
@@ -431,13 +434,17 @@ services:
       # Acceso sin credenciales (oficial): 0 desactiva el Basic auth del GUI. Publica :9100 solo
       # en una maquina controlada si lo desactivas.
       VULNERATOR_WEB_AUTH: "${VULNERATOR_WEB_AUTH:-1}"
+      # Disparador de informe (POST /api/report): 1 (por defecto) deja el botón "Generar informe"
+      # activo; 0 deja la consola en modo SOLO-OBSERVACIÓN (botón oculto, ruta 403).
+      VULNERATOR_WEB_ALLOW_TRIGGER: "${VULNERATOR_WEB_ALLOW_TRIGGER:-1}"
       # Informe: engagement / cliente / operador. VACIOS por defecto (nada de datos reales en el
       # repo); el GUI deriva el engagement del engagement_id de los hallazgos, y cliente/operador
       # solo aparecen si los defines en tu .env (git-ignored).
       VULNERATOR_WEB_ENGAGEMENT: "${VULNERATOR_WEB_ENGAGEMENT:-}"
       VULNERATOR_WEB_CLIENT: "${VULNERATOR_WEB_CLIENT:-}"
       VULNERATOR_WEB_OPERATOR: "${VULNERATOR_WEB_OPERATOR:-}"
-      # Live web-traffic feed (Caido history, guest session like kali-mcp). 0 disables it.
+      # Interruptor maestro de Caido: feed del historial (Copilot) + proxy de la UI pre-autenticada
+      # (Pantallas). Vacío/1 => on; 0 lo apaga TODO.
       VULNERATOR_WEB_CAIDO_FEED: "${VULNERATOR_WEB_CAIDO_FEED:-1}"
       CAIDO_URL: "${CAIDO_URL:-http://caido:8080}"
       CAIDO_PROJECT: "${CAIDO_PROJECT:-}"
@@ -498,6 +505,8 @@ services:
         - linux/arm64
         - linux/amd64
     image: vulnerator-ai-browser-view:dev
+    # OPT-IN: visible-browser screen, only with the `web` profile. Not part of the default stack.
+    profiles: ["web"]
     environment:
       BROWSER_VIEW_GEOMETRY: "${BROWSER_VIEW_GEOMETRY:-1920x1080x24}"
       BROWSER_VIEW_VIEWONLY: "${BROWSER_VIEW_VIEWONLY:-1}"
@@ -506,7 +515,7 @@ services:
       BROWSER_VIEW_PROXY: "${BROWSER_VIEW_PROXY:-}"
       # El vigilante de objetivo (browser_reset.py) sondea la consola con estas credenciales
       # para saber cuándo empieza un engagement nuevo y resetear el navegador a la bienvenida.
-      GUI_BASE: "http://vulnerator-web:9100"
+      GUI_BASE: "${GUI_BASE:-http://vulnerator-web:9100}"
       VULNERATOR_WEB_USER: "${VULNERATOR_WEB_USER:-${HERMES_DASHBOARD_USER:-admin}}"
       VULNERATOR_WEB_PASSWORD: "${VULNERATOR_WEB_PASSWORD:-${HERMES_DASHBOARD_PASSWORD:-vulnerator}}"
     # Chromium con pantalla necesita memoria compartida generosa (si no, cuelga al renderizar).
@@ -536,8 +545,10 @@ services:
         - linux/arm64
         - linux/amd64
     image: vulnerator-ai-caido-director:dev
+    # OPT-IN: Caido-UI mirror screen, only with the `web` profile. Not part of the default stack.
+    profiles: ["web"]
     environment:
-      GUI_BASE: "http://vulnerator-web:9100"
+      GUI_BASE: "${GUI_BASE:-http://vulnerator-web:9100}"
       # UI de Caido pre-autenticada que sirve vulnerator-web (proxy con token de invitado).
       CAIDO_UI_URL: "http://vulnerator-web:7001/"
       VULNERATOR_WEB_USER: "${VULNERATOR_WEB_USER:-${HERMES_DASHBOARD_USER:-admin}}"
