@@ -1,0 +1,29 @@
+# Manifiesto de dependencias de la imagen vulnerator-web (la GUI web de Vulnerator-AI).
+# Componente OBSERVADOR: lee la API de sesiones de Hermes (:8642) y el historial de Caido y
+# sirve una consola de operador. Toda la lógica (normalización de eventos, store de trazas,
+# PoC replay, parser OODA, CLI watch) es STDLIB PURA y se testea sin estas dependencias; lo de
+# abajo es solo la capa HTTP.
+
+# starlette: micro-framework ASGI de la capa web (rutas, StaticFiles, StreamingResponse para
+#   el SSE en vivo). Se elige Starlette y no FastAPI a propósito: no hace falta validación
+#   pydantic ni OpenAPI, y la superficie de dependencias queda mínima.
+#   Acotado a la línea 0.x (<1) con mínimo en la versión verificada (0.52.1).
+starlette>=0.52.1,<1
+
+# uvicorn: servidor ASGI (mismo rango que docker/mcp/requirements.txt; verificado 0.54.0).
+uvicorn>=0.54.0,<1
+
+# httpx: cliente async hacia :8642 (sesiones + mensajes) y sondeo de las UIs de Hermes.
+#   Mismo rango que docker/mcp (verificado 0.28.1).
+httpx>=0.28.1,<1
+
+# anyio: base async de Starlette/httpx (verificado 4.16.0; mismo mínimo que docker/mcp).
+anyio>=4.15.1
+
+# websockets: para que el proxy de la UI de Caido (caido_proxy.py) puentee las suscripciones
+# GraphQL-over-WS y el historial se actualice EN VIVO. También habilita el soporte WS de uvicorn.
+websockets>=13.0,<16
+
+# weasyprint: render HTML->PDF del informe de pentest (/api/report.pdf). Necesita libs de
+# sistema (pango/cairo/gdk-pixbuf) instaladas en el Dockerfile. Verificado 67.0.
+weasyprint>=63.0,<68

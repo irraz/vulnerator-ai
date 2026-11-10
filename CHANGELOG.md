@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **PoC severity filter and badges in the operator console** — the PoC view (`#pocs`) gains a severity filter bar (Todas / Críticas / Altas / Medias / Bajas / Info) with live per-level counts, a per-finding severity badge, and worst-first ordering, so findings can be triaged at a glance. `docker/web/static/{app.js,index.html,style.css}`.
+- **AI-assigned finding severity** — report generation now asks the agent to rate each finding by *real operational risk*, not just the title's CVSS (e.g. a production DB exposed on the network, `APP_DEBUG=true` in production, unauthenticated panels/metrics, or EOL/unpatchable software are high/medium even without a CVSS), each with a short rationale, persisted to `/artifacts/<engagement>/severities.json`. This verdict drives **both** the report and the console (badges, counts and the filter — AI-rated badges show a `·IA` marker and the rationale in their tooltip); a title keyword/CVSS regex remains only as a fallback. New `GET /api/severities`.
+- **Engagement report in MD / TXT / HTML / PDF with full verbatim** — new `docker/web/report.py` builds the formal report from the recorded PoCs: executive summary + severity table + per-finding detail with the **exact command, the evidence output and the raw verbatim tool output** (everything needed to reproduce each PoC), plus the agent's narrative when present. Served by `GET /api/report.{md,txt,html,pdf}` (`?dl=1` forces download); the console adds an "Informe" bar — **Ver** embeds the HTML report inside the PoC detail pane, **PDF/MD/TXT** download — and a **Generar informe** button. PDF rendered with WeasyPrint.
+- **Report trigger from the console** — `POST /api/report` instructs Hermes to assign severities and write the report **from the already-recorded findings only** (no new scanning/enumeration), continuing the session for context and `chmod 644`-ing the artifacts so the GUI process can serve them.
+- **Credential-free console mode** — `VULNERATOR_WEB_AUTH=0` disables the GUI Basic auth explicitly (the default stays on and fail-closed). Intended for a controlled single-user machine.
+
+### Changed
+
+- **`vulnerator-web` is no longer strictly observer-only** — it gains an opt-in report-generation trigger (`POST /api/report`) that calls Hermes' runs API, and now mounts the shared `kali-artifacts` volume **read-only** (`/artifacts`) to serve the engagement's report artifacts (`severities.json`, `pentest-report.md/.html`). New env: `VULNERATOR_WEB_AUTH`, `VULNERATOR_WEB_ENGAGEMENT`.
+- **`vulnerator-web` image** — adds the `weasyprint` Python dependency and its system libraries (`libpango`, `libpangocairo`, `libgdk-pixbuf`, `libjpeg`, `fonts-dejavu-core`, `shared-mime-info`) for PDF report rendering, and copies the new `report.py` module.
+
 ## [1.8.0] - 2026-11-05
 
 ### Added

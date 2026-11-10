@@ -85,10 +85,11 @@ tools run on a Kali governed by an MCP server. Hermes decides what
 to run and launches it **directly** against the target through the Kali MCP.
 
 It is a deliberately minimal design: **no core, no REST API, no UI, no gates**.
-Five containers (the agent, two tool MCP servers, the Caido web-security toolkit and the MCP
-front door) and the agent driving end to end.
+The agent, two tool MCP servers, the Caido web-security toolkit, the MCP front door, the web GUI
+and two live-screen containers (a visible browser and a Caido director), with the agent driving end
+to end. To bring everything up from scratch, follow **[`docs/RUNBOOK.md`](docs/RUNBOOK.md)**.
 
-## Architecture (5 containers)
+## Architecture
 
 ![Vulnerator AI system architecture: an MCP client (Claude Code / Kiro / BugTraceAI) drives a pentest THROUGH the vulnerator-mcp front door (MCP, :8700 internal), which forwards to Hermes' :8642 runs API over HTTP Bearer; an external assistant can still trigger/observe Hermes directly over :8642. Hermes is the OODA brain, reasoning with mistralai/mistral-large on OpenRouter and driving the kali-mcp (:8900) and playwright-mcp (:8931) servers over MCP; kali runs the pentest tools against the authorized target and also drives the Caido web-security toolkit (caido:8080, internal network only) for proxy, Replay, HTTPQL history, Automate fuzzing and interception. ATT&CK is the Orient language of the loop.](docs/architecture.svg)
 
@@ -106,8 +107,18 @@ front door) and the agent driving end to end.
 - **vulnerator-mcp** — thin MCP **front door** over Hermes' `:8642` runs API so MCP clients
   (Claude Code / Kiro, BugTraceAI, ...) can trigger/observe/steer/stop a run. **Up by default**;
   it exposes **only** the runs lifecycle, never raw `kali_run` or `/v1/chat/completions`.
+- **vulnerator-web** — Vulnerator's own **web GUI** at **http://localhost:9100**: live OODA
+  terminal, Copilot (running tools, browser actions, Caido traffic), Langfuse-style traces of every
+  tool call, and PoCs with the OODA path that led to them and a recorded terminal replay
+  (`.cast` / `.md`). Links to the Hermes Dashboard (`:9119`) and Webapp (`:9120`). Observer only.
+  Terminal client: `python3 docker/web/vulnerator_watch.py`. See **[`docs/web-gui.md`](docs/web-gui.md)**.
+- **browser-view** — a *visible* Chromium (Xvfb + x11vnc + noVNC) that `playwright-mcp` drives over
+  CDP, so the agent's browsing is shown live in the console's **Pantallas** tab (`:6080`).
+- **caido-director** — a visible Chromium on the pre-authenticated Caido UI, driven by a controller
+  that re-enacts the agent's `caido_*` actions (opens the Replay session, types the HTTPQL filter,
+  opens the packet…), shown live in **Pantallas** (`:6090`).
 
-No `api` or `ui` service: the agent talks directly to the MCPs. See
+No `api` service: the agent talks directly to the MCPs; the GUI only observes. See
 **[`docs/design.md`](docs/design.md)** for the full architecture and the curated Kali toolset.
 
 ## Quick Start
