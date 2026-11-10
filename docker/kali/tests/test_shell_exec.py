@@ -11,6 +11,7 @@ sustituye por un fake). Fijan que:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -18,8 +19,21 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import session_log  # noqa: E402
 import shell_exec  # noqa: E402
 import tool_streaming  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _staging(tmp_path, monkeypatch):
+    """Apunta la raíz del staging (log de auditoría) a un tmp dir por test.
+
+    Autouse: TODAS las llamadas a ``run_shell`` auditan en tmp, de forma determinista (sin
+    tocar ``/artifacts`` real). Los tests existentes no asertan sobre el log, pero así su
+    escritura de auditoría es inocua y reproducible.
+    """
+    monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
+    return tmp_path
 
 
 def _fake_runner(returncode=0, timed_out=False, cancelled=False, lines=None):
@@ -95,3 +109,103 @@ def test_run_shell_cancelled(monkeypatch):
     result = shell_exec.run_shell("sleep 999", "exec-sh-cancel")
     assert result["status"] == "cancelled"
     assert result["cancelled"] is True
+
+
+# --- Auditoría durable (session_log): salida COMPLETA, fail-open, execution_id ----------
+
+
+def _read_session_log(staging, engagement_id):
+    path = Path(staging) / engagement_id / session_log.SESSION_LOG_NAME
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
+
+
+def test_run_shell_includes_execution_id_in_result(monkeypatch):
+    runner, _ = _fake_runner(lines=[("stdout", "hi")])
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
+
+    result = shell_exec.run_shell("echo hi", "exec-id-1", engagement_id="eng-x")
+    assert result["execution_id"] == "exec-id-1"
+
+
+def test_run_shell_writes_audit_record_with_command_and_output(_staging, monkeypatch):
+    runner, _ = _fake_runner(returncode=0, lines=[("stdout", "uid=0(root)")])
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
+
+    shell_exec.run_shell("id", "exec-audit-1", engagement_id="eng-test", tool_label="kali_run")
+
+    records = _read_session_log(_staging, "eng-test")
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["execution_id"] == "exec-audit-1"
+    assert rec["engagement_id"] == "eng-test"
+    assert rec["tool"] == "kali_run"
+    assert rec["command"] == "id"
+    assert rec["status"] == "done"
+    assert rec["returncode"] == 0
+    assert "uid=0(root)" in rec["output"]
+    assert rec["ts_start"].endswith("Z")
+    assert rec["ts_end"].endswith("Z")
+
+
+def test_audit_captures_full_output_beyond_ring_cap(_staging, monkeypatch):
+    # El fake vuelca MÁS líneas que el tope del ring: el ring (lo que ve el LLM) se capa,
+    # pero el registro de auditoría debe tener la salida ÍNTEGRA.
+    total = tool_streaming.RING_MAXLEN + 50
+    lines = [("stdout", f"line-{i}") for i in range(total)]
+    runner, _ = _fake_runner(returncode=0, lines=lines)
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
+
+    result = shell_exec.run_shell("big", "exec-big-1", engagement_id="eng-big")
+
+    # Lo que ve el LLM (ring) está capado.
+    assert result["output"].count("\n") + 1 == tool_streaming.RING_MAXLEN
+
+    # El registro de auditoría tiene TODAS las líneas y marca el truncado.
+    rec = _read_session_log(_staging, "eng-big")[0]
+    assert rec["total_lines"] == total
+    assert rec["returned_lines"] == tool_streaming.RING_MAXLEN
+    assert rec["truncated"] is True
+    assert "[stdout] line-0" in rec["output"]
+    assert f"[stdout] line-{total - 1}" in rec["output"]
+
+
+def test_empty_engagement_id_falls_back_to_unscoped(_staging, monkeypatch):
+    runner, _ = _fake_runner(lines=[("stdout", "x")])
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
+
+    shell_exec.run_shell("echo x", "exec-unscoped-1")  # sin engagement_id
+
+    rec = _read_session_log(_staging, session_log.DEFAULT_ENGAGEMENT)[0]
+    assert rec["execution_id"] == "exec-unscoped-1"
+    assert rec["engagement_id"] == session_log.DEFAULT_ENGAGEMENT
+
+
+def test_audit_failure_is_fail_open_does_not_break_command(monkeypatch):
+    # Si la escritura de auditoría revienta, el comando IGUAL devuelve su resultado normal.
+    runner, _ = _fake_runner(returncode=0, lines=[("stdout", "ok")])
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("disk full / whatever")
+
+    monkeypatch.setattr(shell_exec.session_log, "record", _boom)
+
+    result = shell_exec.run_shell("echo ok", "exec-failopen-1", engagement_id="eng-y")
+    assert result["status"] == "done"
+    assert result["returncode"] == 0
+    assert "ok" in result["output"]
+    assert result["execution_id"] == "exec-failopen-1"
+
+
+def test_invalid_command_not_audited_but_returns_execution_id(_staging, monkeypatch):
+    # Comando inválido: fail-closed, no se ejecuta ni se audita, pero devuelve execution_id.
+    def _should_not_run(*args, **kwargs):
+        raise AssertionError("no debe ejecutarse")
+
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", _should_not_run)
+    result = shell_exec.run_shell("", "exec-invalid-1", engagement_id="eng-z")
+    assert result["status"] == "failed"
+    assert result["execution_id"] == "exec-invalid-1"
+    # No se creó ningún log para ese engagement (no hubo ejecución que auditar).
+    assert not (Path(_staging) / "eng-z" / session_log.SESSION_LOG_NAME).exists()

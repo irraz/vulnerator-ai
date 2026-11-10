@@ -742,7 +742,13 @@ def kali_exec(
     effective_timeout = timeout if timeout and timeout > 0 else shell_exec.DEFAULT_TIMEOUT
     tool_streaming.start_background(
         execution_id,
-        lambda: shell_exec.run_shell(command, execution_id, effective_timeout),
+        lambda: shell_exec.run_shell(
+            command,
+            execution_id,
+            effective_timeout,
+            engagement_id=engagement_id,
+            tool_label=KALI_EXEC_TOOL_NAME,
+        ),
     )
     return {"execution_id": execution_id, "status": "started"}
 
@@ -790,20 +796,34 @@ def kali_run(
             usa ``_scope-violations``).
 
     Returns:
-        El dict TERMINAL del runner en la misma llamada:
-        {'status':'done','returncode':int,'output':<stdout+stderr verbatim>} si terminó;
-        {'status':'failed','timed_out':True,...} en timeout;
-        {'status':'cancelled',...} si se canceló;
-        {'status':'failed','returncode':-1,'error':...} si ``command`` es inválido;
+        El dict TERMINAL del runner en la misma llamada, SIEMPRE con ``execution_id`` (clave
+        para cruzar con el transcript de Hermes y con el log de auditoría por engagement):
+        {'status':'done','returncode':int,'output':<stdout+stderr del ring, acotado>,
+         'execution_id':str} si terminó;
+        {'status':'failed','timed_out':True,...,'execution_id':str} en timeout;
+        {'status':'cancelled',...,'execution_id':str} si se canceló;
+        {'status':'failed','returncode':-1,'error':...,'execution_id':str} si ``command`` es
+        inválido;
         {'status':'failed','scope_violation':True,'error':'SCOPE_VIOLATION: ...'} si el
-        scope-guard está activo y bloquea (sin ejecutar).
+        scope-guard está activo y bloquea (sin ejecutar ni auditar).
+
+        AUDITORÍA: la salida COMPLETA (sin el tope del ring) se persiste verbatim en
+        ``<engagement_id>/session.jsonl`` (``session_log``), junto al comando exacto,
+        returncode y timestamps. Es FAIL-OPEN: nunca afecta a este retorno. ``engagement_id``
+        es advisory; sin él el registro cae al bucket ``_unscoped``.
     """
     scope_error = _scope_gate(command, targets, engagement_id)
     if scope_error is not None:
         return scope_error
     execution_id = uuid.uuid4().hex
     effective_timeout = timeout if timeout and timeout > 0 else shell_exec.DEFAULT_TIMEOUT
-    return shell_exec.run_shell(command, execution_id, effective_timeout)
+    return shell_exec.run_shell(
+        command,
+        execution_id,
+        effective_timeout,
+        engagement_id=engagement_id,
+        tool_label=KALI_RUN_TOOL_NAME,
+    )
 
 
 @mcp.tool(name=RECORD_FINDING_TOOL_NAME)

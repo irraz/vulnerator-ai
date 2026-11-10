@@ -33,23 +33,27 @@ def test_tools_por_introspeccion_sincrona():
 
 def test_lista_estatica_de_15_nombres_eliminada():
     source = _source()
-    # The old static list enumerated these constants as elements of `tools`
-    # (with a trailing comma). That form must no longer exist anywhere in the server.
+    # The old static list enumerated these constants as STANDALONE list elements: a line
+    # whose only content is `<CONST>,`. That form must no longer exist anywhere.
+    # NOTE: this is checked against WHOLE stripped lines, not as a bare substring, so
+    # legitimate uses of the constant as a kwarg (e.g. `tool_label=KALI_EXEC_TOOL_NAME,`
+    # when wiring run_shell) do NOT false-positive — only the bare list-element form fails.
+    stripped_lines = {line.strip() for line in source.splitlines()}
     for const in (
-        "START_COLLECTION_TOOL_NAME,",
-        "SCAN_STATUS_TOOL_NAME,",
-        "READ_LOGS_TOOL_NAME,",
-        "CANCEL_SCAN_TOOL_NAME,",
-        "IAM_ENUM_TOOL_NAME,",
-        "IAM_SIMULATE_TOOL_NAME,",
-        "KALI_EXEC_TOOL_NAME,",
-        "KALI_RUN_TOOL_NAME,",
-        "RECORD_FINDING_TOOL_NAME,",
-        "READ_FINDINGS_STORE_TOOL_NAME,",
-        "DNS_RECON_TOOL_NAME,",
-        "WEBTECH_SCAN_TOOL_NAME,",
+        "START_COLLECTION_TOOL_NAME",
+        "SCAN_STATUS_TOOL_NAME",
+        "READ_LOGS_TOOL_NAME",
+        "CANCEL_SCAN_TOOL_NAME",
+        "IAM_ENUM_TOOL_NAME",
+        "IAM_SIMULATE_TOOL_NAME",
+        "KALI_EXEC_TOOL_NAME",
+        "KALI_RUN_TOOL_NAME",
+        "RECORD_FINDING_TOOL_NAME",
+        "READ_FINDINGS_STORE_TOOL_NAME",
+        "DNS_RECON_TOOL_NAME",
+        "WEBTECH_SCAN_TOOL_NAME",
     ):
-        assert const not in source, f"la lista estática aún referencia {const!r}"
+        assert f"{const}," not in stripped_lines, f"la lista estática aún referencia {const!r}"
     # The textual marker of the old inline list (`"server_info",` as an element) neither.
     assert '"server_info",' not in source
 

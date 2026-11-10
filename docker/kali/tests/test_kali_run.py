@@ -140,3 +140,40 @@ def test_server_text_wires_scope_guard_into_runners():
     # (6) La violación se loguea en el store de findings (evidencia auditable).
     assert 'title": "SCOPE_VIOLATION"' in source or '"SCOPE_VIOLATION"' in source
     assert "finding_store.append" in source
+
+
+@pytest.fixture(autouse=True)
+def _staging_kali_run(tmp_path, monkeypatch):
+    """Redirige el log de auditoría a un tmp dir (run_shell audita; no debe tocar /artifacts)."""
+    monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
+    return tmp_path
+
+
+def test_run_shell_returns_execution_id_for_kali_run_semantics(monkeypatch):
+    # kali_run devuelve TAL CUAL el dict de run_shell, que ahora SIEMPRE incluye execution_id
+    # (clave para cruzar con el transcript de Hermes y el log de auditoría por engagement).
+    runner = _fake_runner(returncode=0, lines=[("stdout", "x")])
+    monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
+
+    eid = uuid.uuid4().hex
+    result = shell_exec.run_shell("echo x", eid, 600, engagement_id="eng-1", tool_label="kali_run")
+    assert result["execution_id"] == eid
+
+
+def test_server_text_wires_audit_into_runners():
+    # Se valida por TEXTO (NO import: mcp<2 no está en el venv) que ambos runners pasan
+    # engagement_id + la etiqueta de tool a run_shell (auditoría durable por engagement).
+    source = _SERVER_PATH.read_text(encoding="utf-8")
+
+    # (1) Ambos runners propagan engagement_id al runner compartido (>=2: kali_run y kali_exec).
+    assert source.count("engagement_id=engagement_id") >= 2
+
+    # (2) Cada runner etiqueta su ejecución con su propio nombre de tool.
+    assert "tool_label=KALI_RUN_TOOL_NAME" in source
+    assert "tool_label=KALI_EXEC_TOOL_NAME" in source
+
+    # (3) kali_run devuelve directamente el resultado de run_shell (no lo re-envuelve ni le
+    # quita el execution_id): la llamada real a run_shell está precedida por `return`.
+    run_start = source.index("def kali_run")
+    run_body = source[run_start : source.index("def record_finding")]
+    assert "return shell_exec.run_shell(" in run_body
