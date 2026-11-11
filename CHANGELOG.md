@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-11 — "fucking UI"
+
+The operator console release. Vulnerator-AI gains a live web GUI for the OODA loop
+(`vulnerator-web`), two live-screen containers (`browser-view`, `caido-director`), an
+engagement reporting layer with AI-rated severity, and a Caido execution surface in the
+`web-pentest` skill. The entire web stack and its docs are English-only.
+
+### Added
+
+- **Opt-in operator console and live screens (`web` profile)** — the web GUI (`vulnerator-web`, `:9100`) and the two live-screen containers (`browser-view`, `caido-director`) run **only** under the `web` profile (`docker compose --profile web up`). The default stack stays the minimal agent/API path, and `playwright-mcp` stays a self-contained **headless** browser unless the `docker-compose.web.yml` overlay is used, which points it at the visible `browser-view` over CDP so the agent's browsing can be watched live.
+- **PoC severity filter and badges in the operator console** — the PoC view (`#pocs`) gains a severity filter bar (All / Critical / High / Medium / Low / Info) with live per-level counts, a per-finding severity badge, and worst-first ordering, so findings can be triaged at a glance. `docker/web/static/{app.js,index.html,style.css}`.
+- **AI-assigned finding severity (single source of truth)** — severity is resolved **once in the backend** (`report.severity_for`): a title keyword/CVSS regex by default, overridden by the agent's own rating when present (persisted to `/artifacts/<engagement>/severities.json`), which now **also carries its own CVSS score**. The same resolved verdict drives the report, the badges, the counts and the filter (AI-rated badges show a `·AI` marker and the rationale in their tooltip); the console only paints it, with no client-side recomputation. New `GET /api/severities`.
+- **Engagement report in MD / TXT / HTML with full verbatim** — new `docker/web/report.py` builds the formal report from the recorded PoCs: executive summary + severity table + per-finding detail with the **exact command, the evidence output and the raw verbatim tool output** (everything needed to reproduce each PoC), plus the agent's narrative when present. Served by `GET /api/report.{md,txt,html}` (`?dl=1` forces download); the console adds a "Report" bar — **View** embeds the HTML report inside the PoC detail pane, **MD/TXT** download — and a **Generate report** button (see below). Print to PDF from the HTML view if a PDF is needed.
+- **Report trigger from the console (opt-out)** — `POST /api/report` instructs Hermes to assign severities and write the report **from the already-recorded findings only** (no new scanning/enumeration), continuing the session for context and `chmod 644`-ing the artifacts so the GUI process can serve them. On by default; `VULNERATOR_WEB_ALLOW_TRIGGER=0` hides the button and makes the route answer `403`, leaving the console in strict observer mode.
+- **Credential-free console mode** — `VULNERATOR_WEB_AUTH=0` disables the GUI Basic auth explicitly (the default stays on and fail-closed). Intended for a controlled single-user machine.
+
+### Changed
+
+- **`vulnerator-web` is observer-by-default with a single opt-out action** — its only action over Hermes is the report trigger (`POST /api/report`, gated by `VULNERATOR_WEB_ALLOW_TRIGGER`); otherwise it only reads Hermes' session API and Caido's history. It mounts the shared `kali-artifacts` volume **read-only** (`/artifacts`) to serve the report artifacts (`severities.json`, `pentest-report.md/.html`). New env: `VULNERATOR_WEB_AUTH`, `VULNERATOR_WEB_ALLOW_TRIGGER`, `VULNERATOR_WEB_ENGAGEMENT`.
+- **`VULNERATOR_WEB_CAIDO_FEED` is the master switch for Caido** — one flag governs both the live history feed (Copilot) and the pre-authenticated Caido UI proxy (Screens); `=0` disables all of it.
+- **`web-pentest` skill** — Caido (`caido_*`) is documented as one execution surface alongside `kali_run` and the browser, **not** a forced default over `curl`/`ffuf`.
+
 ## [1.8.0] - 2026-11-05
 
 ### Added

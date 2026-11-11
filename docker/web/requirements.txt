@@ -1,0 +1,25 @@
+# Dependency manifest for the vulnerator-web image (Vulnerator-AI's web GUI).
+# OBSERVER component: it reads Hermes' session API (:8642) and Caido's history and
+# serves an operator console. All the logic (event normalization, trace store,
+# PoC replay, OODA parser, watch CLI) is PURE STDLIB and is tested without these dependencies;
+# the entries below are only the HTTP layer.
+
+# starlette: the web layer's ASGI micro-framework (routing, StaticFiles, StreamingResponse for
+#   the live SSE). Starlette is chosen over FastAPI on purpose: no pydantic validation
+#   nor OpenAPI is needed, and the dependency surface stays minimal.
+#   Bounded to the 0.x line (<1) with the floor at the verified version (0.52.1).
+starlette>=0.52.1,<1
+
+# uvicorn: ASGI server (same range as docker/mcp/requirements.txt; verified 0.54.0).
+uvicorn>=0.54.0,<1
+
+# httpx: async client to :8642 (sessions + messages) and probing of Hermes' UIs.
+#   Same range as docker/mcp (verified 0.28.1).
+httpx>=0.28.1,<1
+
+# anyio: async base of Starlette/httpx (verified 4.16.0; same floor as docker/mcp).
+anyio>=4.15.1
+
+# websockets: lets Caido's UI proxy (caido_proxy.py) bridge the GraphQL-over-WS
+# subscriptions so the history updates LIVE. It also enables uvicorn's WS support.
+websockets>=13.0,<16

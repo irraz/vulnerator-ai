@@ -67,22 +67,22 @@ services:
       # guard even if the file says enabled:true (leave empty to honor the file).
       SCOPE_FILE: "${SCOPE_FILE:-/scope/scope.json}"
       SCOPE_ENFORCE: "${SCOPE_ENFORCE:-}"
-      # --- Caido (toolkit web: proxy + Replay + HTTPQL + scope + workflows) ---
-      # kali-mcp habla la API GraphQL de Caido para las tools caido_graphql/caido_request/
-      # caido_history (ver docs/caido.md). El servicio `caido` (abajo) vive en la MISMA red
-      # interna: se alcanza por DNS en http://caido:8080 (NO publicado al host). ZERO-TOUCH: el
-      # servicio arranca con --allow-guests y caido_client inicia sesión como invitado y elige/
-      # crea un proyecto solo, así que NO hace falta token. CAIDO_PAT/CAIDO_ACCESS_TOKEN son
-      # OPCIONALES (Caido sin --allow-guests, o externo); CAIDO_ALLOW_GUEST=0 fuerza exigirlos.
-      # Sin credenciales válidas las tools devuelven `unauthenticated` (no se finge).
+      # --- Caido (web toolkit: proxy + Replay + HTTPQL + scope + workflows) ---
+      # kali-mcp speaks Caido's GraphQL API for the caido_graphql/caido_request/
+      # caido_history tools (see docs/caido.md). The `caido` service (below) lives on the SAME
+      # internal network: it is reached by DNS at http://caido:8080 (NOT published to the host).
+      # ZERO-TOUCH: the service starts with --allow-guests and caido_client logs in as a guest and
+      # picks/creates a project on its own, so NO token is needed. CAIDO_PAT/CAIDO_ACCESS_TOKEN are
+      # OPTIONAL (Caido without --allow-guests, or external); CAIDO_ALLOW_GUEST=0 forces requiring them.
+      # Without valid credentials the tools return `unauthenticated` (nothing is faked).
       CAIDO_URL: "${CAIDO_URL:-http://caido:8080}"
       CAIDO_PAT: "${CAIDO_PAT:-}"
       CAIDO_ACCESS_TOKEN: "${CAIDO_ACCESS_TOKEN:-}"
       CAIDO_ALLOW_GUEST: "${CAIDO_ALLOW_GUEST:-1}"
-      # Captura por proxy OPT-IN: a "1" el arranque de kali-mcp baja la CA de Caido y enruta el
-      # tráfico HTTP de kali_run (curl/nuclei/ffuf/sqlmap/wget) por el proxy de Caido, para que
-      # quede en su historial; HTTPS incluido al confiar en la CA. Vacío/0 = off (comportamiento
-      # de siempre). Sólo clientes que respetan HTTP(S)_PROXY; nmap/masscan (socket crudo) no.
+      # OPT-IN proxy capture: at "1" the kali-mcp startup fetches Caido's CA and routes kali_run's
+      # HTTP traffic (curl/nuclei/ffuf/sqlmap/wget) through Caido's proxy, so it is kept in its
+      # history; HTTPS included by trusting the CA. Empty/0 = off (the usual behavior). Only
+      # clients that honor HTTP(S)_PROXY; nmap/masscan (raw socket) are not captured.
       CAIDO_PROXY_CAPTURE: "${CAIDO_PROXY_CAPTURE:-}"
       # Tuning (empty = built-in default): per-HTTP-call timeout in seconds (60), cap in bytes
       # of the response body returned by caido_request (20000), and the name of the project
@@ -118,8 +118,12 @@ services:
     restart: unless-stopped
 
   ooda-agent:
-    # Official registry image (NOT built from this repo).
-    image: nousresearch/hermes-agent
+    # Official registry image (NOT built from this repo). PINNED to v0.23.0 (the first release
+    # with the Webapp, port 9120, and the session/run APIs vulnerator-web reads). The slim tag
+    # already ships the prebuilt Webapp; the `-desktop` variant only adds the VNC "Bot Screen"
+    # this stack does not use. Override with HERMES_IMAGE in .env (e.g. to roll back:
+    # HERMES_IMAGE=nousresearch/hermes-agent:v0.22.7), then `docker compose up -d ooda-agent`.
+    image: "${HERMES_IMAGE:-nousresearch/hermes-agent:v0.23.0}"
     # Startup ("default profile" model): recreates the DEFAULT profile (/opt/data) by copying
     # the repo's declarative template (read-only bind-mount at /opt/profile-src),
     # injects the API server key and starts the gateway in the foreground. 'hermes gateway
@@ -213,7 +217,7 @@ services:
       # Hermes API server key — required (fail-closed): min 8 chars. TWO paths are
       # needed: the command writes it into platforms.api_server.key (to start the
       # API server) and API_SERVER_KEY validates it on every request (to authenticate the Bearer).
-      HERMES_API_SERVER_KEY: "${HERMES_API_SERVER_KEY:?Falta HERMES_API_SERVER_KEY - genera uno con 'openssl rand -hex 32' (min 8 chars) y ponlo en .env}"
+      HERMES_API_SERVER_KEY: "${HERMES_API_SERVER_KEY:?Missing HERMES_API_SERVER_KEY - generate one with 'openssl rand -hex 32' (min 8 chars) and put it in .env}"
       API_SERVER_KEY: "${HERMES_API_SERVER_KEY}"
       # API key for Hermes' LLM provider. Hermes reads the LLM key from THIS env var
       # (OPENROUTER_API_KEY), which is why HERMES_LLM_API_KEY is NOT declared. NO LONGER
@@ -264,7 +268,7 @@ services:
       - "${HERMES_DASHBOARD_HOST_PORT:-9119}:9119"
       # Webapp — the Desktop workspace in a browser (config.yaml `webapp.enabled: true`, host
       # 0.0.0.0, port 9120). Sign in with the dashboard account (admin / vulnerator). Requires
-      # Hermes >= 0.23 (the image is `latest`, which now resolves to 0.23.x). Configurable with
+      # Hermes >= 0.23 (the image is pinned to v0.23.0, see `image:` above). Configurable with
       # HERMES_WEBAPP_HOST_PORT in .env; default 9120. SECURITY: a signed-in Webapp user can run
       # commands as the account running the no-guardrails agent — keep this on a controlled host.
       - "${HERMES_WEBAPP_HOST_PORT:-9120}:9120"
@@ -292,8 +296,13 @@ services:
     # "everything goes through MCP" principle. The web part is NOT limited to kali_run: nmap/whatweb/nuclei/
     # ffuf/sqlmap go through the Kali (kali_run) and navigation/DOM/XSS go through this MCP.
     image: mcr.microsoft.com/playwright/mcp
-    # HTTP (streamable-http) on :8931, MCP endpoint at /mcp. --no-sandbox: Chromium runs
-    # as root in the container without userns. --headless: no display. Internal network only.
+    # HTTP (streamable-http) on :8931, MCP endpoint at /mcp. DEFAULT: self-contained HEADLESS
+    # Chromium (--headless/--no-sandbox/--isolated), internal network only — the agent/API path
+    # runs ALONE, with no screens and no dependency on any other container. --isolated gives each
+    # session its own ephemeral profile (no shared-profile lock "Browser is already in use" mid-run).
+    # To WATCH the agent browse live, enable the `web` profile and drive the visible browser over
+    # CDP instead: swap the --headless/--browser/chromium/--no-sandbox/--isolated flags for
+    # `--cdp-endpoint http://browser-view:9222` and add `depends_on: browser-view (service_healthy)`.
     entrypoint: ["node"]
     command:
       - /app/cli.js
@@ -301,23 +310,15 @@ services:
       - --browser
       - chromium
       - --no-sandbox
+      - --isolated
       - --port
       - "8931"
       - --host
       - "0.0.0.0"
-      # Playwright server anti-DNS-rebinding protection: by default it ONLY accepts the
-      # host it is bound to (localhost), so it rejects Hermes' connection with 403,
-      # which arrives with the Host header `playwright-mcp:8931` (the service's internal DNS name).
-      # That host is EXPLICITLY allowed (not `*`): it keeps the protection scoped to the
-      # internal docker network, from which ooda-agent connects.
+      # Anti-DNS-rebinding of the MCP server itself: only the internal DNS name is allowed as
+      # inbound Host, from which ooda-agent connects.
       - --allowed-hosts
       - "playwright-mcp:8931"
-      # IN-MEMORY browser profile (not persisted to disk). A persistent profile can ONLY
-      # be used by ONE instance at a time and LOCKS ("Browser is already in use ...") if
-      # an orphan Chrome process remains or there are concurrent calls; that left the
-      # mcp_playwright_* tools unusable mid-engagement. With --isolated each session starts its
-      # own ephemeral profile: no shared profile lock.
-      - --isolated
     init: true
     # HEALTHCHECK: the MCP endpoint responds on :8931 (a live process responds to the
     # HTTP handshake), so that ooda-agent can depend on it with condition: service_healthy.
@@ -358,12 +359,12 @@ services:
       # Upstream hop to Hermes by service DNS (internal docker network).
       HERMES_API_BASE_URL: "http://ooda-agent:8642"
       # Upstream PASS-THROUGH Bearer — fail-closed `:?` like the base ooda-agent.
-      HERMES_API_SERVER_KEY: "${HERMES_API_SERVER_KEY:?Falta HERMES_API_SERVER_KEY - genera uno con 'openssl rand -hex 32' (min 8 chars) y ponlo en .env}"
+      HERMES_API_SERVER_KEY: "${HERMES_API_SERVER_KEY:?Missing HERMES_API_SERVER_KEY - generate one with 'openssl rand -hex 32' (min 8 chars) and put it in .env}"
       # INBOUND token (clients -> vulnerator-mcp). REQUIRED, fail-closed `:?`: bringing the
       # default stack up without it aborts with a clear message (defense in depth: compose +
       # process). SEPARATE from HERMES_API_SERVER_KEY (gates a different edge). stdio mode does
       # NOT need it, but the default-up streamable-http service does.
-      VULNERATOR_MCP_INBOUND_TOKEN: "${VULNERATOR_MCP_INBOUND_TOKEN:?Falta VULNERATOR_MCP_INBOUND_TOKEN - genera uno con 'openssl rand -hex 32' y ponlo en .env (lo exige el servicio MCP streamable-http, que viene levantado por defecto)}"
+      VULNERATOR_MCP_INBOUND_TOKEN: "${VULNERATOR_MCP_INBOUND_TOKEN:?Missing VULNERATOR_MCP_INBOUND_TOKEN - generate one with 'openssl rand -hex 32' and put it in .env (required by the streamable-http MCP service, which comes up by default)}"
       VULNERATOR_MCP_TRANSPORT: "streamable-http"
       # Bind INSIDE the container (not a host publication).
       VULNERATOR_MCP_HOST: "0.0.0.0"
@@ -392,6 +393,180 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  vulnerator-web:
+    # 5th container (DEFAULT): Vulnerator's own web GUI (http://localhost:9100) — the operator
+    # console of the OODA loop. OBSERVER ONLY: it reads Hermes' session API (:8642, every
+    # session — API runs, TUI, Webapp and delegated subagents) and Caido's history, and shows:
+    #   - Terminal: the live OODA loop (status lines, reasoning, every tool call + its output);
+    #   - Copilot: what the agent is doing right now (running tools, browser actions, the HTTP
+    #     traffic it touches through Caido, findings);
+    #   - Traces: Langfuse-style waterfall of tool calls (args, duration, status, OODA phase),
+    #     kept in its own SQLite store (named volume, no external service);
+    #   - PoC: for every record_finding, the OODA path that led to it and a terminal REPLAY of
+    #     the reproduction, linked to the real execution. Confirmed PoCs are recorded to
+    #     /data/pocs as asciinema .cast + Markdown automatically;
+    #   - Hermes: links/embeds of the Hermes Dashboard (:9119, Kanban) and Webapp (:9120).
+    # It never triggers, steers or stops a run. Terminal client of the same stream:
+    #   docker compose exec vulnerator-web python3 vulnerator_watch.py
+    #
+    # SECURITY: HTTP Basic auth on every route but /healthz, fail-closed (no password -> the
+    # process refuses to start). It REUSES the Hermes dashboard account by default (admin /
+    # vulnerator) — change HERMES_DASHBOARD_USER/PASSWORD (or VULNERATOR_WEB_USER/PASSWORD) in
+    # .env. The GUI shows raw tool output and evidence of the engagement: publish :9100 only on a
+    # controlled machine (prefer an SSH tunnel / trusted VPN).
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      platforms:
+        - linux/arm64
+        - linux/amd64
+    image: vulnerator-ai-web:dev
+    # OPT-IN: only starts with the `web` profile (`docker compose --profile web up -d`).
+    # The default stack (no profile) is the minimal agent/API path — no console, no screens.
+    profiles: ["web"]
+    environment:
+      HERMES_API_BASE_URL: "http://ooda-agent:8642"
+      # Read-only use of Hermes' session API; same Bearer as the rest of the stack (fail-closed).
+      HERMES_API_SERVER_KEY: "${HERMES_API_SERVER_KEY:?Missing HERMES_API_SERVER_KEY - generate one with 'openssl rand -hex 32' (min 8 chars) and put it in .env}"
+      VULNERATOR_WEB_USER: "${VULNERATOR_WEB_USER:-${HERMES_DASHBOARD_USER:-admin}}"
+      VULNERATOR_WEB_PASSWORD: "${VULNERATOR_WEB_PASSWORD:-${HERMES_DASHBOARD_PASSWORD:-vulnerator}}"
+      # Credential-free access (official): 0 disables the GUI's Basic auth. Publish :9100 only
+      # on a controlled machine if you disable it.
+      VULNERATOR_WEB_AUTH: "${VULNERATOR_WEB_AUTH:-1}"
+      # Report trigger (POST /api/report): 1 (default) keeps the "Generate report" button
+      # active; 0 leaves the console in OBSERVER-ONLY mode (button hidden, route 403).
+      VULNERATOR_WEB_ALLOW_TRIGGER: "${VULNERATOR_WEB_ALLOW_TRIGGER:-1}"
+      # Report: engagement / client / operator. EMPTY by default (no real data in the
+      # repo); the GUI derives the engagement from the findings' engagement_id, and client/operator
+      # only appear if you define them in your .env (git-ignored).
+      VULNERATOR_WEB_ENGAGEMENT: "${VULNERATOR_WEB_ENGAGEMENT:-}"
+      VULNERATOR_WEB_CLIENT: "${VULNERATOR_WEB_CLIENT:-}"
+      VULNERATOR_WEB_OPERATOR: "${VULNERATOR_WEB_OPERATOR:-}"
+      # Caido master switch: the history feed (Copilot) + the pre-authenticated UI proxy
+      # (Screens). Empty/1 => on; 0 turns it ALL off.
+      VULNERATOR_WEB_CAIDO_FEED: "${VULNERATOR_WEB_CAIDO_FEED:-1}"
+      CAIDO_URL: "${CAIDO_URL:-http://caido:8080}"
+      CAIDO_PROJECT: "${CAIDO_PROJECT:-}"
+      # Session poll interval (seconds). Hermes persists each tool call BEFORE running it and
+      # its result right after, so this is the GUI's latency.
+      VULNERATOR_WEB_POLL_SECONDS: "${VULNERATOR_WEB_POLL_SECONDS:-1.5}"
+      # Host ports of the Hermes UIs, so the GUI builds links the BROWSER can open
+      # (it reuses the hostname you used to reach :9100). Internal URLs are only for the
+      # "online / unavailable" probe.
+      HERMES_DASHBOARD_PUBLIC_PORT: "${HERMES_DASHBOARD_HOST_PORT:-9119}"
+      HERMES_WEBAPP_PUBLIC_PORT: "${HERMES_WEBAPP_HOST_PORT:-9120}"
+      HERMES_DASHBOARD_INTERNAL_URL: "http://ooda-agent:9119/"
+      HERMES_WEBAPP_INTERNAL_URL: "http://ooda-agent:9120/"
+      # Live screen: Caido's web UI (the port the caido service publishes above).
+      CAIDO_UI_PUBLIC_PORT: "${CAIDO_HOST_PORT:-7000}"
+      CAIDO_UI_INTERNAL_URL: "http://caido:8080/"
+      # INTERNAL port where this process serves the pre-authenticated Caido UI (published above).
+      CAIDO_PROXY_PORT: "7001"
+      BROWSER_VIEW_PUBLIC_PORT: "${BROWSER_VIEW_HOST_PORT:-6080}"
+      BROWSER_VIEW_INTERNAL_URL: "http://browser-view:6080/"
+      CAIDO_DIRECTOR_PUBLIC_PORT: "${CAIDO_DIRECTOR_HOST_PORT:-6090}"
+      CAIDO_DIRECTOR_INTERNAL_URL: "http://caido-director:6080/"
+    ports:
+      - "${VULNERATOR_WEB_HOST_PORT:-9100}:9100"
+      # Pre-authenticated (guest) Caido UI served by vulnerator-web -> host CAIDO_HOST_PORT.
+      - "${CAIDO_HOST_PORT:-7000}:7001"
+    volumes:
+      # Trace store (SQLite) + recorded PoCs. NAMED so history survives recreates.
+      - vulnerator-web-data:/data
+      # Engagement artifacts (read-only): the GUI serves the report (severities.json,
+      # pentest-report.md/.html) that the agent writes to the shared kali-artifacts volume.
+      - kali-artifacts:/artifacts:ro
+    depends_on:
+      # service_started (implicit): ooda-agent has no healthcheck; the GUI shows "Hermes
+      # unreachable" until the API answers and keeps polling, so start order is not critical.
+      - ooda-agent
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys,os,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('VULNERATOR_WEB_PORT','9100'), timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  browser-view:
+    # VISIBLE browser for demos: on-screen Chromium (Xvfb) + x11vnc + noVNC. playwright-mcp
+    # drives it over CDP (via an internal proxy that works around Chrome's anti-rebinding
+    # protection), and the operator watches it over noVNC embedded in vulnerator-web ("Screens"
+    # tab). Observer: the agent browses here just as before; only now it is VISIBLE.
+    #
+    # SECURITY: the browser's debugging port (CDP) is NOT published to the host or to anyone except
+    # playwright-mcp over the internal network. Only noVNC (:6080) goes to the host, opt-in and documented below.
+    # By default noVNC is READ-ONLY (BROWSER_VIEW_VIEWONLY=1): the audience watches, doesn't touch.
+    build:
+      context: .
+      dockerfile: docker/browser-view/Dockerfile
+      platforms:
+        - linux/arm64
+        - linux/amd64
+    image: vulnerator-ai-browser-view:dev
+    # OPT-IN: visible-browser screen, only with the `web` profile. Not part of the default stack.
+    profiles: ["web"]
+    environment:
+      BROWSER_VIEW_GEOMETRY: "${BROWSER_VIEW_GEOMETRY:-1920x1080x24}"
+      BROWSER_VIEW_VIEWONLY: "${BROWSER_VIEW_VIEWONLY:-1}"
+      # OPT-IN: routes the browser's traffic through a proxy to watch it live in Caido
+      # (e.g. http://caido:8080). Empty = no proxy. HTTPS through a proxy requires the proxy's CA.
+      BROWSER_VIEW_PROXY: "${BROWSER_VIEW_PROXY:-}"
+      # The target watcher (browser_reset.py) polls the console with these credentials
+      # to know when a new engagement starts and reset the browser to the welcome page.
+      GUI_BASE: "${GUI_BASE:-http://vulnerator-web:9100}"
+      VULNERATOR_WEB_USER: "${VULNERATOR_WEB_USER:-${HERMES_DASHBOARD_USER:-admin}}"
+      VULNERATOR_WEB_PASSWORD: "${VULNERATOR_WEB_PASSWORD:-${HERMES_DASHBOARD_PASSWORD:-vulnerator}}"
+    # On-screen Chromium needs generous shared memory (otherwise it hangs when rendering).
+    shm_size: "512m"
+    ports:
+      # noVNC (web) published to the host to embed/watch it. Comment out this block to not publish it
+      # (the tab will then only offer "open via SSH tunnel"). CDP (9222/9223) is NEVER published.
+      - "${BROWSER_VIEW_HOST_PORT:-6080}:6080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:6080/', timeout=3); urllib.request.urlopen('http://127.0.0.1:9222/json/version', timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  caido-director:
+    # Re-stages in the Caido UI the actions Hermes performs via the API (caido_* tools): it opens
+    # the created Replay session, types the HTTPQL filter, opens the packet from the history, etc.,
+    # to SEE what it does with Caido as if it were operated by hand. On-screen Chromium (Xvfb) +
+    # noVNC driven by a controller (Playwright/CDP) that follows vulnerator-web's stream.
+    # Observer: it only mirrors; it does not launch or direct the agent. Only noVNC (:6090) goes to the host.
+    build:
+      context: .
+      dockerfile: docker/caido-director/Dockerfile
+      platforms:
+        - linux/arm64
+        - linux/amd64
+    image: vulnerator-ai-caido-director:dev
+    # OPT-IN: Caido-UI mirror screen, only with the `web` profile. Not part of the default stack.
+    profiles: ["web"]
+    environment:
+      GUI_BASE: "${GUI_BASE:-http://vulnerator-web:9100}"
+      # Pre-authenticated Caido UI served by vulnerator-web (proxy with a guest token).
+      CAIDO_UI_URL: "http://vulnerator-web:7001/"
+      VULNERATOR_WEB_USER: "${VULNERATOR_WEB_USER:-${HERMES_DASHBOARD_USER:-admin}}"
+      VULNERATOR_WEB_PASSWORD: "${VULNERATOR_WEB_PASSWORD:-${HERMES_DASHBOARD_PASSWORD:-vulnerator}}"
+      # Choreography pace (seconds between micro-actions). Higher = slower and more legible.
+      CAIDO_DIRECTOR_STEP: "${CAIDO_DIRECTOR_STEP:-1.4}"
+    shm_size: "512m"
+    ports:
+      - "${CAIDO_DIRECTOR_HOST_PORT:-6090}:6080"
+    depends_on:
+      - vulnerator-web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:6080/', timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
 
   caido-init:
     # One-shot: make the caido-data named volume writable by Caido's non-root user.
@@ -454,6 +629,14 @@ services:
       # protection scoped to the internal docker network, from which kali connects.
       - --ui-domain
       - caido
+      # Domains the operator's BROWSER uses to reach the port published below (the UI
+      # embedded in vulnerator-web). Without them Caido rejects the request due to anti-DNS-rebinding
+      # ("Domain not allowed"). Add here the extra host you serve the console on if it isn't
+      # localhost (e.g. the VM's IP).
+      - --ui-domain
+      - localhost
+      - --ui-domain
+      - 127.0.0.1
       - --listen
       - 0.0.0.0:8080
     depends_on:
@@ -465,11 +648,9 @@ services:
       # container are lost on each `up`. NAMED volume (not a bind-mount) by the same WAL/
       # virtiofs discipline the rest of the stack follows.
       - caido-data:/home/caido/.local/share/caido
-    # To reach the GUI from the host (optional; the tools do NOT need it), tunnel over SSH to
-    # this service, or UNCOMMENT on a CONTROLLED machine (exposes the proxy/GUI to the host;
-    # see the --allow-guests note above before doing so):
-    # ports:
-    #   - "${CAIDO_HOST_PORT:-7000}:8080"
+    # The Caido UI is NOT published directly: vulnerator-web serves it pre-authenticated as a guest
+    # (auto-login, no onboarding) on its own port, and that is the one that gets published (CAIDO_HOST_PORT).
+    # This way the "Screens" tab opens Caido already signed in with the engagement's traffic.
     healthcheck:
       # The image ships neither curl nor nc (checked), but it has bash: probe with a raw TCP
       # connect through /dev/tcp.
@@ -490,3 +671,5 @@ volumes:
   kali-artifacts:
   # Caido projects/sessions/token — persisted across recreates (see the caido service).
   caido-data:
+  # vulnerator-web trace store (SQLite) + recorded PoCs (.cast/.md) — persisted across recreates.
+  vulnerator-web-data:

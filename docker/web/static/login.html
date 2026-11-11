@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Vulnerator Console</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/login.js" defer></script>
+</head>
+<body class="login-body">
+  <main class="login">
+    <img class="login__logo" src="/static/logo.png" alt="Vulnerator AI — unholy pentest">
+    <form class="login__card" method="post" action="/login">
+      <h1 class="login__title login__sub">OODA console</h1>
+      <p class="login__msg" id="login-msg" hidden></p>
+      <label class="field">Username<input id="user" name="user" autocomplete="username" required autofocus></label>
+      <label class="field">Password<input id="password" name="password" type="password" autocomplete="current-password" required></label>
+      <input type="hidden" name="next" id="next" value="/">
+      <button class="btn login__btn" type="submit">Sign in</button>
+      <p class="login__note">The same account as the Hermes dashboard.</p>
+    </form>
+  </main>
+</body>
+</html>

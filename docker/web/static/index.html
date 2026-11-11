@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Vulnerator Console</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" aria-label="Vulnerator-AI">
+      <img class="brand__logo" src="/static/logo-header.png" alt="Vulnerator-AI — unholy pentest">
+      <span class="brand__sub">OODA console</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button class="tab" role="tab" id="tab-terminal" data-view="terminal" aria-selected="true">Terminal</button>
+      <button class="tab" role="tab" id="tab-copilot" data-view="copilot" aria-selected="false">Copilot</button>
+      <button class="tab" role="tab" id="tab-traces" data-view="traces" aria-selected="false">Traces</button>
+      <button class="tab" role="tab" id="tab-pocs" data-view="pocs" aria-selected="false">PoC <span class="tab__count" id="poc-count" hidden></span></button>
+      <button class="tab" role="tab" id="tab-screens" data-view="screens" aria-selected="false">Screens</button>
+      <button class="tab" role="tab" id="tab-hermes" data-view="hermes" aria-selected="false">Hermes</button>
+    </nav>
+    <div class="health" aria-live="polite">
+      <span class="pill" id="pill-hermes" title="Hermes API"><i></i>HERMES <b>…</b></span>
+      <span class="pill" id="pill-ingest" title="Session polling"><i></i>INGEST</span>
+      <span class="pill" id="pill-caido" title="Caido web traffic feed"><i></i>CAIDO</span>
+      <span class="pill pill--live" id="pill-live" title="The agent is running something right now"><i></i>LIVE</span>
+      <a class="logout" href="/logout" title="Log out">Log out</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sessions" aria-label="Sessions">
+      <div class="sessions__head">
+        <h2>Sessions</h2>
+        <label class="switch" title="Jump to the session with the most recent activity">
+          <input type="checkbox" id="follow-active" checked>
+          <span>Follow active</span>
+        </label>
+      </div>
+      <select id="session-select" class="sessions__select" aria-label="Session"></select>
+      <ol class="sessions__list" id="session-list"></ol>
+      <p class="sessions__empty" id="sessions-empty" hidden>
+        No sessions yet. Launch an engagement from Hermes (TUI, Webapp, API or the
+        <code>vulnerator</code> MCP) and it will appear here as soon as it runs its first step.
+      </p>
+    </aside>
+
+    <main class="main">
+      <section class="strip" id="session-strip" hidden>
+        <div class="strip__title">
+          <span class="phase-badge" id="strip-phase" data-phase="">—</span>
+          <h1 id="strip-title">—</h1>
+        </div>
+        <dl class="strip__meta" id="strip-meta"></dl>
+      </section>
+
+      <!-- ── Terminal ─────────────────────────────────────────────── -->
+      <section class="view" id="view-terminal" role="tabpanel" aria-labelledby="tab-terminal">
+        <div class="toolbar">
+          <label class="chk"><input type="checkbox" id="t-follow" checked> Autoscroll</label>
+          <label class="chk"><input type="checkbox" id="t-reasoning" checked> Reasoning</label>
+          <label class="chk"><input type="checkbox" id="t-output" checked> Output</label>
+          <label class="chk"><input type="checkbox" id="t-chat" checked> Comments</label>
+          <span class="toolbar__spacer"></span>
+          <div class="tsearch" role="search">
+            <input type="search" id="t-search" class="tsearch__q" placeholder="Search the session…  ( / )" aria-label="Search the terminal" autocomplete="off" spellcheck="false">
+            <select id="t-tool" class="tsearch__tool" aria-label="Filter by tool"><option value="">All tools</option></select>
+          </div>
+          <span class="toolbar__note" id="t-count"></span>
+        </div>
+        <div class="term-wrap">
+          <div class="term" id="term" tabindex="0" aria-label="Live agent output"></div>
+          <button class="term__live" id="t-live" type="button" hidden>↓ live</button>
+        </div>
+      </section>
+
+      <!-- ── Copilot ──────────────────────────────────────────────── -->
+      <section class="view" id="view-copilot" role="tabpanel" aria-labelledby="tab-copilot" hidden>
+        <div class="now" id="now">
+          <div class="now__phase">
+            <span class="now__label">Right now</span>
+            <div class="now__line"><span class="phase-badge phase-badge--lg" id="now-phase" data-phase="">—</span><span class="now__step" id="now-step"></span></div>
+            <p class="now__desc" id="now-desc">Waiting for agent activity…</p>
+          </div>
+          <div class="now__running">
+            <span class="now__label">Running</span>
+            <ul class="running" id="now-running"></ul>
+          </div>
+          <div class="now__thought">
+            <span class="now__label">Latest reasoning</span>
+            <p id="now-thought" class="muted">—</p>
+          </div>
+        </div>
+        <div class="copilot-grid">
+          <article class="card">
+            <header class="card__head"><h3>Tools</h3><span class="card__meta" id="cp-tools-meta"></span></header>
+            <ol class="feed" id="cp-tools"></ol>
+          </article>
+          <article class="card">
+            <header class="card__head"><h3>Browser</h3><span class="card__meta" id="cp-browser-meta">playwright actions</span></header>
+            <ol class="feed" id="cp-browser"></ol>
+          </article>
+          <article class="card card--wide">
+            <header class="card__head"><h3>Web traffic · Caido</h3><span class="card__meta" id="cp-web-meta"></span></header>
+            <div class="table-wrap">
+              <table class="web">
+                <thead><tr><th>Time</th><th>Method</th><th>Status</th><th>URL</th><th class="num">ms</th><th class="num">Bytes</th></tr></thead>
+                <tbody id="cp-web"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="card card--wide">
+            <header class="card__head"><h3>Findings in this session</h3></header>
+            <ol class="feed" id="cp-findings"></ol>
+          </article>
+        </div>
+      </section>
+
+      <!-- ── Trazas ───────────────────────────────────────────────── -->
+      <section class="view" id="view-traces" role="tabpanel" aria-labelledby="tab-traces" hidden>
+        <div class="kpis" id="tr-kpis"></div>
+        <div class="seg" role="group" aria-label="Trace view">
+          <button class="seg__btn" type="button" data-trmode="graph" aria-pressed="true">Live graph</button>
+          <button class="seg__btn" type="button" data-trmode="cascade" aria-pressed="false">Waterfall</button>
+        </div>
+        <article class="card graph-card" id="tr-graph-card">
+          <header class="card__head">
+            <h3>Who is acting now</h3>
+            <div class="wf-tools">
+              <span class="card__meta">click = detail · Ctrl + wheel = zoom · drag = pan · double-click = fit</span>
+              <button class="btn btn--ghost btn--sm" type="button" data-gzoom="in" aria-label="Zoom in">+</button>
+              <button class="btn btn--ghost btn--sm" type="button" data-gzoom="out" aria-label="Zoom out">−</button>
+              <button class="btn btn--ghost btn--sm" type="button" data-gzoom="fit">Fit</button>
+            </div>
+          </header>
+          <ol class="ooda-steps" id="tr-steps" aria-label="OODA phase"></ol>
+          <div class="graph" id="tr-graph">
+            <p class="graph__ticker" id="tr-ticker" aria-live="polite"></p>
+            <svg id="tr-svg" role="group" aria-label="Live graph: targets, Hermes and actors (tool families and subagents). Click a node to see its detail."></svg>
+            <aside class="graph__drawer" id="tr-drawer" aria-label="Node detail" hidden></aside>
+          </div>
+        </article>
+        <article class="card">
+          <header class="card__head"><h3>Time breakdown</h3><span class="card__meta">over the session window</span></header>
+          <div class="split" id="tr-split"></div>
+        </article>
+        <article class="card" id="tr-cascade-card" hidden>
+          <header class="card__head">
+            <h3>Tool-call waterfall</h3>
+            <div class="wf-tools"><span class="card__meta" id="tr-range"></span><button class="btn btn--ghost btn--sm" type="button" id="tr-reset" hidden>Show all</button></div>
+          </header>
+          <div class="legend" id="tr-legend"></div>
+          <div class="waterfall" id="tr-waterfall"></div>
+        </article>
+        <article class="card" id="tr-detail" hidden></article>
+        <article class="card">
+          <header class="card__head"><h3>By tool</h3><span class="card__meta">click a row to inspect its calls in depth</span></header>
+          <div class="table-wrap">
+            <table class="tools">
+              <thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Total</th><th class="num">Mean</th><th class="num">Max</th><th class="num">Errors</th><th>Tool share</th></tr></thead>
+              <tbody id="tr-tools"></tbody>
+            </table>
+          </div>
+          <aside class="tool-detail" id="tr-tool-detail" hidden></aside>
+        </article>
+      </section>
+
+      <!-- ── PoC ──────────────────────────────────────────────────── -->
+      <section class="view" id="view-pocs" role="tabpanel" aria-labelledby="tab-pocs" hidden>
+        <div class="pocs">
+          <div class="pocs__list">
+            <div class="toolbar">
+              <label class="chk"><input type="checkbox" id="poc-only-session"> This session only</label>
+              <label class="chk"><input type="checkbox" id="poc-only-confirmed"> Confirmed only</label>
+              <button type="button" class="genreport" id="poc-genreport" title="Ask Hermes for the formal report (pentest-report skill) from the recorded findings">Generate report</button>
+            </div>
+            <div class="toolbar sevbar" id="poc-sevbar" role="group" aria-label="Filter by severity">
+              <button type="button" class="sevfilter is-on" data-sev="all">All <span class="sevfilter__n" data-n="all">0</span></button>
+              <button type="button" class="sevfilter sevfilter--critical" data-sev="critical">Critical <span class="sevfilter__n" data-n="critical">0</span></button>
+              <button type="button" class="sevfilter sevfilter--high" data-sev="high">High <span class="sevfilter__n" data-n="high">0</span></button>
+              <button type="button" class="sevfilter sevfilter--medium" data-sev="medium">Medium <span class="sevfilter__n" data-n="medium">0</span></button>
+              <button type="button" class="sevfilter sevfilter--low" data-sev="low">Low <span class="sevfilter__n" data-n="low">0</span></button>
+              <button type="button" class="sevfilter sevfilter--info" data-sev="info">Info <span class="sevfilter__n" data-n="info">0</span></button>
+            </div>
+            <div class="toolbar repbar" id="poc-repbar" aria-label="Engagement report">
+              <span class="repbar__lbl">Report:</span>
+              <button type="button" class="repbtn repbtn--view" id="rep-view" title="View the full report (with verbatim) in here">View</button>
+              <a class="repbtn" id="rep-md" href="/api/report.md?dl=1" title="Download Markdown">MD</a>
+              <a class="repbtn" id="rep-txt" href="/api/report.txt?dl=1" title="Download plain text">TXT</a>
+            </div>
+            <ol class="poclist" id="poc-list"></ol>
+            <p class="empty" id="poc-empty">No findings yet. Every <code>record_finding</code> from the agent appears here; <b>confirmed</b> ones are recorded automatically with their reproduction.</p>
+          </div>
+          <div class="pocs__detail" id="poc-detail">
+            <p class="empty">Select a finding to see how the agent reached it and replay the recording.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Screens (live demo) ─────────────────────────────── -->
+      <section class="view" id="view-screens" role="tabpanel" aria-labelledby="tab-screens" hidden>
+        <div class="toolbar pant-toolbar">
+          <button class="btn" type="button" id="stage-enter">▣ Stage mode</button>
+          <button class="btn btn--ghost" type="button" id="screens-both" aria-pressed="false">Show both</button>
+          <span class="toolbar__note">Key <kbd>E</kbd> · <kbd>Esc</kbd> to exit. Hides the console and projects browser + Caido + OODA phase full screen.</span>
+        </div>
+        <div class="screens" id="screens">
+          <header class="stage-head" id="stage-head" aria-live="polite">
+            <div class="brand stage-head__brand" aria-label="Vulnerator-AI">
+              <img class="brand__logo" src="/static/logo-header.png" alt="Vulnerator-AI — unholy pentest">
+            </div>
+            <div class="stage-head__phase">
+              <span class="phase-badge phase-badge--stage" id="stage-phase" data-phase="">—</span>
+              <span class="stage-head__text" id="stage-text">Waiting for agent activity…</span>
+            </div>
+            <div class="stage-head__run" id="stage-run"></div>
+            <button class="btn btn--ghost stage-head__exit" type="button" id="stage-exit" title="Exit stage mode (Esc)">Exit ✕</button>
+          </header>
+          <article class="screen screen--actions" id="screen-actions">
+            <header class="screen__bar">
+              <h3>Live Hermes actions <span class="phase-badge" id="pant-phase" data-phase="">—</span></h3>
+              <div class="screen__actions"><span class="screen__url" id="pant-now"></span></div>
+            </header>
+            <ol class="feed feed--pant" id="pant-feed">
+              <li class="feed__empty">Waiting for agent actions… (every tool it uses, including Caido ones — Replay, Automate, intercept — will appear here live)</li>
+            </ol>
+          </article>
+          <article class="screen" id="screen-browser">
+            <header class="screen__bar">
+              <h3>Agent browser <span class="avail" id="sc-browser-up"></span></h3>
+              <div class="screen__actions">
+                <span class="screen__url" id="sc-browser-url"></span>
+                <button class="btn btn--ghost" type="button" data-screen="browser" data-act="full">Full screen</button>
+                <a class="btn btn--ghost" id="sc-browser-open" target="_blank" rel="noopener noreferrer">Open ↗</a>
+                <button class="btn" type="button" data-screen="browser" data-act="toggle" aria-pressed="false">Show</button>
+              </div>
+            </header>
+            <div class="screen__frame" id="sc-browser-frame">
+              <p class="screen__hint" id="sc-browser-hint">Browser driven by the agent, live (noVNC, read-only).</p>
+            </div>
+          </article>
+          <article class="screen" id="screen-caido">
+            <header class="screen__bar">
+              <h3>Caido · Hermes operating it live <span class="avail" id="sc-caido-up"></span></h3>
+              <div class="screen__actions">
+                <span class="screen__url" id="sc-caido-url"></span>
+                <button class="btn btn--ghost" type="button" data-screen="caido" data-act="full">Full screen</button>
+                <a class="btn btn--ghost" id="sc-caido-open" target="_blank" rel="noopener noreferrer">Open ↗</a>
+                <button class="btn" type="button" data-screen="caido" data-act="toggle" aria-pressed="false">Show</button>
+              </div>
+            </header>
+            <div class="screen__frame" id="sc-caido-frame">
+              <p class="screen__hint" id="sc-caido-hint">The Caido interface plays back live what Hermes does with it (Replay, Automate, filters, packets). "Open ↗" opens the real interactive Caido.</p>
+            </div>
+          </article>
+        </div>
+        <p class="note">To project: "Full screen". The browser is read-only (the audience watches). Caido opens pre-authenticated as a guest; whoever uses their own Caido account sets it up at install time.</p>
+      </section>
+
+      <!-- ── Hermes ───────────────────────────────────────────────── -->
+      <section class="view" id="view-hermes" role="tabpanel" aria-labelledby="tab-hermes" hidden>
+        <div class="hermes">
+          <article class="card hcard">
+            <header class="card__head"><h3>Dashboard <span class="avail" id="h-dash-up"></span></h3><span class="card__meta" id="h-dash-url"></span></header>
+            <p>Hermes administration panel: engagement <b>Kanban</b>, sessions, skills, settings and platforms.</p>
+            <div class="hcard__actions">
+              <a class="btn" id="h-dash-open" target="_blank" rel="noopener noreferrer">Open in new tab ↗</a>
+              <button class="btn btn--ghost" type="button" data-embed="dash">Embed here</button>
+            </div>
+          </article>
+          <article class="card hcard">
+            <header class="card__head"><h3>Webapp <span class="avail" id="h-app-up"></span></h3><span class="card__meta" id="h-app-url"></span></header>
+            <p>The Hermes Desktop workspace in the browser: chat with the agent, terminal and OODA mascot. Requires Hermes ≥ 0.23.</p>
+            <p class="hint" id="h-app-hint" hidden>Not responding. With Hermes ≥ 0.23, build the bundle once: <code>docker compose exec ooda-agent hermes webapp --no-open</code></p>
+            <div class="hcard__actions">
+              <a class="btn" id="h-app-open" target="_blank" rel="noopener noreferrer">Open in new tab ↗</a>
+              <button class="btn btn--ghost" type="button" data-embed="app">Embed here</button>
+            </div>
+          </article>
+        </div>
+        <p class="note">Both use their own sign-in (the same dashboard account). If the browser blocks embedding, open them in a new tab.</p>
+        <div class="embed" id="h-embed" hidden>
+          <div class="embed__bar"><span id="h-embed-title"></span><button class="btn btn--ghost" type="button" id="h-embed-close">Close</button></div>
+          <iframe id="h-frame" title="Hermes" referrerpolicy="no-referrer"></iframe>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
+</body>
+</html>

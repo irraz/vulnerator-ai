@@ -1,0 +1,30 @@
+# docker-compose.web.yml — "web" overlay (operator console + LIVE screens).
+#
+# Use it together with the `web` profile. This is the WEB way of running the stack: the console,
+# the visible browser and the Caido mirror, AND the agent browsing in the VISIBLE browser you can
+# watch live (not a headless one):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.web.yml --profile web up -d
+#
+# WITHOUT this overlay (plain `docker compose up -d`) the stack is the minimal agent/API path:
+# playwright-mcp stays HEADLESS and self-contained, and no console/screens run. See the
+# playwright-mcp comment in docker-compose.yml.
+services:
+  playwright-mcp:
+    # Override the DEFAULT headless browser: drive the visible Chromium of `browser-view` over CDP
+    # so the agent's navigation is shown live in the console's "Screens" tab. `command` is
+    # REPLACED (not merged), so the headless/--isolated flags of the base file no longer apply here.
+    command:
+      - /app/cli.js
+      - --cdp-endpoint
+      - "http://browser-view:9222"
+      - --port
+      - "8931"
+      - --host
+      - "0.0.0.0"
+      - --allowed-hosts
+      - "playwright-mcp:8931"
+    depends_on:
+      # The visible browser (CDP + noVNC) must be healthy before this driver connects to it.
+      browser-view:
+        condition: service_healthy
