@@ -12,7 +12,7 @@
 services:
   playwright-mcp:
     # Override the DEFAULT headless browser: drive the visible Chromium of `browser-view` over CDP
-    # so the agent's navigation is shown live in the console's "Pantallas" tab. `command` is
+    # so the agent's navigation is shown live in the console's "Screens" tab. `command` is
     # REPLACED (not merged), so the headless/--isolated flags of the base file no longer apply here.
     command:
       - /app/cli.js

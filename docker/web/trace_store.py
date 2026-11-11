@@ -1,27 +1,27 @@
-"""Store de trazas de la GUI de Vulnerator (STDLIB PURA: ``sqlite3``).
+"""Trace store for the Vulnerator GUI (PURE STDLIB: ``sqlite3``).
 
-Es la memoria durable del servicio ``vulnerator-web`` y, a la vez, su BUS de eventos:
+It is the durable memory of the ``vulnerator-web`` service and, at the same time, its event BUS:
 
-  - ``sessions``: metadatos de cada sesión de Hermes (título, origen, tokens, coste, fase
-    OODA actual...). Incluye los subagentes delegados (``parent_id``).
-  - ``events``: cada evento normalizado (ver ``event_model``) con un ``seq`` GLOBAL
-    monótono (``INTEGER PRIMARY KEY AUTOINCREMENT``). Ese ``seq`` es el cursor del stream
-    en vivo hacia el navegador: un cliente que reconecta pide ``seq > último`` y no pierde
-    nada (reanudación gratis, sin cola en memoria).
-  - ``spans``: UNA fila por tool-call (``session_id`` + ``call_id``) con inicio, fin,
-    duración, estado y fase OODA. Es la vista "tipo Langfuse": qué tools llama, con qué
-    args, cuánto tarda y si falla. El inicio sale del mensaje del asistente que pide la
-    tool (Hermes lo persiste ANTES de ejecutarla) y el fin del mensaje ``tool`` con el
-    resultado; una tool en curso queda ``running``.
+  - ``sessions``: metadata of each Hermes session (title, source, tokens, cost, current
+    OODA phase...). Includes delegated subagents (``parent_id``).
+  - ``events``: each normalized event (see ``event_model``) with a GLOBAL monotonic ``seq``
+    (``INTEGER PRIMARY KEY AUTOINCREMENT``). That ``seq`` is the cursor of the live stream
+    toward the browser: a client that reconnects asks for ``seq > last`` and loses nothing
+    (free resumption, no in-memory queue).
+  - ``spans``: ONE row per tool-call (``session_id`` + ``call_id``) with start, end,
+    duration, status and OODA phase. It is the "Langfuse-like" view: which tools it calls,
+    with what args, how long they take and whether they fail. The start comes from the
+    assistant message that requests the tool (Hermes persists it BEFORE executing it) and
+    the end from the ``tool`` message with the result; a tool in progress stays ``running``.
 
-Idempotente: re-sincronizar los mismos mensajes no duplica nada (``key`` UNIQUE en
-``events`` + tabla ``seen_messages``).
+Idempotent: re-syncing the same messages does not duplicate anything (``key`` UNIQUE in
+``events`` + ``seen_messages`` table).
 
-Por qué SQLite y no Langfuse: decisión del operador (trazas propias, ligeras, offline, sin
-servicio ni credenciales extra). El fichero vive en un volumen nombrado del servicio.
+Why SQLite and not Langfuse: operator's decision (own traces, lightweight, offline, with no
+extra service or credentials). The file lives in a named volume of the service.
 
-Disciplina: el contenido de los eventos es DATO NO CONFIABLE; aquí solo se almacena con
-parámetros enlazados (nunca SQL compuesto con datos) y se devuelve tal cual.
+Discipline: event content is UNTRUSTED DATA; here it is only stored with bound parameters
+(never SQL composed with data) and returned as is.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS seen_messages (
 );
 """
 
-# Campos de sesión de Hermes (``_session_response``) -> columna local.
+# Hermes session fields (``_session_response``) -> local column.
 _SESSION_FIELDS = {
     "parent_session_id": "parent_id", "title": "title", "source": "source", "model": "model",
     "started_at": "started_at", "ended_at": "ended_at", "end_reason": "end_reason",
@@ -118,7 +118,7 @@ _EVENT_COLS = (
     "extra",
 )
 
-# Tamaño del preview del resultado guardado en el span (el texto completo está en events).
+# Size of the result preview stored in the span (the full text is in events).
 _SPAN_PREVIEW_MAX = 600
 
 
@@ -130,7 +130,7 @@ def _num(value: Any) -> Optional[float]:
 
 
 class TraceStore:
-    """Fachada thread-safe sobre una conexión SQLite (WAL)."""
+    """Thread-safe facade over a SQLite connection (WAL)."""
 
     def __init__(self, path: str = ":memory:") -> None:
         self._lock = threading.RLock()
@@ -145,9 +145,9 @@ class TraceStore:
         with self._lock:
             self._db.close()
 
-    # ------------------------------------------------------------------ sesiones
+    # ------------------------------------------------------------------ sessions
     def upsert_session(self, meta: dict[str, Any]) -> bool:
-        """Inserta/actualiza la sesión con los metadatos de Hermes. True si cambió algo."""
+        """Inserts/updates the session with Hermes metadata. True if anything changed."""
         sid = meta.get("id")
         if not isinstance(sid, str) or not sid:
             return False
@@ -185,7 +185,7 @@ class TraceStore:
         return dict(row) if row else None
 
     def list_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
-        """Sesiones por actividad reciente, con contadores de tools/hallazgos/fallos."""
+        """Sessions by recent activity, with counters of tools/findings/failures."""
         with self._lock:
             rows = self._db.execute(
                 """
@@ -204,7 +204,7 @@ class TraceStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    # ------------------------------------------------------------------ mensajes
+    # ------------------------------------------------------------------ messages
     def seen_message_ids(self, session_id: str) -> set[int]:
         with self._lock:
             rows = self._db.execute(
@@ -213,11 +213,11 @@ class TraceStore:
         return {r[0] for r in rows}
 
     def ingest_messages(self, session_id: str, messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Ingiere mensajes NUEVOS de una sesión y devuelve los eventos insertados (con ``seq``).
+        """Ingests NEW messages of a session and returns the inserted events (with ``seq``).
 
-        Etiqueta cada evento con la fase/paso OODA vigente (la última línea de estado vista en
-        la sesión) y mantiene los spans: ``tool.call`` abre un span ``running``; ``tool.result``
-        lo cierra con duración y estado ``ok``/``error``.
+        Tags each event with the current OODA phase/step (the last status line seen in the
+        session) and maintains the spans: ``tool.call`` opens a ``running`` span; ``tool.result``
+        closes it with duration and ``ok``/``error`` status.
         """
         msgs = []
         for m in messages:
@@ -332,9 +332,9 @@ class TraceStore:
              ev.get("ts"), status, preview, ev.get("seq"), ev.get("phase"), ev.get("step")),
         )
 
-    # ------------------------------------------------------------------ tráfico web
+    # ------------------------------------------------------------------ web traffic
     def ingest_web(self, entries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Ingiere entradas del historial de Caido como eventos ``web.request`` (dedup por id)."""
+        """Ingests entries from Caido's history as ``web.request`` events (dedup by id)."""
         inserted = []
         with self._lock:
             self._db.execute("BEGIN")
@@ -354,7 +354,7 @@ class TraceStore:
                 raise
         return inserted
 
-    # ------------------------------------------------------------------ lectura
+    # ------------------------------------------------------------------ reading
     def max_seq(self) -> int:
         with self._lock:
             row = self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
@@ -369,7 +369,7 @@ class TraceStore:
         limit: int = 500,
         text_limit: Optional[int] = None,
     ) -> list[dict[str, Any]]:
-        """Eventos con ``seq > after`` (orden ascendente), filtrables por sesión y tipo."""
+        """Events with ``seq > after`` (ascending order), filterable by session and kind."""
         sql = "SELECT * FROM events WHERE seq > ?"
         params: list[Any] = [int(after)]
         if session_id:
@@ -388,8 +388,8 @@ class TraceStore:
     def tail_events(self, session_id: Optional[str] = None, limit: int = 400, *,
                     kinds: Optional[Iterable[str]] = None,
                     text_limit: Optional[int] = None) -> list[dict[str, Any]]:
-        """Los últimos ``limit`` eventos (orden ascendente), filtrables por sesión y/o tipo. El
-        recorte se hace en SQL (``ORDER BY seq DESC LIMIT``), sin traer toda la tabla a memoria."""
+        """The last ``limit`` events (ascending order), filterable by session and/or kind. The
+        clipping is done in SQL (``ORDER BY seq DESC LIMIT``), without bringing the whole table into memory."""
         where: list[str] = []
         params: list[Any] = []
         if session_id:
@@ -416,7 +416,7 @@ class TraceStore:
         return row_to_event(row) if row else None
 
     def session_events(self, session_id: str) -> list[dict[str, Any]]:
-        """TODOS los eventos de una sesión (texto completo) — insumo del PoC replay."""
+        """ALL events of a session (full text) — input for the PoC replay."""
         with self._lock:
             rows = self._db.execute(
                 "SELECT * FROM events WHERE session_id=? ORDER BY seq ASC", (session_id,)
@@ -433,7 +433,7 @@ class TraceStore:
         return [dict(r) for r in rows]
 
     def trace_summary(self, session_id: str) -> dict[str, Any]:
-        """Agregados por tool (llamadas, tiempo total/medio/máx, errores) + totales."""
+        """Aggregates per tool (calls, total/avg/max time, errors) + totals."""
         spans = self.spans(session_id)
         per_tool: dict[str, dict[str, Any]] = {}
         total_time = 0.0
@@ -471,7 +471,7 @@ class TraceStore:
 
 
 def row_to_event(row: sqlite3.Row, text_limit: Optional[int] = None) -> dict[str, Any]:
-    """Fila de ``events`` -> dict de evento (args/extra decodificados, texto opcionalmente acotado)."""
+    """Row from ``events`` -> event dict (args/extra decoded, text optionally bounded)."""
     ev = {k: row[k] for k in row.keys()}
     for col in ("args", "extra"):
         raw = ev.get(col)
@@ -490,7 +490,7 @@ def row_to_event(row: sqlite3.Row, text_limit: Optional[int] = None) -> dict[str
 
 
 def _caido_ts(value: Any) -> float:
-    """``createdAt`` de Caido (epoch ms o ISO-8601) -> epoch segundos; 0 si no se entiende."""
+    """Caido's ``createdAt`` (epoch ms or ISO-8601) -> epoch seconds; 0 if not understood."""
     if isinstance(value, (int, float)):
         return float(value) / (1000.0 if value > 1e11 else 1.0)
     if isinstance(value, str) and value:
@@ -505,7 +505,7 @@ def _caido_ts(value: Any) -> float:
 
 
 def web_entry_to_event(entry: dict[str, Any]) -> dict[str, Any]:
-    """Entrada de ``caido_client.search_history`` -> evento ``web.request`` de la GUI."""
+    """Entry from ``caido_client.search_history`` -> GUI ``web.request`` event."""
     resp = entry.get("response") if isinstance(entry.get("response"), dict) else {}
     scheme = "https" if entry.get("isTls") else "http"
     host = str(entry.get("host") or "")

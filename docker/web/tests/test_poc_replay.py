@@ -1,4 +1,4 @@
-"""Tests de ``poc_replay`` (cadena OODA + reproducción + exportes)."""
+"""Tests for ``poc_replay`` (OODA chain + reproduction + exports)."""
 
 from __future__ import annotations
 
@@ -77,10 +77,10 @@ def test_asciicast_is_valid_v2_and_neutralizes_escapes():
 def test_markdown_has_command_and_fence_safety():
     poc = _pocs()[0]
     md = poc_replay.to_markdown(poc)
-    assert fx.SQLI_CMD in md and "## Reproducción" in md and "OBSERVE" in md
+    assert fx.SQLI_CMD in md and "## Reproduction" in md and "OBSERVE" in md
     poc["reproduction"]["execution"]["output"] = "```\nbreakout"
     md = poc_replay.to_markdown(poc)
-    assert "````" in md  # el fence crece para que una salida con ``` no rompa el bloque
+    assert "````" in md  # the fence grows so output containing ``` does not break the block
 
 
 def test_command_matching_is_whitespace_insensitive():

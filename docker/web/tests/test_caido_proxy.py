@@ -1,4 +1,4 @@
-"""Tests de las funciones puras del proxy de Caido (inyección del token)."""
+"""Tests for the pure functions of the Caido proxy (token injection)."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -11,7 +11,7 @@ def test_bootstrap_script_is_safe_js_string():
     sc = cp._bootstrap_script(TOK)
     assert sc.startswith("<script>") and sc.endswith("</script>")
     assert "localStorage.setItem('CAIDO_AUTHENTICATION'," in sc
-    # el token va como literal JS entre comillas dobles (json.dumps), no crudo
+    # the token goes as a JS literal in double quotes (json.dumps), not raw
     assert '"{\\"__typename' in sc
 
 

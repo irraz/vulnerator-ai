@@ -1,4 +1,4 @@
-"""Tests de ``trace_store`` (SQLite en memoria, fixtures sintéticas)."""
+"""Tests for ``trace_store`` (in-memory SQLite, synthetic fixtures)."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def test_events_cursor_kinds_and_text_limit():
     assert all(e["seq"] > mid for e in st.events(mid, session_id=fx.SID))
     clipped = st.events(0, session_id=fx.SID, kinds=["tool.result"], text_limit=10)
     assert all(len(e.get("text", "")) <= 10 for e in clipped)
-    assert st.events(0, kinds=["nope"])  # tipo desconocido se ignora (no filtra a vacío)
+    assert st.events(0, kinds=["nope"])  # unknown kind is ignored (does not filter to empty)
 
 
 def test_web_ingest_dedup_and_mapping():

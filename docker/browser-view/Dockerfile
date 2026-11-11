@@ -1,11 +1,11 @@
-# browser-view — navegador VISIBLE (Chromium) para las demos de vulnerator-web.
+# browser-view — VISIBLE browser (Chromium) for the vulnerator-web demos.
 #
-# Xvfb (pantalla virtual) + Chromium con pantalla + x11vnc + noVNC. playwright-mcp lo conduce
-# por CDP (vía cdp_proxy.py, que arregla la protección anti-rebinding de Chrome) y el operador
-# lo ve por noVNC embebido en la consola. NO publica el puerto de depuración; al host solo va
-# noVNC (lo hace docker-compose.yml).
+# Xvfb (virtual display) + headed Chromium + x11vnc + noVNC. playwright-mcp drives it over CDP
+# (via cdp_proxy.py, which fixes Chrome's anti-rebinding protection) and the operator sees it
+# through noVNC embedded in the console. It does NOT publish the debugging port; only noVNC goes
+# to the host (done by docker-compose.yml).
 #
-# Build (desde la raíz del repo):
+# Build (from the repo root):
 #   docker build -f docker/browser-view/Dockerfile -t vulnerator-ai-browser-view:dev docker/browser-view
 
 # syntax=docker/dockerfile:1
@@ -16,8 +16,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Navegador + pantalla virtual + VNC/noVNC + WM ligero + fuentes + tini (init). Versiones
-# pineadas (disciplina del repo). Limpieza de listas de apt en la misma capa.
+# Browser + virtual display + VNC/noVNC + lightweight WM + fonts + tini (init). Pinned versions
+# (repo discipline). Cleanup of apt lists in the same layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium=156.0.8078.79-1~deb12u1 \
       xvfb=2:21.1.7-3+deb12u13 \
@@ -41,11 +41,11 @@ ENV HOME=/home/bview \
     BROWSER_VIEW_GEOMETRY=1920x1080x24 \
     BROWSER_VIEW_VIEWONLY=1
 
-# noVNC (web). El puerto de depuración (9222 del proxy, 9223 de Chrome) NO se expone aquí: solo
-# lo alcanza playwright-mcp por la red interna; a nadie más.
+# noVNC (web). The debugging port (9222 of the proxy, 9223 of Chrome) is NOT exposed here: only
+# playwright-mcp reaches it over the internal network; nobody else.
 EXPOSE 6080
 
-# Vivo = noVNC responde Y el proxy CDP da la versión del navegador.
+# Alive = noVNC responds AND the CDP proxy returns the browser version.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=5 \
   CMD ["sh", "-c", "python3 -c \"import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:6080/', timeout=3); urllib.request.urlopen('http://127.0.0.1:9222/json/version', timeout=3)\" || exit 1"]
 

@@ -1,4 +1,4 @@
-"""Tests del CLI ``vulnerator_watch`` (parser SSE, saneado de terminal y formateo)."""
+"""Tests for the ``vulnerator_watch`` CLI (SSE parser, terminal sanitizing and formatting)."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_format_ooda_and_call_and_result():
     res = vw.format_event({"kind": "tool.result", "tool_display": "kali_run", "ts": 12.5,
                            "text": json.dumps({"status": "done", "output": "a\nb\nc"})},
                           P, output_lines=2, call_ts=10.0)
-    assert res[0].strip().startswith("✓ 2.50s") and res[1].endswith("a") and "1 líneas más" in res[-1]
+    assert res[0].strip().startswith("✓ 2.50s") and res[1].endswith("a") and "1 more lines" in res[-1]
 
 
 def test_format_hides_reasoning_and_pure_ooda_assistant_text():

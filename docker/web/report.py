@@ -1,5 +1,5 @@
-"""Genera el informe de pentest (MD / TXT / HTML) a partir de los PoC del store,
-con comando exacto, salida de evidencia y VERBATIM crudo de cada hallazgo."""
+"""Generates the pentest report (MD / TXT / HTML) from the store's PoCs,
+with the exact command, evidence output and raw VERBATIM of each finding."""
 from __future__ import annotations
 import html as _html
 import json
@@ -9,7 +9,7 @@ import datetime
 import event_model as em
 
 SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-SEV_ES = {"critical": "CRÍTICA", "high": "ALTA", "medium": "MEDIA", "low": "BAJA", "info": "INFO"}
+SEV_EN = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW", "info": "INFO"}
 SEV_HEX = {"critical": "#ef5350", "high": "#ffa726", "medium": "#d4b26a", "low": "#7fb3c9", "info": "#9aa0ac"}
 
 
@@ -29,17 +29,17 @@ def derive_sev(title: str):
 
 
 def clean_output(raw):
-    """Extrae el stdout real de la salida de una tool MCP. Reutiliza el ÚNICO desenvolvedor
-    (``event_model.tool_output_text``); el regex queda solo como RESPALDO para salidas con un
-    prefijo tipo ``<untrusted_tool_result>{...}`` que el desenvolvedor estricto (pide JSON al
-    inicio) no cubre. Si nada aplica, devuelve el crudo tal cual (sigue siendo verbatim)."""
+    """Extracts the real stdout from the output of an MCP tool. Reuses the SINGLE unwrapper
+    (``event_model.tool_output_text``); the regex is only a FALLBACK for outputs with a
+    prefix like ``<untrusted_tool_result>{...}`` that the strict unwrapper (which requires JSON
+    at the start) does not cover. If nothing applies, it returns the raw value as is (still verbatim)."""
     if not raw:
         return ""
     s = str(raw)
     out = em.tool_output_text(s)
     if out != s:
         return out
-    try:  # respaldo: aísla el JSON embebido tras un prefijo y vuelve a pasarlo por el mismo helper
+    try:  # fallback: isolate the JSON embedded after a prefix and run it through the same helper again
         m = re.search(r"\{.*\}", s, re.S)
         if m:
             inner = em.tool_output_text(m.group(0))
@@ -55,9 +55,9 @@ def _norm_key(s):
 
 
 def ai_lookup(title, ai_sev):
-    """Veredicto de severidad de la IA para un título. Match EXACTO → normalizado (ignora
-    espacios/mayúsculas). SIN difuso: nunca presta la severidad de un hallazgo a otro de título
-    parecido (el prompt obliga a la IA a usar el TÍTULO EXACTO, así que el difuso solo metía cruces)."""
+    """AI severity verdict for a title. EXACT match → normalized (ignores whitespace/case).
+    NO fuzzy matching: it never lends the severity of one finding to another with a similar
+    title (the prompt forces the AI to use the EXACT TITLE, so fuzzy matching only caused crossovers)."""
     if not ai_sev:
         return None
     if title in ai_sev:
@@ -67,7 +67,7 @@ def ai_lookup(title, ai_sev):
 
 
 def _coerce_sev(entry):
-    """Admite {title: 'high'} o {title: {severity, cvss, rationale}}."""
+    """Accepts {title: 'high'} or {title: {severity, cvss, rationale}}."""
     if isinstance(entry, str):
         return entry.lower().strip(), None, ""
     if isinstance(entry, dict):
@@ -77,11 +77,11 @@ def _coerce_sev(entry):
 
 
 def severity_for(title, ai_sev=None):
-    """ÚNICA fuente de verdad de la severidad de un hallazgo (la usan la consola y el informe).
+    """SINGLE source of truth for the severity of a finding (used by the console and the report).
 
-    Base: regex del título (``derive_sev``). Si la IA lo calificó (``severities.json``), su veredicto
-    MANDA y aporta su propio CVSS y su justificación. Devuelve ``(sev, sev_by, score, rationale)``,
-    donde ``sev_by`` es ``"ia"`` o ``"regex"`` y ``score`` es el CVSS (el de la IA si lo dio).
+    Base: title regex (``derive_sev``). If the AI rated it (``severities.json``), its verdict
+    WINS and provides its own CVSS and justification. Returns ``(sev, sev_by, score, rationale)``,
+    where ``sev_by`` is ``"ia"`` or ``"regex"`` and ``score`` is the CVSS (the AI's one if provided).
     """
     sev, score = derive_sev(title)
     sev_by, rationale = "regex", ""
@@ -99,7 +99,7 @@ def severity_for(title, ai_sev=None):
 
 
 def normalize(pocs, ai_sev=None):
-    """pocs: lista de PoC completos. ai_sev: mapa título→severidad de la IA (manda sobre el regex)."""
+    """pocs: list of complete PoCs. ai_sev: map title→AI severity (wins over the regex)."""
     out = []
     for p in pocs:
         f = p.get("finding", {}) or {}
@@ -112,7 +112,7 @@ def normalize(pocs, ai_sev=None):
             "sev_by": sev_by,
             "rationale": rationale,
             "sev": sev, "score": score,
-            "title": f.get("title", "(sin título)"),
+            "title": f.get("title", "(untitled)"),
             "target": f.get("target", ""),
             "technique": f.get("technique_id", ""),
             "confidence": f.get("confidence", ""),
@@ -151,10 +151,10 @@ def _targets(findings):
 def _byline(client, operator, now, sep):
     parts = []
     if client:
-        parts.append("Cliente: " + client)
+        parts.append("Client: " + client)
     if operator:
-        parts.append("Operador: " + operator)
-    parts.append("Generado: " + now)
+        parts.append("Operator: " + operator)
+    parts.append("Generated: " + now)
     return sep.join(parts)
 
 
@@ -162,93 +162,93 @@ def render_md(findings, engagement="engagement", narrative="", operator="", clie
     c = _counts(findings)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     L = []
-    L.append(f"# Informe de pentest — {engagement}")
+    L.append(f"# Pentest report — {engagement}")
     L.append(f"_{_byline(client, operator, now, ' · ')}_\n")
-    L.append("## Resumen ejecutivo\n")
-    L.append(f"- **Hosts en alcance:** {', '.join(_targets(findings)) or '—'}")
-    L.append(f"- **Hallazgos:** {len(findings)} "
-             f"(🔴 {c['critical']} críticas · 🟠 {c['high']} altas · 🟡 {c['medium']} medias · "
-             f"🔵 {c['low']} bajas · ⚪ {c['info']} info)")
-    L.append("- **Modo:** pentest no intrusivo (sin explotación)\n")
-    L.append("| Severidad | Hallazgo | Target |")
+    L.append("## Executive summary\n")
+    L.append(f"- **Hosts in scope:** {', '.join(_targets(findings)) or '—'}")
+    L.append(f"- **Findings:** {len(findings)} "
+             f"(🔴 {c['critical']} critical · 🟠 {c['high']} high · 🟡 {c['medium']} medium · "
+             f"🔵 {c['low']} low · ⚪ {c['info']} info)")
+    L.append("- **Mode:** non-intrusive pentest (no exploitation)\n")
+    L.append("| Severity | Finding | Target |")
     L.append("|---|---|---|")
     for f in findings:
-        L.append(f"| {SEV_ES[f['sev']]} | {f['title'].replace('|','/')} | {(f['target'] or '').replace('|','/')} |")
+        L.append(f"| {SEV_EN[f['sev']]} | {f['title'].replace('|','/')} | {(f['target'] or '').replace('|','/')} |")
     L.append("")
     if narrative.strip():
-        L.append("## Narrativa del analista\n")
+        L.append("## Analyst narrative\n")
         L.append(narrative.strip() + "\n")
-    L.append("## Hallazgos detallados — reproducción y verbatim\n")
+    L.append("## Detailed findings — reproduction and verbatim\n")
     for i, f in enumerate(findings, 1):
-        L.append(f"### {i}. [{SEV_ES[f['sev']]}] {f['title']}\n")
+        L.append(f"### {i}. [{SEV_EN[f['sev']]}] {f['title']}\n")
         meta = [f"**Target:** {f['target'] or '—'}",
-                f"**Técnica:** {f['technique'] or '—'}",
-                f"**Confianza:** {f['confidence'] or '—'}",
-                f"**Estado:** {f['state'] or '—'}"]
+                f"**Technique:** {f['technique'] or '—'}",
+                f"**Confidence:** {f['confidence'] or '—'}",
+                f"**State:** {f['state'] or '—'}"]
         if f["score"]:
             meta.insert(1, f"**CVSS:** {f['score']}")
         L.append("  ·  ".join(meta) + "\n")
         if f.get("rationale"):
-            L.append(f"> **Severidad asignada por IA:** {f['rationale']}\n")
+            L.append(f"> **Severity assigned by AI:** {f['rationale']}\n")
         if f["command"]:
-            L.append("**Comando:**\n")
+            L.append("**Command:**\n")
             L.append("```bash\n" + f["command"].strip() + "\n```\n")
         if f["evidence_output"]:
-            L.append("**Salida (evidencia):**\n")
+            L.append("**Output (evidence):**\n")
             L.append("```\n" + str(f["evidence_output"]).strip() + "\n```\n")
         if f["raw_output"] and f["raw_output"].strip() != str(f["evidence_output"]).strip():
-            L.append("**Verbatim completo"
-                     + (" (truncado por la herramienta)" if f["truncated"] else "") + ":**\n")
+            L.append("**Full verbatim"
+                     + (" (truncated by the tool)" if f["truncated"] else "") + ":**\n")
             L.append("```\n" + f["raw_output"].strip() + "\n```\n")
         if f["ooda_path"]:
             steps = " → ".join(str(s.get("label") or s) if isinstance(s, dict) else str(s) for s in f["ooda_path"])
-            L.append(f"**Ruta OODA:** {steps}\n")
+            L.append(f"**OODA path:** {steps}\n")
     return "\n".join(L)
 
 
-# ─────────────────────────────────────────── Texto plano
+# ─────────────────────────────────────────── Plain text
 def render_txt(findings, engagement="engagement", narrative="", operator="", client=""):
     c = _counts(findings)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     bar = "=" * 78
-    L = [bar, f"INFORME DE PENTEST — {engagement.upper()}",
+    L = [bar, f"PENTEST REPORT — {engagement.upper()}",
          _byline(client, operator, now, " | "), bar, "",
-         "RESUMEN EJECUTIVO",
+         "EXECUTIVE SUMMARY",
          f"  Hosts: {', '.join(_targets(findings)) or '-'}",
-         f"  Hallazgos: {len(findings)} (CRITICAS {c['critical']} | ALTAS {c['high']} | "
-         f"MEDIAS {c['medium']} | BAJAS {c['low']} | INFO {c['info']})",
-         "  Modo: pentest no intrusivo (sin explotacion)", ""]
+         f"  Findings: {len(findings)} (CRITICAL {c['critical']} | HIGH {c['high']} | "
+         f"MEDIUM {c['medium']} | LOW {c['low']} | INFO {c['info']})",
+         "  Mode: non-intrusive pentest (no exploitation)", ""]
     if narrative.strip():
-        L += ["-" * 78, "NARRATIVA DEL ANALISTA", "-" * 78, "",
+        L += ["-" * 78, "ANALYST NARRATIVE", "-" * 78, "",
               re.sub(r"[#*`>]", "", narrative).strip(), ""]
-    L += ["-" * 78, "HALLAZGOS DETALLADOS — REPRODUCCION Y VERBATIM", "-" * 78, ""]
+    L += ["-" * 78, "DETAILED FINDINGS — REPRODUCTION AND VERBATIM", "-" * 78, ""]
     for i, f in enumerate(findings, 1):
-        L.append(f"[{i}] ({SEV_ES[f['sev']]}{(' CVSS '+str(f['score'])) if f['score'] else ''}) {f['title']}")
-        L.append(f"    Target: {f['target'] or '-'} | Tecnica: {f['technique'] or '-'} | "
-                 f"Confianza: {f['confidence'] or '-'} | Estado: {f['state'] or '-'}")
+        L.append(f"[{i}] ({SEV_EN[f['sev']]}{(' CVSS '+str(f['score'])) if f['score'] else ''}) {f['title']}")
+        L.append(f"    Target: {f['target'] or '-'} | Technique: {f['technique'] or '-'} | "
+                 f"Confidence: {f['confidence'] or '-'} | State: {f['state'] or '-'}")
         if f.get("rationale"):
-            L.append("    Severidad (IA): " + f["rationale"])
+            L.append("    Severity (AI): " + f["rationale"])
         if f["command"]:
-            L += ["", "    COMANDO:", "      " + f["command"].strip().replace("\n", "\n      ")]
+            L += ["", "    COMMAND:", "      " + f["command"].strip().replace("\n", "\n      ")]
         if f["evidence_output"]:
-            L += ["", "    SALIDA (EVIDENCIA):",
+            L += ["", "    OUTPUT (EVIDENCE):",
                   "      " + str(f["evidence_output"]).strip().replace("\n", "\n      ")]
         if f["raw_output"] and f["raw_output"].strip() != str(f["evidence_output"]).strip():
-            L += ["", "    VERBATIM COMPLETO" + (" (truncado)" if f["truncated"] else "") + ":",
+            L += ["", "    FULL VERBATIM" + (" (truncated)" if f["truncated"] else "") + ":",
                   "      " + f["raw_output"].strip().replace("\n", "\n      ")]
         L += ["", "-" * 78, ""]
     return "\n".join(L)
 
 
-# ─────────────────────────────────────────── HTML (vista)
+# ─────────────────────────────────────────── HTML (view)
 def render_html(findings, engagement="engagement", narrative="", operator="", client=""):
     c = _counts(findings)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     e = _html.escape
     title_who = " — ".join(x for x in (e(client), e(operator)) if x)
     sub_who = "".join(
-        ([" · Cliente <b>%s</b>" % e(client)] if client else [])
-        + ([" · Operador <b>%s</b>" % e(operator)] if operator else []))
+        ([" · Client <b>%s</b>" % e(client)] if client else [])
+        + ([" · Operator <b>%s</b>" % e(operator)] if operator else []))
 
     def block(label, text, mono=True):
         if not text:
@@ -259,38 +259,38 @@ def render_html(findings, engagement="engagement", narrative="", operator="", cl
 
     rows = ""
     for f in findings:
-        rows += (f'<tr><td><span class="sev sev--{f["sev"]}">{SEV_ES[f["sev"]]}</span></td>'
+        rows += (f'<tr><td><span class="sev sev--{f["sev"]}">{SEV_EN[f["sev"]]}</span></td>'
                  f'<td>{e(f["title"])}</td><td class="mut">{e(f["target"] or "—")}</td></tr>')
     cards = ""
     for i, f in enumerate(findings, 1):
         cvss = f'<span class="meta">CVSS <b>{f["score"]}</b></span>' if f["score"] else ""
         narr_raw = ""
         if f["raw_output"] and f["raw_output"].strip() != str(f["evidence_output"]).strip():
-            narr_raw = block("Verbatim completo" + (" (truncado por la herramienta)" if f["truncated"] else ""),
+            narr_raw = block("Full verbatim" + (" (truncated by the tool)" if f["truncated"] else ""),
                              f["raw_output"])
         cards += f"""
         <section class="card card--{f['sev']}">
-          <h3><span class="sev sev--{f['sev']}">{SEV_ES[f['sev']]}</span> {i}. {e(f['title'])}</h3>
+          <h3><span class="sev sev--{f['sev']}">{SEV_EN[f['sev']]}</span> {i}. {e(f['title'])}</h3>
           <div class="metas">
             <span class="meta">Target <b>{e(f['target'] or '—')}</b></span>
-            <span class="meta">Técnica <b>{e(f['technique'] or '—')}</b></span>
-            <span class="meta">Confianza <b>{e(f['confidence'] or '—')}</b></span>
-            <span class="meta">Estado <b>{e(f['state'] or '—')}</b></span>
+            <span class="meta">Technique <b>{e(f['technique'] or '—')}</b></span>
+            <span class="meta">Confidence <b>{e(f['confidence'] or '—')}</b></span>
+            <span class="meta">State <b>{e(f['state'] or '—')}</b></span>
             {cvss}
-            {'<span class="meta meta--ia">severidad IA</span>' if f.get('sev_by') == 'ia' else ''}
+            {'<span class="meta meta--ia">AI severity</span>' if f.get('sev_by') == 'ia' else ''}
           </div>
-          {('<div class="airat"><b>Severidad (IA):</b> ' + e(f['rationale']) + '</div>') if f.get('rationale') else ''}
-          {block("Comando", f['command'])}
-          {block("Salida (evidencia)", f['evidence_output'])}
+          {('<div class="airat"><b>Severity (AI):</b> ' + e(f['rationale']) + '</div>') if f.get('rationale') else ''}
+          {block("Command", f['command'])}
+          {block("Output (evidence)", f['evidence_output'])}
           {narr_raw}
         </section>"""
     narrative_html = ""
     if narrative.strip():
-        narrative_html = f'<section class="narr"><h2>Narrativa del analista</h2><pre class="txt">{e(narrative.strip())}</pre></section>'
-    return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
-<title>Informe de pentest — {e(engagement)}{(' — ' + title_who) if title_who else ''}</title>
+        narrative_html = f'<section class="narr"><h2>Analyst narrative</h2><pre class="txt">{e(narrative.strip())}</pre></section>'
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Pentest report — {e(engagement)}{(' — ' + title_who) if title_who else ''}</title>
 <style>
-  @page {{ size: A4; margin: 16mm 14mm; @bottom-right {{ content: "Pág. " counter(page) "/" counter(pages); font-size: 9px; color: #888; }} }}
+  @page {{ size: A4; margin: 16mm 14mm; @bottom-right {{ content: "Page " counter(page) "/" counter(pages); font-size: 9px; color: #888; }} }}
   * {{ box-sizing: border-box; }}
   body {{ font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #15171e; background: #fff; margin: 0; font-size: 12px; line-height: 1.5; }}
   h1 {{ color: #b03a3a; margin: 0 0 2px; font-size: 24px; }}
@@ -319,16 +319,16 @@ def render_html(findings, engagement="engagement", narrative="", operator="", cl
   pre.txt {{ background: #f6f6f8; color: #222; }}
   .summary {{ background: #faf7f7; border: 1px solid #eadada; border-radius: 6px; padding: 10px 14px; }}
 </style></head><body>
-  <h1>Informe de pentest</h1>
-  <p class="sub">Engagement <b>{e(engagement)}</b>{sub_who} · {now} · <b>pentest no intrusivo (sin explotación)</b></p>
+  <h1>Pentest report</h1>
+  <p class="sub">Engagement <b>{e(engagement)}</b>{sub_who} · {now} · <b>non-intrusive pentest (no exploitation)</b></p>
   <div class="summary">
-    <b>{len(findings)} hallazgos</b> — 🔴 {c['critical']} críticas · 🟠 {c['high']} altas · 🟡 {c['medium']} medias · 🔵 {c['low']} bajas · ⚪ {c['info']} info
+    <b>{len(findings)} findings</b> — 🔴 {c['critical']} critical · 🟠 {c['high']} high · 🟡 {c['medium']} medium · 🔵 {c['low']} low · ⚪ {c['info']} info
     &nbsp;|&nbsp; Hosts: {e(', '.join(_targets(findings)) or '—')}
   </div>
-  <h2>Resumen de hallazgos</h2>
-  <table><thead><tr><th>Sev.</th><th>Hallazgo</th><th>Target</th></tr></thead><tbody>{rows}</tbody></table>
+  <h2>Findings summary</h2>
+  <table><thead><tr><th>Sev.</th><th>Finding</th><th>Target</th></tr></thead><tbody>{rows}</tbody></table>
   {narrative_html}
-  <h2>Hallazgos detallados — reproducción y verbatim</h2>
+  <h2>Detailed findings — reproduction and verbatim</h2>
   {cards}
 </body></html>"""
 

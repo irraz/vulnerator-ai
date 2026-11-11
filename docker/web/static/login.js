@@ -4,6 +4,6 @@
   const next = q.get("next") || "/";
   document.getElementById("next").value = (next.startsWith("/") && !next.startsWith("//") ? next : "/") + location.hash;
   const msg = document.getElementById("login-msg");
-  if (q.get("error")) { msg.textContent = "Usuario o contraseña incorrectos."; msg.hidden = false; }
-  else if (q.get("expired")) { msg.textContent = "El enlace de acceso ha caducado o ya se usó. Entra con tu cuenta."; msg.hidden = false; }
+  if (q.get("error")) { msg.textContent = "Incorrect username or password."; msg.hidden = false; }
+  else if (q.get("expired")) { msg.textContent = "The access link has expired or has already been used. Sign in with your account."; msg.hidden = false; }
 })();

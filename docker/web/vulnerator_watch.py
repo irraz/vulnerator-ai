@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""vulnerator-watch — sigue en tu TERMINAL lo que está haciendo Vulnerator, en vivo (STDLIB PURA).
+"""vulnerator-watch — follow in your TERMINAL what Vulnerator is doing, live (PURE STDLIB).
 
-Se conecta al stream SSE de ``vulnerator-web`` (``/api/stream``) y pinta cada paso del agente:
-líneas de estado OODA coloreadas por fase, razonamiento, cada tool-call con su comando y su
-salida, y el resultado. Cuando el agente CONFIRMA un PoC (``record_finding`` aceptado por el
-store), lo REPRODUCE en la terminal —el comando tecleado y su salida con los tiempos reales—
-y, con ``--record-dir``, guarda la grabación ``.cast`` (``asciinema play``) y la ficha ``.md``.
+Connects to the ``vulnerator-web`` SSE stream (``/api/stream``) and renders every agent step:
+OODA status lines colored by phase, reasoning, every tool-call with its command and its
+output, and the result. When the agent CONFIRMS a PoC (``record_finding`` accepted by the
+store), it REPLAYS it in the terminal —the typed command and its output with real timings—
+and, with ``--record-dir``, saves the ``.cast`` recording (``asciinema play``) and the ``.md`` sheet.
 
-Uso (desde el host, con la GUI publicada en :9100):
+Usage (from the host, with the GUI published on :9100):
 
-    python3 docker/web/vulnerator_watch.py                    # todas las sesiones
-    python3 docker/web/vulnerator_watch.py --session <id>     # una sesión
+    python3 docker/web/vulnerator_watch.py                    # all sessions
+    python3 docker/web/vulnerator_watch.py --session <id>     # a single session
     python3 docker/web/vulnerator_watch.py --record-dir ./pocs
 
-o dentro del contenedor: ``docker compose exec vulnerator-web python3 vulnerator_watch.py``.
+or inside the container: ``docker compose exec vulnerator-web python3 vulnerator_watch.py``.
 
-Credenciales: ``VULNERATOR_WEB_USER`` / ``VULNERATOR_WEB_PASSWORD`` (por defecto las del
-dashboard, ``admin`` / ``vulnerator``) o ``--user`` / ``--password``.
+Credentials: ``VULNERATOR_WEB_USER`` / ``VULNERATOR_WEB_PASSWORD`` (by default the dashboard's,
+``admin`` / ``vulnerator``) or ``--user`` / ``--password``.
 
-Disciplina: todo lo que se muestra es DATO NO CONFIABLE (salida de tools, texto del modelo).
-Antes de escribirlo en la terminal se NEUTRALIZAN las secuencias de control (ESC, BEL, ...),
-para que una salida maliciosa no pueda reprogramar tu terminal. Solo lee; nunca actúa.
+Discipline: everything displayed is UNTRUSTED DATA (tool output, model text). Before writing it
+to the terminal the control sequences (ESC, BEL, ...) are NEUTRALIZED, so that malicious output
+cannot reprogram your terminal. It only reads; it never acts.
 """
 
 from __future__ import annotations
@@ -47,12 +47,12 @@ CAT_COLORS = {"shell": "1;37", "browser": "38;5;116", "web": "38;5;169", "findin
 FRAME_COLORS = {"ooda": "38;5;174", "cmd": "1;37", "out": "0;37", "note": "38;5;245",
                 "ok": "1;92", "err": "1;91"}
 OODA_LINE = re.compile(r"^[\s>*_`#]*OODA\s*[—–\-:]+\s*[*_`]*(OBSERVE|ORIENT|DECIDE|ACT|REPORT)\b", re.I)
-# Controles C0/C1 salvo \n y \t: se sustituyen por un símbolo visible.
+# C0/C1 controls except \n and \t: replaced with a visible symbol.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 def sanitize(text: Any) -> str:
-    """Neutraliza secuencias de control de un texto no confiable antes de imprimirlo."""
+    """Neutralizes control sequences from untrusted text before printing it."""
     return _CONTROL.sub("·", str(text if text is not None else ""))
 
 
@@ -65,8 +65,8 @@ class Painter:
 
 
 def output_text(text: str) -> str:
-    """Salida útil de una tool (``output`` de kali_run, stdout/stderr o el texto). Delega en el
-    ÚNICO desenvolvedor (``event_model.tool_output_text``) para no duplicar la lógica."""
+    """Useful output of a tool (kali_run's ``output``, stdout/stderr or the text). Delegates to the
+    SINGLE unwrapper (``event_model.tool_output_text``) to avoid duplicating the logic."""
     return em.tool_output_text(text)
 
 
@@ -83,7 +83,7 @@ def fmt_dur(seconds: Optional[float]) -> str:
 
 def format_event(ev: dict[str, Any], p: Painter, *, reasoning: bool = True,
                  output_lines: int = 8, tag: str = "", call_ts: Optional[float] = None) -> list[str]:
-    """Líneas de terminal para un evento (sin salto final). Lista vacía = no se muestra."""
+    """Terminal lines for an event (without trailing newline). Empty list = not shown."""
     kind = ev.get("kind")
     pre = p("38;5;240", tag + " ") if tag else ""
     if kind == "ooda":
@@ -91,7 +91,7 @@ def format_event(ev: dict[str, Any], p: Painter, *, reasoning: bool = True,
         badge = p("1;" + PHASE_COLORS.get(phase, "37"), "[%s %s]" % (phase, ev.get("step")))
         return ["", pre + badge + " " + p("1;37", sanitize(ev.get("text")))]
     if kind == "user":
-        return [pre + p("38;5;169", "operador ▸ ") + sanitize(_one(ev.get("text"), 300))]
+        return [pre + p("38;5;169", "operator ▸ ") + sanitize(_one(ev.get("text"), 300))]
     if kind == "reasoning":
         return [pre + p("3;38;5;242", "∴ " + sanitize(_one(ev.get("text"), 260)))] if reasoning else []
     if kind == "assistant":
@@ -111,7 +111,7 @@ def format_event(ev: dict[str, Any], p: Painter, *, reasoning: bool = True,
             for ln in out[:output_lines]:
                 lines.append(pre + p("38;5;240", "  │ ") + sanitize(ln[:400]))
             if len(out) > output_lines:
-                lines.append(pre + p("38;5;240", "  │ … %d líneas más" % (len(out) - output_lines)))
+                lines.append(pre + p("38;5;240", "  │ … %d more lines" % (len(out) - output_lines)))
         return lines
     return []
 
@@ -122,7 +122,7 @@ def _one(text: Any, limit: int) -> str:
 
 
 def parse_sse(lines: Iterable[str]) -> Iterator[tuple[Optional[str], str, str]]:
-    """Parser SSE mínimo: produce ``(id, event, data)`` por mensaje (ignora comentarios)."""
+    """Minimal SSE parser: yields ``(id, event, data)`` per message (ignores comments)."""
     ev_id: Optional[str] = None
     ev_type = "message"
     data: list[str] = []
@@ -158,7 +158,7 @@ class Watcher:
 
     def _get(self, path: str) -> Any:
         req = urllib.request.Request(self.base + path, headers=self.auth)
-        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 (URL del operador)
+        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 (operator-supplied URL)
             return json.loads(resp.read().decode("utf-8"))
 
     def out(self, lines: list[str]) -> None:
@@ -170,10 +170,10 @@ class Watcher:
         p = self.p
         self.out([p("1;31", "┌──────────────────────────────────────────────────────────┐"),
                   p("1;31", "│") + p("1;37", "  VULNERATOR-AI") + p("38;5;167", " // ") +
-                  p("38;5;250", "watch · OODA en vivo                    ") + p("1;31", "│"),
+                  p("38;5;250", "watch · OODA live                       ") + p("1;31", "│"),
                   p("1;31", "└──────────────────────────────────────────────────────────┘"),
-                  p("38;5;244", "  %s%s · Ctrl-C para salir" % (
-                      self.base, (" · sesión " + self.args.session) if self.args.session else ""))])
+                  p("38;5;244", "  %s%s · Ctrl-C to exit" % (
+                      self.base, (" · session " + self.args.session) if self.args.session else ""))])
 
     def run(self) -> int:
         self.banner()
@@ -187,11 +187,11 @@ class Watcher:
                 return 0
             except urllib.error.HTTPError as exc:
                 if exc.code == 401:
-                    self.out([self.p("1;91", "✗ 401: credenciales rechazadas (VULNERATOR_WEB_USER/PASSWORD).")])
+                    self.out([self.p("1;91", "✗ 401: credentials rejected (VULNERATOR_WEB_USER/PASSWORD).")])
                     return 2
-                self.out([self.p("38;5;244", "… HTTP %s, reintentando" % exc.code)])
+                self.out([self.p("38;5;244", "… HTTP %s, retrying" % exc.code)])
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
-                self.out([self.p("38;5;244", "… sin conexión (%s), reintentando" % sanitize(exc))])
+                self.out([self.p("38;5;244", "… no connection (%s), retrying" % sanitize(exc))])
             if self.last_id:
                 after = int(self.last_id)
             try:
@@ -201,16 +201,16 @@ class Watcher:
             backoff = min(backoff * 2, 15.0)
 
     def _start_cursor(self) -> int:
-        """Cursor inicial: el final actual, menos ``--backfill`` eventos de contexto."""
+        """Initial cursor: the current end, minus ``--backfill`` events of context."""
         try:
             st = self._get("/api/status")
         except urllib.error.HTTPError as exc:
             if exc.code == 401:
-                self.out([self.p("1;91", "✗ 401: credenciales rechazadas (VULNERATOR_WEB_USER/PASSWORD).")])
+                self.out([self.p("1;91", "✗ 401: credentials rejected (VULNERATOR_WEB_USER/PASSWORD).")])
                 sys.exit(2)
             raise
         except (urllib.error.URLError, OSError) as exc:
-            self.out([self.p("1;91", "✗ no se alcanza %s: %s" % (self.base, sanitize(exc)))])
+            self.out([self.p("1;91", "✗ cannot reach %s: %s" % (self.base, sanitize(exc)))])
             sys.exit(1)
         top = int(st.get("max_seq") or 0)
         if self.args.backfill <= 0:
@@ -274,13 +274,13 @@ class Watcher:
         p = self.p
         title = sanitize(poc["finding"]["title"])
         if poc.get("store_status") == "rejected":
-            self.out([p("1;91", "  ✗ hallazgo rechazado por el store: ") + title + p("38;5;244", " — " + sanitize(poc.get("store_error") or ""))])
+            self.out([p("1;91", "  ✗ finding rejected by the store: ") + title + p("38;5;244", " — " + sanitize(poc.get("store_error") or ""))])
             return
         if not poc.get("confirmed"):
-            self.out([p("38;5;179", "  ◆ hallazgo %s registrado: " % sanitize(poc["finding"].get("state"))) + title])
+            self.out([p("38;5;179", "  ◆ finding %s recorded: " % sanitize(poc["finding"].get("state"))) + title])
             return
         bar = "═" * 60
-        self.out(["", p("1;92", "╔" + bar + "╗"), p("1;92", "║  PoC CONFIRMADO") + "  " + p("1;37", title),
+        self.out(["", p("1;92", "╔" + bar + "╗"), p("1;92", "║  PoC CONFIRMED") + "  " + p("1;37", title),
                   p("1;92", "╚" + bar + "╝")])
         if not self.args.no_replay:
             self.play(poc)
@@ -321,9 +321,9 @@ class Watcher:
                 with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310
                     (folder / (stem + "." + ext)).write_bytes(resp.read())
             except (urllib.error.URLError, OSError) as exc:
-                self.out([self.p("38;5;244", "  (no se pudo guardar .%s: %s)" % (ext, sanitize(exc)))])
+                self.out([self.p("38;5;244", "  (could not save .%s: %s)" % (ext, sanitize(exc)))])
                 return
-        self.out([self.p("38;5;244", "  ⏺ grabado en %s/%s.{cast,md}  ·  asciinema play %s/%s.cast" % (
+        self.out([self.p("38;5;244", "  ⏺ recorded to %s/%s.{cast,md}  ·  asciinema play %s/%s.cast" % (
             folder, stem, folder, stem))])
 
 
@@ -332,14 +332,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--url", default=os.environ.get("VULNERATOR_WEB_URL", "http://localhost:9100"))
     ap.add_argument("--user", default=os.environ.get("VULNERATOR_WEB_USER", "admin"))
     ap.add_argument("--password", default=os.environ.get("VULNERATOR_WEB_PASSWORD", "vulnerator"))
-    ap.add_argument("--session", help="seguir solo esta sesión")
-    ap.add_argument("--backfill", type=int, default=30, help="eventos previos de contexto (0 = ninguno)")
-    ap.add_argument("--output-lines", type=int, default=8, help="líneas de salida por tool (0 = ocultar)")
-    ap.add_argument("--no-reasoning", action="store_true", help="ocultar el razonamiento")
-    ap.add_argument("--web", action="store_true", help="mostrar también el tráfico web de Caido")
-    ap.add_argument("--no-replay", action="store_true", help="no reproducir los PoC confirmados")
+    ap.add_argument("--session", help="follow only this session")
+    ap.add_argument("--backfill", type=int, default=30, help="previous context events (0 = none)")
+    ap.add_argument("--output-lines", type=int, default=8, help="output lines per tool (0 = hide)")
+    ap.add_argument("--no-reasoning", action="store_true", help="hide the reasoning")
+    ap.add_argument("--web", action="store_true", help="also show Caido's web traffic")
+    ap.add_argument("--no-replay", action="store_true", help="do not replay the confirmed PoCs")
     ap.add_argument("--replay-speed", type=float, default=1.0)
-    ap.add_argument("--record-dir", help="guardar aquí el .cast y el .md de cada PoC confirmado")
+    ap.add_argument("--record-dir", help="save here the .cast and .md of each confirmed PoC")
     ap.add_argument("--no-color", action="store_true")
     return ap
 

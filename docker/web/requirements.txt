@@ -1,25 +1,25 @@
-# Manifiesto de dependencias de la imagen vulnerator-web (la GUI web de Vulnerator-AI).
-# Componente OBSERVADOR: lee la API de sesiones de Hermes (:8642) y el historial de Caido y
-# sirve una consola de operador. Toda la lógica (normalización de eventos, store de trazas,
-# PoC replay, parser OODA, CLI watch) es STDLIB PURA y se testea sin estas dependencias; lo de
-# abajo es solo la capa HTTP.
+# Dependency manifest for the vulnerator-web image (Vulnerator-AI's web GUI).
+# OBSERVER component: it reads Hermes' session API (:8642) and Caido's history and
+# serves an operator console. All the logic (event normalization, trace store,
+# PoC replay, OODA parser, watch CLI) is PURE STDLIB and is tested without these dependencies;
+# the entries below are only the HTTP layer.
 
-# starlette: micro-framework ASGI de la capa web (rutas, StaticFiles, StreamingResponse para
-#   el SSE en vivo). Se elige Starlette y no FastAPI a propósito: no hace falta validación
-#   pydantic ni OpenAPI, y la superficie de dependencias queda mínima.
-#   Acotado a la línea 0.x (<1) con mínimo en la versión verificada (0.52.1).
+# starlette: the web layer's ASGI micro-framework (routing, StaticFiles, StreamingResponse for
+#   the live SSE). Starlette is chosen over FastAPI on purpose: no pydantic validation
+#   nor OpenAPI is needed, and the dependency surface stays minimal.
+#   Bounded to the 0.x line (<1) with the floor at the verified version (0.52.1).
 starlette>=0.52.1,<1
 
-# uvicorn: servidor ASGI (mismo rango que docker/mcp/requirements.txt; verificado 0.54.0).
+# uvicorn: ASGI server (same range as docker/mcp/requirements.txt; verified 0.54.0).
 uvicorn>=0.54.0,<1
 
-# httpx: cliente async hacia :8642 (sesiones + mensajes) y sondeo de las UIs de Hermes.
-#   Mismo rango que docker/mcp (verificado 0.28.1).
+# httpx: async client to :8642 (sessions + messages) and probing of Hermes' UIs.
+#   Same range as docker/mcp (verified 0.28.1).
 httpx>=0.28.1,<1
 
-# anyio: base async de Starlette/httpx (verificado 4.16.0; mismo mínimo que docker/mcp).
+# anyio: async base of Starlette/httpx (verified 4.16.0; same floor as docker/mcp).
 anyio>=4.15.1
 
-# websockets: para que el proxy de la UI de Caido (caido_proxy.py) puentee las suscripciones
-# GraphQL-over-WS y el historial se actualice EN VIVO. También habilita el soporte WS de uvicorn.
+# websockets: lets Caido's UI proxy (caido_proxy.py) bridge the GraphQL-over-WS
+# subscriptions so the history updates LIVE. It also enables uvicorn's WS support.
 websockets>=13.0,<16

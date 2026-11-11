@@ -1,9 +1,9 @@
-"""Sesión de Hermes SINTÉTICA para los tests de vulnerator-web.
+"""SYNTHETIC Hermes session for the vulnerator-web tests.
 
-Forma exacta de ``GET /api/sessions/{id}/messages`` (hermes-agent 0.23): ``id``, ``role``,
+Exact shape of ``GET /api/sessions/{id}/messages`` (hermes-agent 0.23): ``id``, ``role``,
 ``content``, ``tool_calls`` (JSON string), ``tool_call_id``, ``tool_name``, ``timestamp``,
-``reasoning``. TODOS los destinos son de documentación (RFC 5737 ``192.0.2.0/24`` y
-``example.com``): nunca recon real de un target (regla del repo público).
+``reasoning``. ALL targets are documentation ones (RFC 5737 ``192.0.2.0/24`` and
+``example.com``): never real recon against a target (public-repo rule).
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def messages() -> list[dict]:
             "engagement_id": "eng-test", "title": "Admin panel exposed", "state": "confirmed"})]))
     add("tool", 27.2, tool_call_id="call_bad", tool_name="mcp_kali_record_finding",
         content=json.dumps({"status": "error",
-                            "error": "finding 'confirmed' inválido: requiere 'evidence' reproducible"}))
+                            "error": "invalid 'confirmed' finding: requires reproducible 'evidence'"}))
     add("assistant", 29, content="OODA — ACT (step 7): out-of-scope probe",
         tool_calls=json.dumps([_call("call_oos", "mcp_kali_kali_run",
                                      {"command": "curl -s http://198.51.100.7/"})]))
@@ -88,7 +88,7 @@ def messages() -> list[dict]:
 
 
 def caido_entries() -> list[dict]:
-    """Nodos de ``caido_client.search_history`` (forma de HISTORY_QUERY), sintéticos."""
+    """Nodes from ``caido_client.search_history`` (HISTORY_QUERY shape), synthetic."""
     return [
         {"id": "12", "method": "GET", "host": "shop.example.com", "port": 80,
          "path": "/item", "isTls": False, "length": 120, "createdAt": int((T0 + 18) * 1000),

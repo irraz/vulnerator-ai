@@ -1,4 +1,4 @@
-"""Tests del ingestor (Hermes falso, sin red) y de la app HTTP (auth, API, descargas)."""
+"""Tests for the ingestor (fake Hermes, no network) and the HTTP app (auth, API, downloads)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from trace_store import TraceStore  # noqa: E402
 
 
 class FakeHermes:
-    """Imita ``HermesSessions`` sobre la fixture: expone los mensajes poco a poco."""
+    """Mimics ``HermesSessions`` over the fixture: exposes the messages bit by bit."""
 
     def __init__(self, upto: int) -> None:
         self.upto = upto
@@ -50,12 +50,12 @@ def test_session_ingestor_incremental_and_poc_recording(tmp_path):
         hermes.upto = len(fx.messages())
         second = await ing.poll_once()
         assert second > 0 and hermes.calls[-1][0] == "latest"
-        assert await ing.poll_once() == 0  # sesión "activa": re-sync idempotente, 0 nuevos
+        assert await ing.poll_once() == 0  # "active" session: idempotent re-sync, 0 new
         return st
 
     asyncio.run(go())
     files = sorted(p.name for p in tmp_path.rglob("*") if p.is_file())
-    assert len(files) == 2  # solo el PoC CONFIRMADO y ACEPTADO se graba (.cast + .md)
+    assert len(files) == 2  # only the CONFIRMED and ACCEPTED PoC is recorded (.cast + .md)
     assert any(f.endswith(".cast") for f in files) and any(f.endswith(".md") for f in files)
     assert all("Boolean-SQL-injection" in f for f in files)
 
@@ -67,7 +67,7 @@ def test_notifier_wakes_waiters():
         await asyncio.sleep(0.01)
         await n.notify_async()
         assert await asyncio.wait_for(waiter, 1) == 1
-        assert await n.wait(1, 0.01) == 1  # timeout sin cambios
+        assert await n.wait(1, 0.01) == 1  # timeout with no changes
 
     asyncio.run(go())
 
@@ -160,7 +160,7 @@ def test_security_headers(client):
     csp = r.headers["content-security-policy"]
     assert "script-src 'self'" in csp and "unsafe-inline" not in csp
     assert r.headers["x-content-type-options"] == "nosniff"
-    assert client.get("/api/status").headers["x-frame-options"] == "DENY"  # también en 401
+    assert client.get("/api/status").headers["x-frame-options"] == "DENY"  # also on 401
 
 
 def test_sessions_events_trace_api(client):
@@ -185,7 +185,7 @@ def test_pocs_api_and_downloads(client):
     assert cast.status_code == 200 and "attachment" in cast.headers["content-disposition"]
     assert json.loads(cast.text.splitlines()[0])["version"] == 2
     md = client.get("/api/sessions/%s/pocs/call_find.md" % fx.SID, headers=_auth())
-    assert md.status_code == 200 and "## Reproducción" in md.text
+    assert md.status_code == 200 and "## Reproduction" in md.text
     assert client.get("/api/sessions/%s/pocs/call_find.exe" % fx.SID,
                       headers=_auth()).status_code == 400
     assert client.get("/api/sessions/%s/pocs/nope.md" % fx.SID, headers=_auth()).status_code == 404
@@ -216,11 +216,11 @@ def test_status_reports_hermes_ui_probe_without_faking(client):
     st = client.get("/api/status", headers=_auth()).json()
     for key in ("dashboard", "webapp"):
         assert st["hermes"][key]["up"] is False
-        assert st["hermes"][key]["detail"] == "sin URL interna configurada"
+        assert st["hermes"][key]["detail"] == "no internal URL configured"
     assert st["hermes"]["dashboard"]["port"] == "9119"
 
 
-# --------------------------------------------------------------------------- sesión
+# --------------------------------------------------------------------------- session
 def _key():
     s = _settings()
     return web_app.session_key(s.user, s.password, s.hermes_key)
@@ -243,7 +243,7 @@ def test_login_form_sets_session_cookie(client):
                      headers={"Content-Type": "application/x-www-form-urlencoded"}, follow_redirects=False)
     assert ok.status_code == 303 and ok.headers["location"] == "/#traces"
     assert "httponly" in ok.headers["set-cookie"].lower() and "samesite=strict" in ok.headers["set-cookie"].lower()
-    assert client.get("/api/status").status_code == 200  # la cookie basta, sin Basic
+    assert client.get("/api/status").status_code == 200  # the cookie is enough, no Basic
     client.get("/logout", follow_redirects=False)
     assert client.get("/api/status").status_code == 401
 

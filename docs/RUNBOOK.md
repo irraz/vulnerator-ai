@@ -1,272 +1,272 @@
-# RUNBOOK — Vulnerator-AI con consola web, pantallas en vivo y director de Caido
+# RUNBOOK — Vulnerator-AI with web console, live screens and Caido director
 
-Guía para levantar **todo desde cero** (clon limpio del repo) y que funcione. Incluye lo nuevo:
-la **consola web** (`vulnerator-web`), el **navegador visible** (`browser-view`), el **director de
-Caido** (`caido-director`) y Hermes **v0.23.0**. Pensada para operador; en español.
+Guide to bring **everything up from scratch** (clean clone of the repo) and have it working. It covers
+what's new: the **web console** (`vulnerator-web`), the **visible browser** (`browser-view`), the **Caido
+director** (`caido-director`) and Hermes **v0.23.0**. Written for the operator.
 
-> Esto documenta el estado de la rama de trabajo. Nada está subido a GitHub todavía.
+> This documents the state of the working branch. Nothing has been pushed to GitHub yet.
 
 ---
 
-## 1. Qué levanta la stack (9 servicios)
+## 1. What the stack brings up (9 services)
 
-| Servicio | Imagen | Puerto host | Qué es |
+| Service | Image | Host port | What it is |
 |---|---|---|---|
-| `kali` | `vulnerator-ai-kali:dev` (build) | 8900 | Runtime de tools (nmap, whatweb, sqlmap, Caido client…) vía kali-mcp. |
-| `ooda-agent` | `nousresearch/hermes-agent:v0.23.0` | 8642 (API), 9119 (dashboard), 9120 (webapp) | El cerebro OODA (Hermes). |
-| `playwright-mcp` | `mcr.microsoft.com/playwright/mcp` | — (interno) | Navegador del agente. **Conduce el navegador de `browser-view` por CDP.** |
-| `vulnerator-mcp` | `vulnerator-ai-mcp:dev` (build) | — (interno) | Front door MCP sobre la API de runs. |
-| `vulnerator-web` | `vulnerator-ai-web:dev` (build) | **9100** (GUI), 7000 (Caido pre-auth) | **La consola web.** También sirve la UI de Caido pre-autenticada como invitado. |
-| `browser-view` | `vulnerator-ai-browser-view:dev` (build) | 6080 (noVNC) | Chromium **visible** que conduce el agente; se ve por noVNC en la consola. |
-| `caido-director` | `vulnerator-ai-caido-director:dev` (build) | 6090 (noVNC) | Re-escenifica en la UI de Caido lo que el agente hace con ella. |
-| `caido` + `caido-init` | `caido/caido:0.59.0` | — (interno) | Toolkit web (proxy/Replay/Automate/Intercept). |
-| `juice-shop` (opcional, lab) | `bkimminich/juice-shop` | — (interno) | Objetivo de prácticas; solo con `docker-compose.target.yml`. |
+| `kali` | `vulnerator-ai-kali:dev` (build) | 8900 | Tools runtime (nmap, whatweb, sqlmap, Caido client…) via kali-mcp. |
+| `ooda-agent` | `nousresearch/hermes-agent:v0.23.0` | 8642 (API), 9119 (dashboard), 9120 (webapp) | The OODA brain (Hermes). |
+| `playwright-mcp` | `mcr.microsoft.com/playwright/mcp` | — (internal) | The agent's browser. **Drives the `browser-view` browser over CDP.** |
+| `vulnerator-mcp` | `vulnerator-ai-mcp:dev` (build) | — (internal) | MCP front door over the runs API. |
+| `vulnerator-web` | `vulnerator-ai-web:dev` (build) | **9100** (GUI), 7000 (Caido pre-auth) | **The web console.** It also serves the Caido UI pre-authenticated as a guest. |
+| `browser-view` | `vulnerator-ai-browser-view:dev` (build) | 6080 (noVNC) | **Visible** Chromium the agent drives; watched over noVNC in the console. |
+| `caido-director` | `vulnerator-ai-caido-director:dev` (build) | 6090 (noVNC) | Re-stages in the Caido UI what the agent does with it. |
+| `caido` + `caido-init` | `caido/caido:0.59.0` | — (internal) | Web toolkit (proxy/Replay/Automate/Intercept). |
+| `juice-shop` (optional, lab) | `bkimminich/juice-shop` | — (internal) | Practice target; only with `docker-compose.target.yml`. |
 
-**Imágenes propias a construir:** `kali`, `vulnerator-mcp`, `vulnerator-web`, `browser-view`,
-`caido-director`. Las demás se descargan.
+**Own images to build:** `kali`, `vulnerator-mcp`, `vulnerator-web`, `browser-view`,
+`caido-director`. The rest are pulled.
 
 ---
 
-## 2. Requisitos
+## 2. Requirements
 
 - **Docker** + **docker compose v2** (`docker compose version`).
-- Acceso a internet (para descargar imágenes y para que Hermes llame a OpenRouter).
-- Disco: ~5-6 GB de imágenes (Hermes v0.23.0 pesa ~3,2 GB).
-- Una clave de **OpenRouter** con saldo (el cerebro de Hermes). Alternativa: Ollama (ver §9).
+- Internet access (to pull images and for Hermes to call OpenRouter).
+- Disk: ~5-6 GB of images (Hermes v0.23.0 weighs ~3.2 GB).
+- An **OpenRouter** key with credit (Hermes' brain). Alternative: Ollama (see §9).
 
 ---
 
-## 3. Preparar el `.env` (una sola vez)
+## 3. Prepare the `.env` (one time only)
 
-Copia la plantilla y rellena lo imprescindible:
+Copy the template and fill in the essentials:
 
 ```sh
-cd ~/vulnerator-ai-work          # tu clon del repo
+cd ~/vulnerator-ai-work          # your clone of the repo
 cp .env.example .env
 chmod 600 .env
 ```
 
-**Variables OBLIGATORIAS** (sin ellas la stack no arranca, son fail-closed):
+**REQUIRED variables** (without them the stack won't start — they are fail-closed):
 
 ```ini
-# Clave del proveedor LLM de Hermes (OpenRouter). Requerida en modo OpenRouter.
+# Key for Hermes' LLM provider (OpenRouter). Required in OpenRouter mode.
 OPENROUTER_API_KEY=sk-or-v1-....................................................
 
-# Bearer de la API de Hermes (:8642). Genera uno:  openssl rand -hex 32
+# Bearer for the Hermes API (:8642). Generate one:  openssl rand -hex 32
 HERMES_API_SERVER_KEY=<64 hex>
 
-# Token de entrada del MCP front door. Genera otro distinto:  openssl rand -hex 32
+# Inbound token for the MCP front door. Generate a different one:  openssl rand -hex 32
 VULNERATOR_MCP_INBOUND_TOKEN=<64 hex>
 ```
 
-> Genera las dos claves con `openssl rand -hex 32` (una distinta para cada una).
-> `install.sh` también las genera por ti si prefieres ese camino (§5, opción B).
+> Generate the two keys with `openssl rand -hex 32` (a different one for each).
+> `install.sh` also generates them for you if you prefer that path (§5, option B).
 
-**Recomendadas para las pantallas en vivo de Caido** (si no, Caido no verá el tráfico del
-agente):
+**Recommended for Caido's live screens** (otherwise Caido won't see the agent's
+traffic):
 
 ```ini
-# El navegador visible enruta su tráfico por el proxy de Caido -> se ve en Caido.
+# The visible browser routes its traffic through Caido's proxy -> it shows up in Caido.
 BROWSER_VIEW_PROXY=http://caido:8080
-# Las tools HTTP de kali (curl/nuclei/ffuf…) también pasan por el proxy de Caido.
+# kali's HTTP tools (curl/nuclei/ffuf…) also go through Caido's proxy.
 CAIDO_PROXY_CAPTURE=1
 ```
 
-**Opcionales** (tienen default sensato; ver `.env.example` para todas):
-`VULNERATOR_WEB_PASSWORD` (login de la consola; por defecto `vulnerator`),
-`HERMES_IMAGE` (por defecto `nousresearch/hermes-agent:v0.23.0`),
-`CAIDO_DIRECTOR_STEP` (ritmo del director), puertos `*_HOST_PORT`.
+**Optional** (they have sensible defaults; see `.env.example` for all of them):
+`VULNERATOR_WEB_PASSWORD` (console login; defaults to `vulnerator`),
+`HERMES_IMAGE` (defaults to `nousresearch/hermes-agent:v0.23.0`),
+`CAIDO_DIRECTOR_STEP` (director pacing), `*_HOST_PORT` ports.
 
-El `.env` está en `.gitignore` — **nunca se sube**.
+The `.env` is in `.gitignore` — **it is never committed**.
 
 ---
 
-## 4. Construir las imágenes propias
+## 4. Build the own images
 
-El `docker-compose.yml` declara `platforms:` multi-arch (para publicar), y un Docker **sin
-buildx/containerd** falla con *"Multi-platform build is not supported for the docker driver"*.
-Por eso, el camino fiable es construir cada imagen para tu arquitectura con el script incluido:
+The `docker-compose.yml` declares multi-arch `platforms:` (for publishing), and a Docker **without
+buildx/containerd** fails with *"Multi-platform build is not supported for the docker driver"*.
+That's why the reliable path is to build each image for your architecture with the included script:
 
 ```sh
 ./build-local-images.sh
 ```
 
-(Equivale a `docker build -f docker/<x>/Dockerfile -t vulnerator-ai-<x>:dev .` de las 5 imágenes.)
+(Equivalent to `docker build -f docker/<x>/Dockerfile -t vulnerator-ai-<x>:dev .` for the 5 images.)
 
-> Si tu Docker **sí** tiene buildx/containerd, puedes saltarte esto y usar `docker compose up -d
-> --build` directamente (o `./install.sh`).
+> If your Docker **does** have buildx/containerd, you can skip this and use `docker compose up -d
+> --build` directly (or `./install.sh`).
 
 ---
 
-## 5. Levantar la stack
+## 5. Bring the stack up
 
-**Opción A — manual (recomendada tras `build-local-images.sh`):**
+**Option A — manual (recommended after `build-local-images.sh`):**
 
 ```sh
-# Sin lab:
+# Without the lab:
 docker compose up -d --no-build
-# Con el lab de prácticas OWASP Juice Shop:
+# With the OWASP Juice Shop practice lab:
 docker compose -f docker-compose.yml -f docker-compose.target.yml up -d --no-build
 ```
 
-**Opción B — instalador oficial** (genera el `.env` y hace `up -d --build`; requiere que tu
-Docker construya multi-plataforma, o adáptalo):
+**Option B — official installer** (generates the `.env` and runs `up -d --build`; requires that your
+Docker build multi-platform, or adapt it):
 
 ```sh
-./install.sh                     # te pide la OpenRouter key y genera claves
-./install.sh --with-juice-shop   # además levanta el lab
+./install.sh                     # asks for the OpenRouter key and generates keys
+./install.sh --with-juice-shop   # also brings up the lab
 ```
 
 ---
 
-## 6. Verificar que está sano
+## 6. Verify it's healthy
 
 ```sh
-docker compose ps        # todos "healthy" / "Up" (ooda-agent no tiene healthcheck: es normal)
+docker compose ps        # all "healthy" / "Up" (ooda-agent has no healthcheck: that's normal)
 curl -s http://localhost:8642/health            # {"status":"ok",...,"version":"0.23.0"}
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9100/healthz   # 200
 ```
 
-`caido` tarda ~30-60 s en estar listo tras un arranque en frío. El **director de Caido** necesita
-ese margen para dejar la UI pre-autenticada y sin onboarding (lo hace solo, ver §10/§11).
+`caido` takes ~30-60 s to be ready after a cold start. The **Caido director** needs
+that margin to leave the UI pre-authenticated and without onboarding (it does this on its own, see §10/§11).
 
 ---
 
-## 7. Entrar en la consola web
+## 7. Enter the web console
 
-La consola está en **http://localhost:9100**.
+The console is at **http://localhost:9100**.
 
-- **Login propio** (usuario `admin` / contraseña `vulnerator`, o lo que pongas en
-  `VULNERATOR_WEB_USER`/`PASSWORD`). Para acceso sin credenciales en una máquina controlada,
+- **Own login** (user `admin` / password `vulnerator`, or whatever you set in
+  `VULNERATOR_WEB_USER`/`PASSWORD`). For credential-free access on a controlled machine,
   `VULNERATOR_WEB_AUTH=0`.
 
-Pestañas:
-- **Terminal** — el bucle OODA en vivo: fases, razonamiento, cada comando con su salida.
-- **Copilot** — "ahora mismo": tool en curso, navegador, tráfico de Caido, hallazgos.
-- **Trazas** — cascada de tool-calls (duración, estado, fase) tipo Langfuse.
-- **PoC** — por cada hallazgo confirmado: ruta OODA + reproducción grabada (`.cast`/`.md`).
-- **Pantallas** — para demos: **acciones de Hermes en vivo** + **navegador del agente** (noVNC)
-  + **Caido operándose solo** (director) + enlaces al Dashboard/Webapp de Hermes.
-- **Hermes** — accesos al Dashboard (`:9119`, Kanban) y Webapp (`:9120`).
+Tabs:
+- **Terminal** — the live OODA loop: phases, reasoning, every command with its output.
+- **Copilot** — "right now": running tool, browser, Caido traffic, findings.
+- **Traces** — tool-call waterfall (duration, status, phase), Langfuse-style.
+- **PoC** — for each confirmed finding: OODA path + recorded reproduction (`.cast`/`.md`).
+- **Screens** — for demos: **Hermes' actions live** + **the agent's browser** (noVNC)
+  + **Caido driving itself** (director) + links to Hermes' Dashboard/Webapp.
+- **Hermes** — access to the Dashboard (`:9119`, Kanban) and Webapp (`:9120`).
 
 ---
 
-## 8. Lanzar un engagement (como usuario)
+## 8. Launch an engagement (as a user)
 
-Es independiente de la consola (la consola solo observa). Formas:
+It is independent of the console (the console only observes). Ways:
 
 ```sh
-# a) TUI interactiva:
+# a) interactive TUI:
 docker compose exec -it ooda-agent hermes chat
 
-# b) API de runs (lo que se ve en vivo en la consola):
+# b) runs API (what shows up live in the console):
 KEY=$(grep '^HERMES_API_SERVER_KEY=' .env | cut -d= -f2-)
 curl -s http://localhost:8642/v1/runs -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
   -d '{"input":"Authorized pentest against http://juice-shop:3000 (scope: that host only). ..."}'
 ```
 
-El lab interno se alcanza como `http://juice-shop:3000`. Para un objetivo externo autorizado,
-pon su URL y acota el scope a ese host.
+The internal lab is reached as `http://juice-shop:3000`. For an authorized external target,
+put its URL and narrow the scope to that host.
 
-Seguirlo **desde la terminal** (CLI, stdlib pura):
+Follow it **from the terminal** (CLI, pure stdlib):
 ```sh
-docker compose exec vulnerator-web python3 vulnerator_watch.py            # todas las sesiones
-# o desde el host:  python3 docker/web/vulnerator_watch.py --record-dir ./pocs
+docker compose exec vulnerator-web python3 vulnerator_watch.py            # all sessions
+# or from the host:  python3 docker/web/vulnerator_watch.py --record-dir ./pocs
 ```
 
 ---
 
-## 9. Modo Ollama (sin OpenRouter)
+## 9. Ollama mode (without OpenRouter)
 
-Pon en `.env` `OLLAMA_BASE_URL=http://host.docker.internal:11434/v1` y `OLLAMA_MODEL=<modelo>`;
-entonces `OPENROUTER_API_KEY` no es obligatoria. (Ver `.env.example`.)
-
----
-
-## 10. Las pantallas en vivo (cómo ver lo que hace)
-
-- **Navegador del agente** (`browser-view`, noVNC en `:6080`): el agente controla ese Chromium
-  pixel a pixel; lo ves navegar/clicar. Para objetivos **HTTPS por el proxy de Caido** el
-  navegador usa `--ignore-certificate-errors` (el proxy hace MITM con su propia CA).
-- **Caido (director)** (`caido-director`, noVNC en `:6090`): la UI de Caido **se mueve sola**
-  reproduciendo cada `caido_request`/`caido_automate`/`caido_history`/scope del agente: abre la
-  sesión de Replay, teclea el filtro HTTPQL, abre el paquete, etc. Los **datos son reales** (los
-  del agente); el "paseo" por la UI lo coreografía el director. Va al **ritmo del agente**
-  (cada acción es una inferencia del LLM, ~30-60 s): es el "directo lento pero se ve todo".
-- Para que Caido tenga tráfico que mostrar: `BROWSER_VIEW_PROXY=http://caido:8080` y
-  `CAIDO_PROXY_CAPTURE=1` en `.env` (§3).
-
-**Caido entra siempre como invitado, sin onboarding** — está resuelto en código: `vulnerator-web`
-hace de proxy de Caido e inyecta un token de invitado y marca el onboarding/analytics como hecho
-(ver `docker/web/caido_proxy.py`). Sobrevive a borrar el volumen de Caido. Quien quiera su cuenta
-Caido la configura al instalar (token de entorno `CAIDO_PAT`).
+Set `OLLAMA_BASE_URL=http://host.docker.internal:11434/v1` and `OLLAMA_MODEL=<model>` in `.env`;
+then `OPENROUTER_API_KEY` is no longer required. (See `.env.example`.)
 
 ---
 
-## 11. Troubleshooting (cosas que ya resolvimos)
+## 10. The live screens (how to watch what it does)
 
-- **Caido muestra "Learn the Essentials"/analytics al abrir** → solo pasa en los primeros ~30 s
-  tras un volumen de Caido recién creado (el proxy aún está fijando el estado). Refresca; se
-  auto-corrige en cada carga. Está resuelto en código, no hay que tocar nada a mano.
-- **Caido no captura nada** → faltan `BROWSER_VIEW_PROXY=http://caido:8080` y/o
-  `CAIDO_PROXY_CAPTURE=1` en `.env`, o estás mirando tráfico de antes de arrancar el engagement.
-- **El navegador visible da error de certificado en HTTPS** → ya está el flag
-  `--ignore-certificate-errors` en `browser-view` (necesario al pasar por el proxy de Caido).
-- **Caido entra en pánico "Permission denied" tras borrar su volumen** → lo arregla el servicio
-  one-shot `caido-init` (hace `chown` del volumen). Si recreas Caido a mano con `--no-deps`,
-  ejecuta antes `docker compose run --rm caido-init`.
-- **`docker compose build` falla "Multi-platform build is not supported"** → usa
+- **The agent's browser** (`browser-view`, noVNC on `:6080`): the agent controls that Chromium
+  pixel by pixel; you watch it navigate/click. For **HTTPS targets through Caido's proxy** the
+  browser uses `--ignore-certificate-errors` (the proxy does MITM with its own CA).
+- **Caido (director)** (`caido-director`, noVNC on `:6090`): the Caido UI **moves on its own**
+  replaying each `caido_request`/`caido_automate`/`caido_history`/scope from the agent: it opens the
+  Replay session, types the HTTPQL filter, opens the packet, etc. The **data is real** (the
+  agent's); the "walkthrough" of the UI is choreographed by the director. It runs at the **agent's
+  pace** (each action is an LLM inference, ~30-60 s): it's the "slow but you see everything" live feed.
+- For Caido to have traffic to show: `BROWSER_VIEW_PROXY=http://caido:8080` and
+  `CAIDO_PROXY_CAPTURE=1` in `.env` (§3).
+
+**Caido always enters as a guest, without onboarding** — it is handled in code: `vulnerator-web`
+acts as a Caido proxy and injects a guest token and marks onboarding/analytics as done
+(see `docker/web/caido_proxy.py`). It survives deleting Caido's volume. Whoever wants their own
+Caido account configures it at install time (the `CAIDO_PAT` environment token).
+
+---
+
+## 11. Troubleshooting (things we already solved)
+
+- **Caido shows "Learn the Essentials"/analytics when opened** → this only happens in the first ~30 s
+  after a freshly created Caido volume (the proxy is still fixing the state). Refresh; it
+  self-corrects on every load. It is handled in code, nothing needs to be touched by hand.
+- **Caido captures nothing** → `BROWSER_VIEW_PROXY=http://caido:8080` and/or
+  `CAIDO_PROXY_CAPTURE=1` are missing from `.env`, or you're looking at traffic from before the engagement started.
+- **The visible browser gives a certificate error on HTTPS** → the
+  `--ignore-certificate-errors` flag is already on `browser-view` (needed when going through Caido's proxy).
+- **Caido panics with "Permission denied" after deleting its volume** → the one-shot
+  `caido-init` service fixes it (it `chown`s the volume). If you recreate Caido by hand with `--no-deps`,
+  run `docker compose run --rm caido-init` first.
+- **`docker compose build` fails with "Multi-platform build is not supported"** → use
   `./build-local-images.sh` (§4).
-- **Hermes rechaza el LLM con `HTTP 401 User not found`** → la `OPENROUTER_API_KEY` es inválida
-  o sin saldo; pon una válida y recrea: `docker compose up -d ooda-agent`.
-- **Rollback de Hermes** → `HERMES_IMAGE=nousresearch/hermes-agent:v0.22.7` en `.env` y
+- **Hermes rejects the LLM with `HTTP 401 User not found`** → the `OPENROUTER_API_KEY` is invalid
+  or has no credit; set a valid one and recreate: `docker compose up -d ooda-agent`.
+- **Hermes rollback** → `HERMES_IMAGE=nousresearch/hermes-agent:v0.22.7` in `.env` and
   `docker compose up -d ooda-agent`.
-- **El director de Caido está quieto** → el agente no está usando tools de Caido en ese momento
-  (hace recon/navegador). Solo se mueve cuando el agente ejecuta `caido_*`.
+- **The Caido director is still** → the agent isn't using Caido tools at that moment
+  (it's doing recon/browser). It only moves when the agent runs `caido_*`.
 
 ---
 
-## 12. Empezar un ejercicio DESDE 0 (pizarra limpia)
+## 12. Start an exercise FROM 0 (clean slate)
 
-Para una demo desde cero sin rastro de pruebas anteriores:
+For a demo from scratch with no trace of previous tests:
 
 ```sh
-# 1) parar runs activos (si los hay): por la API /v1/runs/<id>/stop, o reinicia ooda-agent.
-# 2) borrar estado (sesiones de Hermes, base de la consola, tráfico de Caido):
-docker compose down                         # para la stack (conserva volúmenes)
+# 1) stop active runs (if any): via the /v1/runs/<id>/stop API, or restart ooda-agent.
+# 2) delete state (Hermes sessions, the console's database, Caido traffic):
+docker compose down                         # stops the stack (keeps volumes)
 docker volume rm vulnerator-ai-work_hermes-data \
                  vulnerator-ai-work_vulnerator-web-data \
                  vulnerator-ai-work_caido-data
-docker compose run --rm caido-init          # permisos del volumen nuevo de Caido
-docker compose up -d --no-build             # (+ -f docker-compose.target.yml para el lab)
+docker compose run --rm caido-init          # permissions for the new Caido volume
+docker compose up -d --no-build             # (+ -f docker-compose.target.yml for the lab)
 ```
 
-Esto deja Hermes sin sesiones, la consola vacía y Caido sin tráfico. El onboarding de Caido se
-vuelve a poner solo (código). Espera ~30-60 s a que todo esté sano antes de lanzar el engagement.
+This leaves Hermes with no sessions, the console empty and Caido with no traffic. Caido's onboarding
+is set up again on its own (code). Wait ~30-60 s for everything to be healthy before launching the engagement.
 
-> Borrar `hermes-data` resetea también el perfil/Kanban de Hermes (se reconstruye al arrancar
-> desde `./agent-ooda`). Si solo quieres limpiar la consola y el tráfico, borra únicamente
-> `vulnerator-web-data` y `caido-data`.
+> Deleting `hermes-data` also resets Hermes' profile/Kanban (it is rebuilt on startup
+> from `./agent-ooda`). If you only want to clear the console and the traffic, delete only
+> `vulnerator-web-data` and `caido-data`.
 
 ---
 
-## 13. Reset total (borrar TODO, incl. imágenes)
+## 13. Full reset (delete EVERYTHING, incl. images)
 
 ```sh
-docker compose down -v                      # para y borra TODOS los volúmenes
-# (opcional) borrar las imágenes propias:
+docker compose down -v                      # stops and deletes ALL volumes
+# (optional) delete the own images:
 docker image rm vulnerator-ai-kali:dev vulnerator-ai-mcp:dev vulnerator-ai-web:dev \
                 vulnerator-ai-browser-view:dev vulnerator-ai-caido-director:dev
-# luego: ./build-local-images.sh && docker compose up -d --no-build
+# then: ./build-local-images.sh && docker compose up -d --no-build
 ```
 
 ---
 
-## 14. Estado del repo / qué falta
+## 14. Repo status / what's missing
 
-- Rama de trabajo local sobre `master`. **Sin commits todavía; nada subido a GitHub.**
-- Añadidos nuevos: `docker/web/`, `docker/browser-view/`, `docker/caido-director/`,
+- Local working branch on top of `master`. **No commits yet; nothing pushed to GitHub.**
+- New additions: `docker/web/`, `docker/browser-view/`, `docker/caido-director/`,
   `build-local-images.sh`, `docs/web-gui.md`, `docs/RUNBOOK.md`.
-- Modificados: `docker-compose.yml`, `.env.example`, `README.md`.
-- Documentación de la consola y las pantallas: **[`docs/web-gui.md`](web-gui.md)**.
+- Modified: `docker-compose.yml`, `.env.example`, `README.md`.
+- Documentation for the console and the screens: **[`docs/web-gui.md`](web-gui.md)**.

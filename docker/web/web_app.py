@@ -1,34 +1,34 @@
-"""vulnerator-web — la GUI web de Vulnerator-AI (capa fina Starlette sobre módulos puros).
+"""vulnerator-web — the Vulnerator-AI web GUI (thin Starlette layer over pure modules).
 
-Sirve una consola de operador (``static/``) y su API:
+Serves an operator console (``static/``) and its API:
 
-  GET /healthz                               vida del proceso (SIN auth, match exacto)
-  GET /api/status                            Hermes/ingesta/Caido + puertos de las UIs de Hermes
-  GET /api/sessions                          sesiones (incluye subagentes) con contadores
-  GET /api/sessions/{sid}                    una sesión
-  GET /api/sessions/{sid}/events             eventos (``after``/``tail``/``kinds``/``limit``)
-  GET /api/sessions/{sid}/trace              spans + agregados por tool (vista tipo Langfuse)
-  GET /api/sessions/{sid}/pocs               PoCs de la sesión (cadena OODA + reproducción)
-  GET /api/sessions/{sid}/pocs/{call}.cast   grabación asciinema v2 del PoC
-  GET /api/sessions/{sid}/pocs/{call}.md     ficha Markdown del PoC
-  GET /api/pocs                              índice de hallazgos de todas las sesiones
-  GET /api/events/{seq}                      un evento con su texto COMPLETO
-  GET /api/web                               tráfico web capturado por Caido
-  GET /api/stream                            SSE en vivo (reanudable con Last-Event-ID)
+  GET /healthz                               process liveness (NO auth, exact match)
+  GET /api/status                            Hermes/ingest/Caido + ports of the Hermes UIs
+  GET /api/sessions                          sessions (includes subagents) with counters
+  GET /api/sessions/{sid}                    a single session
+  GET /api/sessions/{sid}/events             events (``after``/``tail``/``kinds``/``limit``)
+  GET /api/sessions/{sid}/trace              spans + per-tool aggregates (Langfuse-style view)
+  GET /api/sessions/{sid}/pocs               PoCs of the session (OODA chain + replay)
+  GET /api/sessions/{sid}/pocs/{call}.cast   asciinema v2 recording of the PoC
+  GET /api/sessions/{sid}/pocs/{call}.md     Markdown sheet of the PoC
+  GET /api/pocs                              index of findings across all sessions
+  GET /api/events/{seq}                      a single event with its FULL text
+  GET /api/web                               web traffic captured by Caido
+  GET /api/stream                            live SSE (resumable with Last-Event-ID)
 
-OBSERVADOR por diseño: lee la API de sesiones de Hermes y el historial de Caido y los muestra; no
-dirige ni para runs. La ÚNICA acción que puede iniciar, bajo demanda del operador, es generar el
-informe formal (botón "Generar informe" -> POST /api/report); se desactiva con
-VULNERATOR_WEB_ALLOW_TRIGGER=0 (consola en modo solo-observación). La lógica vive en módulos
-stdlib-puros (``event_model``, ``trace_store``, ``poc_replay``, ``ooda_parse``) cubiertos por
-tests; aquí solo hay HTTP, auth y cableado.
+OBSERVER by design: it reads the Hermes sessions API and the Caido history and displays them; it
+does not drive or stop runs. The ONLY action it can start, on operator demand, is generating the
+formal report ("Generate report" button -> POST /api/report); it is disabled with
+VULNERATOR_WEB_ALLOW_TRIGGER=0 (console in observe-only mode). The logic lives in pure-stdlib
+modules (``event_model``, ``trace_store``, ``poc_replay``, ``ooda_parse``) covered by
+tests; here there is only HTTP, auth and wiring.
 
-Seguridad:
-  - Basic auth obligatoria (comparación en tiempo constante); FAIL-CLOSED: el proceso no
-    arranca sin ``VULNERATOR_WEB_PASSWORD`` ni sin ``HERMES_API_SERVER_KEY``.
-  - CSP estricta (sin scripts/estilos inline), ``nosniff``, ``no-referrer``, sin framing.
-  - Todo lo que viene de Hermes/Caido es DATO NO CONFIABLE: se devuelve como JSON y el
-    frontend lo pinta como texto, nunca como HTML.
+Security:
+  - Mandatory Basic auth (constant-time comparison); FAIL-CLOSED: the process does not
+    start without ``VULNERATOR_WEB_PASSWORD`` nor without ``HERMES_API_SERVER_KEY``.
+  - Strict CSP (no inline scripts/styles), ``nosniff``, ``no-referrer``, no framing.
+  - Everything coming from Hermes/Caido is UNTRUSTED DATA: it is returned as JSON and the
+    frontend renders it as text, never as HTML.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ STATIC = HERE / "static"
 
 _SID_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,160}$")
 _CALL_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,200}$")
-# Texto máximo por evento en listados y stream (el completo: /api/events/{seq}).
+# Max text per event in listings and stream (the full one: /api/events/{seq}).
 LIST_TEXT_MAX = 8 * 1024
 STREAM_HEARTBEAT_S = 15.0
 
@@ -88,33 +88,33 @@ class Settings:
         self.webapp_port = _env("HERMES_WEBAPP_PUBLIC_PORT", "9120")
         self.dashboard_internal = _env("HERMES_DASHBOARD_INTERNAL_URL", "http://ooda-agent:9119/")
         self.webapp_internal = _env("HERMES_WEBAPP_INTERNAL_URL", "http://ooda-agent:9120/")
-        # Pantallas en vivo (para presentaciones): UI de Caido y, más adelante, el navegador.
+        # Live screens (for presentations): Caido UI and, later on, the browser.
         self.caido_ui_port = _env("CAIDO_UI_PUBLIC_PORT")
         self.caido_ui_internal = _env("CAIDO_UI_INTERNAL_URL", "http://caido:8080/")
         self.browser_view_port = _env("BROWSER_VIEW_PUBLIC_PORT")
         self.browser_view_internal = _env("BROWSER_VIEW_INTERNAL_URL", "http://browser-view:6080/")
         self.caido_director_port = _env("CAIDO_DIRECTOR_PUBLIC_PORT")
         self.caido_director_internal = _env("CAIDO_DIRECTOR_INTERNAL_URL", "http://caido-director:6080/")
-        # Proxy de la UI de Caido (auto-login de invitado) servido por ESTE proceso en otro puerto.
+        # Caido UI proxy (guest auto-login) served by THIS process on another port.
         self.caido_proxy_port = _env("CAIDO_PROXY_PORT", "7001")
         self.dashboard_url = _env("HERMES_DASHBOARD_PUBLIC_URL")
         self.webapp_url = _env("HERMES_WEBAPP_PUBLIC_URL")
         self.host = _env("VULNERATOR_WEB_HOST", "0.0.0.0")
         self.port = int(_env("VULNERATOR_WEB_PORT", "9100") or 9100)
-        # Tareas de fondo (sondeo de Hermes/Caido). Los tests las apagan y alimentan el store.
+        # Background tasks (polling Hermes/Caido). Tests turn them off and feed the store.
         self.background = True
-        # Acceso sin credenciales (oficial): VULNERATOR_WEB_AUTH=0 desactiva el Basic auth.
+        # Credential-free access (official): VULNERATOR_WEB_AUTH=0 disables Basic auth.
         self.auth_enabled = _env("VULNERATOR_WEB_AUTH", "1").lower() not in ("0", "false", "no", "off")
-        # Disparador de informe (POST /api/report): es la ÚNICA acción que la consola puede iniciar
-        # sobre Hermes. ON por defecto; VULNERATOR_WEB_ALLOW_TRIGGER=0 lo desactiva y deja la consola
-        # en modo SOLO-OBSERVACIÓN (el botón "Generar informe" se oculta y la ruta responde 403).
+        # Report trigger (POST /api/report): it is the ONLY action the console can start
+        # against Hermes. ON by default; VULNERATOR_WEB_ALLOW_TRIGGER=0 disables it and leaves the
+        # console in OBSERVE-ONLY mode (the "Generate report" button is hidden and the route returns 403).
         self.allow_trigger = _env("VULNERATOR_WEB_ALLOW_TRIGGER", "1").lower() not in ("0", "false", "no", "off")
-        # Informe: lee los artefactos del engagement (severities.json / pentest-report.md) del
-        # volumen compartido kali-artifacts montado aquí en modo lectura.
+        # Report: reads the engagement artifacts (severities.json / pentest-report.md) from the
+        # shared kali-artifacts volume mounted here in read-only mode.
         self.artifacts_dir = _env("VULNERATOR_WEB_ARTIFACTS_DIR", "/artifacts")
-        # Engagement/cliente/operador del informe. VACIOS por defecto: nada de datos reales en el
-        # codigo. El handler deriva el engagement del engagement_id de los hallazgos; cliente y
-        # operador solo salen en el informe si los defines (en tu .env, git-ignored).
+        # Engagement/client/operator of the report. EMPTY by default: no real data in the
+        # code. The handler derives the engagement from the engagement_id of the findings; client and
+        # operator only appear in the report if you define them (in your .env, git-ignored).
         self.engagement = _env("VULNERATOR_WEB_ENGAGEMENT", "")
         self.client = _env("VULNERATOR_WEB_CLIENT", "")
         self.operator = _env("VULNERATOR_WEB_OPERATOR", "")
@@ -122,23 +122,23 @@ class Settings:
     def validate(self) -> list[str]:
         problems = []
         if self.auth_enabled and not self.password:
-            problems.append("VULNERATOR_WEB_PASSWORD vacío: la GUI no arranca sin credencial (fail-closed). "
-                            "Usa VULNERATOR_WEB_AUTH=0 para desactivar el login explícitamente.")
+            problems.append("VULNERATOR_WEB_PASSWORD empty: the GUI does not start without a credential (fail-closed). "
+                            "Use VULNERATOR_WEB_AUTH=0 to disable login explicitly.")
         if not self.hermes_key:
-            problems.append("HERMES_API_SERVER_KEY vacío: sin él no se puede leer la API de Hermes.")
+            problems.append("HERMES_API_SERVER_KEY empty: without it the Hermes API cannot be read.")
         return problems
 
 
-# --------------------------------------------------------------------------- sesión
+# --------------------------------------------------------------------------- session
 SESSION_COOKIE = "vweb_session"
 SESSION_TTL_S = 12 * 3600
-# Rutas sin auth: vida del proceso, login/logout y estáticos (no son secretos).
+# Routes without auth: process liveness, login/logout and static files (not secrets).
 _OPEN_EXACT = ("/healthz", "/login", "/logout")
 _OPEN_PREFIX = ("/static/",)
 
 
 def session_key(user: str, password: str, hermes_key: str) -> bytes:
-    """Clave HMAC de las cookies/enlaces: derivada de la credencial (cambiarla invalida todo)."""
+    """HMAC key for cookies/links: derived from the credential (changing it invalidates everything)."""
     return hashlib.sha256(("vweb-session\0%s\0%s\0%s" % (user, password, hermes_key)).encode()).digest()
 
 
@@ -156,7 +156,7 @@ def sign(key: bytes, kind: str, payload: str) -> str:
 
 
 def verify(key: bytes, kind: str, token: str) -> Optional[str]:
-    """Devuelve el payload si la firma es válida (tiempo constante); None si no."""
+    """Returns the payload if the signature is valid (constant time); None otherwise."""
     try:
         body, mac = token.split(".", 1)
         payload = _unb64(body).decode()
@@ -183,7 +183,7 @@ def check_session_cookie(key: bytes, token: str, now: Optional[float] = None) ->
 
 
 def safe_next(target: Optional[str]) -> str:
-    """Solo rutas locales (``/...``): evita redirecciones abiertas a otro host."""
+    """Local routes only (``/...``): avoids open redirects to another host."""
     t = (target or "/").strip()
     if not t.startswith("/") or t.startswith("//") or t.startswith("/\\") or "\\" in t:
         return "/"
@@ -204,7 +204,7 @@ _SECURITY_HEADERS = [
 
 
 class SecurityMiddleware:
-    """Basic auth (salvo ``/healthz`` exacto) + cabeceras de seguridad en toda respuesta."""
+    """Basic auth (except exact ``/healthz``) + security headers on every response."""
 
     def __init__(self, app, user: str, password: str, key: bytes = b"", enabled: bool = True) -> None:
         self.app = app
@@ -271,7 +271,7 @@ class SecurityMiddleware:
                 resp = RedirectResponse("/login?next=" + quote(path or "/", safe="/"), status_code=303)
                 return await resp(scope, receive, send_with_headers)
             resp = PlainTextResponse(
-                "Autenticación requerida", status_code=401,
+                "Authentication required", status_code=401,
                 headers={"WWW-Authenticate": 'Basic realm="Vulnerator-AI", charset="UTF-8"'},
             )
             return await resp(scope, receive, send_with_headers)
@@ -301,7 +301,7 @@ def _state(request: Request):
 
 
 def _pocs_for(app_state, sid: str) -> list[dict[str, Any]]:
-    """PoCs de una sesión con caché por versión (último seq de la sesión)."""
+    """PoCs of a session with per-version cache (last seq of the session)."""
     sess = app_state.store.session(sid)
     if sess is None:
         return []
@@ -313,10 +313,10 @@ def _pocs_for(app_state, sid: str) -> list[dict[str, Any]]:
     else:
         pocs = poc_replay.build_pocs(events)
         app_state.poc_cache[sid] = (last, pocs)
-    # Severidad: ÚNICA fuente de verdad (report.severity_for), resuelta aquí para TODO consumidor
-    # (consola, informe, contadores, filtro). Se aplica en cada llamada para reflejar el
-    # severities.json ACTUAL de la IA sin invalidar la caché de build_pocs. El engagement se deriva
-    # en sitio desde los propios PoC (NO con _engagement(), que llamaría de vuelta a _pocs_for).
+    # Severity: SINGLE source of truth (report.severity_for), resolved here for EVERY consumer
+    # (console, report, counters, filter). It is applied on each call to reflect the AI's CURRENT
+    # severities.json without invalidating the build_pocs cache. The engagement is derived
+    # in place from the PoCs themselves (NOT with _engagement(), which would call back into _pocs_for).
     eng = ""
     for p in pocs:
         eid = (p.get("finding") or {}).get("engagement_id")
@@ -334,11 +334,11 @@ _PROBE_TTL_S = 20.0
 
 
 async def probe_ui(app_state, key: str, url: str) -> dict[str, Any]:
-    """¿Responde la UI de Hermes en la red interna? (caché ``_PROBE_TTL_S``; nunca lanza).
+    """Does the Hermes UI respond on the internal network? (``_PROBE_TTL_S`` cache; never raises).
 
-    Cualquier respuesta HTTP < 500 (incluida la redirección/401 del sign-in) cuenta como "en
-    línea"; un fallo de conexión o un 5xx, como "no disponible" con el motivo. No se sigue la
-    redirección ni se manda credencial: solo se comprueba que el listener está vivo.
+    Any HTTP response < 500 (including the sign-in redirect/401) counts as "online"; a connection
+    failure or a 5xx counts as "unavailable" with the reason. The redirect is not followed and no
+    credential is sent: it only checks that the listener is alive.
     """
     cache = app_state.probe_cache
     hit = cache.get(key)
@@ -347,14 +347,14 @@ async def probe_ui(app_state, key: str, url: str) -> dict[str, Any]:
     import httpx
     result: dict[str, Any] = {"up": False, "detail": None, "checked_at": time.time()}
     if not url:
-        result["detail"] = "sin URL interna configurada"
+        result["detail"] = "no internal URL configured"
     else:
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(3.0), follow_redirects=False) as c:
                 resp = await c.get(url)
             result["up"] = resp.status_code < 500
             result["detail"] = "HTTP %s" % resp.status_code
-        except Exception as exc:  # red: se informa, no se finge
+        except Exception as exc:  # network: report it, don't fake it
             result["detail"] = em.one_line(str(exc) or exc.__class__.__name__, 160)
     cache[key] = result
     return result
@@ -383,7 +383,7 @@ async def login_page(request: Request) -> Response:
     ok_user = hmac.compare_digest(form.get("user", "").encode(), s.user.encode())
     ok_pass = hmac.compare_digest(form.get("password", "").encode(), s.password.encode())
     if not (ok_user and ok_pass):
-        await asyncio.sleep(0.4)  # frena la fuerza bruta online sin bloquear el loop
+        await asyncio.sleep(0.4)  # slows online brute force without blocking the loop
         return RedirectResponse("/login?error=1&next=" + quote(target, safe="/"), status_code=303)
     return _set_session(RedirectResponse(target, status_code=303), s)
 
@@ -437,17 +437,17 @@ async def api_sessions(request: Request) -> Response:
 async def api_session(request: Request) -> Response:
     sid = _sid(request)
     if not sid:
-        return _bad("session id inválido")
+        return _bad("invalid session id")
     sess = _state(request).store.session(sid)
     if sess is None:
-        return _bad("sesión no encontrada", 404)
+        return _bad("session not found", 404)
     return JSONResponse(sess)
 
 
 async def api_session_events(request: Request) -> Response:
     sid = _sid(request)
     if not sid:
-        return _bad("session id inválido")
+        return _bad("invalid session id")
     q = request.query_params
     kinds = [k for k in (q.get("kinds") or "").split(",") if k]
     store: TraceStore = _state(request).store
@@ -464,10 +464,10 @@ async def api_session_events(request: Request) -> Response:
 async def api_trace(request: Request) -> Response:
     sid = _sid(request)
     if not sid:
-        return _bad("session id inválido")
+        return _bad("invalid session id")
     store: TraceStore = _state(request).store
     if store.session(sid) is None:
-        return _bad("sesión no encontrada", 404)
+        return _bad("session not found", 404)
     return JSONResponse({"summary": store.trace_summary(sid), "spans": store.spans(sid),
                          "session": store.session(sid), "now": time.time()})
 
@@ -475,7 +475,7 @@ async def api_trace(request: Request) -> Response:
 async def api_session_pocs(request: Request) -> Response:
     sid = _sid(request)
     if not sid:
-        return _bad("session id inválido")
+        return _bad("invalid session id")
     return JSONResponse({"data": _pocs_for(_state(request), sid)})
 
 
@@ -484,7 +484,7 @@ async def api_poc_file(request: Request) -> Response:
     call = request.path_params.get("call", "")
     ext = request.path_params.get("ext", "")
     if not sid or not _CALL_RE.match(call or "") or ext not in ("cast", "md"):
-        return _bad("parámetros inválidos")
+        return _bad("invalid parameters")
     for poc in _pocs_for(_state(request), sid):
         if poc.get("call_id") == call:
             name = ingest.poc_basename(poc) + "." + ext
@@ -494,7 +494,7 @@ async def api_poc_file(request: Request) -> Response:
                 body, media = poc_replay.to_markdown(poc), "text/markdown; charset=utf-8"
             return Response(body, media_type=media, headers={
                 "Content-Disposition": 'attachment; filename="%s"' % name})
-    return _bad("PoC no encontrado", 404)
+    return _bad("PoC not found", 404)
 
 
 async def api_pocs(request: Request) -> Response:
@@ -512,7 +512,7 @@ async def api_pocs(request: Request) -> Response:
                 "target": f.get("target"), "technique_id": f.get("technique_id"),
                 "store_status": poc["store_status"], "confirmed": poc["confirmed"],
                 "phase": poc.get("phase"), "step": poc.get("step"),
-                # Severidad ya resuelta en el backend (ver _pocs_for): el front solo la pinta.
+                # Severity already resolved in the backend (see _pocs_for): the front just renders it.
                 "sev": poc.get("sev"), "sev_by": poc.get("sev_by"),
                 "score": poc.get("score"), "rationale": poc.get("rationale"),
             })
@@ -520,28 +520,28 @@ async def api_pocs(request: Request) -> Response:
     return JSONResponse({"data": out})
 
 
-# --------------------------------------------------------------------------- informe
-# Instruccion de la generacion del informe: la IA evalua severidad por riesgo real y la graba,
-# y luego redacta el informe. chmod 644 para que ESTE proceso (uid no-root) pueda leer los
-# artefactos del volumen compartido.
+# --------------------------------------------------------------------------- report
+# Report generation instruction: the AI evaluates severity by real risk and records it,
+# and then writes the report. chmod 644 so THIS process (non-root uid) can read the
+# artifacts from the shared volume.
 REPORT_INPUT = (
-    "mode: pentest. Trabaja EXCLUSIVAMENTE sobre los hallazgos ya registrados en el store de esta sesion. "
-    "NO realices nuevo escaneo, enumeracion ni pruebas sobre los hosts.\n\n"
-    "PASO 1 — SEVERIDAD POR CRITERIO PROPIO: evalua la severidad REAL de cada hallazgo segun riesgo "
-    "operativo, no solo el CVSS del titulo. Ejemplos: una base de datos de PRODUCCION expuesta en red, "
-    "APP_DEBUG=true en produccion, phpinfo() expuesto, paneles/metricas sin autenticar o software EOL sin "
-    "parches son de severidad alta o media aunque el titulo no lleve CVSS. Escribe con kali_run el fichero "
-    "/artifacts/{eng}/severities.json con un objeto JSON valido (comillas dobles) que mapea el TITULO EXACTO "
-    "de cada hallazgo (verbatim, tal cual esta registrado) a "
-    '{"severity":"critical|high|medium|low|info","cvss":<numero 0.0-10.0>,"rationale":"<justificacion breve>"}. '
-    "El CVSS es OBLIGATORIO (nunca null): asigna la nota que corresponda y que sea COHERENTE con la "
-    "severidad — critical 9.0-10.0, high 7.0-8.9, medium 4.0-6.9, low 0.1-3.9, info 0.0. "
-    "Incluye TODOS los hallazgos.\n\n"
-    "PASO 2 — INFORME: genera el informe formal (skill pentest-report, base report_gen.py) usando esas "
-    "severidades. Para cada hallazgo: severidad, vector, version afectada, version parcheada y recomendacion. "
-    "Entrega Markdown y su version HTML (pentest-report.html).\n\n"
-    "PASO 3: ejecuta con kali_run 'chmod 644 /artifacts/{eng}/severities.json /artifacts/{eng}/pentest-report.md "
-    "/artifacts/{eng}/pentest-report.html' para que la consola pueda servir los artefactos."
+    "mode: pentest. Work EXCLUSIVELY on the findings already recorded in the store of this session. "
+    "Do NOT perform new scanning, enumeration or testing against the hosts.\n\n"
+    "STEP 1 — SEVERITY BY YOUR OWN JUDGMENT: evaluate the REAL severity of each finding based on "
+    "operational risk, not just the CVSS in the title. Examples: a PRODUCTION database exposed on the network, "
+    "APP_DEBUG=true in production, exposed phpinfo(), unauthenticated panels/metrics or EOL software without "
+    "patches are high or medium severity even if the title carries no CVSS. Use kali_run to write the file "
+    "/artifacts/{eng}/severities.json with a valid JSON object (double quotes) that maps the EXACT TITLE "
+    "of each finding (verbatim, exactly as recorded) to "
+    '{"severity":"critical|high|medium|low|info","cvss":<number 0.0-10.0>,"rationale":"<brief justification>"}. '
+    "The CVSS is MANDATORY (never null): assign the appropriate score and make it CONSISTENT with the "
+    "severity — critical 9.0-10.0, high 7.0-8.9, medium 4.0-6.9, low 0.1-3.9, info 0.0. "
+    "Include ALL findings.\n\n"
+    "STEP 2 — REPORT: generate the formal report (skill pentest-report, based on report_gen.py) using those "
+    "severities. For each finding: severity, vector, affected version, patched version and recommendation. "
+    "Deliver Markdown and its HTML version (pentest-report.html).\n\n"
+    "STEP 3: run with kali_run 'chmod 644 /artifacts/{eng}/severities.json /artifacts/{eng}/pentest-report.md "
+    "/artifacts/{eng}/pentest-report.html' so the console can serve the artifacts."
 )
 
 
@@ -581,7 +581,7 @@ def _load_severities(settings, eng: str) -> dict:
 
 
 def _engagement(state, settings, sid) -> str:
-    """Engagement del informe: el engagement_id de los hallazgos de la sesion; si no, el de env."""
+    """Report engagement: the engagement_id of the session's findings; otherwise, the one from env."""
     if sid:
         for p in _pocs_for(state, sid):
             eid = (p.get("finding") or {}).get("engagement_id")
@@ -599,7 +599,7 @@ async def api_severities(request: Request) -> Response:
 async def api_report(request: Request) -> Response:
     ext = request.path_params.get("ext", "")
     if ext not in ("md", "txt", "html"):
-        return _bad("formato no soportado", 404)
+        return _bad("unsupported format", 404)
     st = _state(request)
     settings = st.settings
     sid = _report_sid(st, request.query_params)
@@ -629,10 +629,10 @@ async def api_report_trigger(request: Request) -> Response:
     st = _state(request)
     settings = st.settings
     if not settings.allow_trigger:
-        return _bad("Disparador de informe desactivado (VULNERATOR_WEB_ALLOW_TRIGGER=0): "
-                    "consola en modo solo-observación.", 403)
+        return _bad("Report trigger disabled (VULNERATOR_WEB_ALLOW_TRIGGER=0): "
+                    "console in observe-only mode.", 403)
     if not settings.hermes_key:
-        return _bad("sin HERMES_API_SERVER_KEY: no se puede lanzar el informe", 503)
+        return _bad("missing HERMES_API_SERVER_KEY: cannot launch the report", 503)
     try:
         body = await request.json()
     except Exception:
@@ -650,14 +650,14 @@ async def api_report_trigger(request: Request) -> Response:
                              json=payload)
         return Response(r.text, status_code=r.status_code, media_type="application/json")
     except Exception as e:  # noqa: BLE001
-        return _bad("no se pudo lanzar el informe: %s" % e, 502)
+        return _bad("could not launch the report: %s" % e, 502)
 
 
 async def api_event(request: Request) -> Response:
     seq = _int(request.path_params.get("seq"), -1, -1)
     ev = _state(request).store.event(seq) if seq >= 0 else None
     if ev is None:
-        return _bad("evento no encontrado", 404)
+        return _bad("event not found", 404)
     if ev.get("kind") == em.KIND_TOOL_RESULT:
         ev["output"] = em.tool_output_text(ev.get("text") or "")
     return JSONResponse(ev)
@@ -682,7 +682,7 @@ async def api_stream(request: Request) -> Response:
                  store.max_seq())
     sid = request.query_params.get("session") or None
     if sid and not _SID_RE.match(sid):
-        return _bad("session id inválido")
+        return _bad("invalid session id")
 
     async def gen():
         cursor = after
@@ -726,19 +726,19 @@ async def lifespan(app: Starlette):
     app.state.caido = None
     if s.caido_feed and s.background:
         try:
-            import caido_client  # mismo módulo stdlib que usa kali-mcp (copiado en la imagen)
+            import caido_client  # same stdlib module used by kali-mcp (copied into the image)
         except ImportError:
             caido_client = None
-            ingest._log("caido_client no disponible: feed de tráfico web desactivado")
+            ingest._log("caido_client not available: web traffic feed disabled")
         if caido_client is not None:
             app.state.caido = ingest.CaidoFeed(
                 app.state.store, app.state.notifier,
                 lambda httpql, limit: caido_client.search_history(httpql=httpql, limit=limit, timeout=15),
             )
             tasks.append(asyncio.create_task(app.state.caido.run(), name="caido-feed"))
-    # Segundo servidor en el mismo proceso: la UI de Caido pre-autenticada como invitado,
-    # servida desde nuestro origen para poder inyectar el token (ver caido_proxy.py). Gobernado
-    # por el MISMO interruptor que el feed (CAIDO_FEED): =0 apaga TODO lo de Caido (feed + proxy).
+    # Second server in the same process: the Caido UI pre-authenticated as guest,
+    # served from our origin so we can inject the token (see caido_proxy.py). Governed
+    # by the SAME switch as the feed (CAIDO_FEED): =0 turns OFF EVERYTHING Caido (feed + proxy).
     if s.caido_proxy_port and s.caido_feed and s.background:
         try:
             import uvicorn
@@ -747,8 +747,8 @@ async def lifespan(app: Starlette):
             cconf = uvicorn.Config(capp, host="0.0.0.0", port=int(s.caido_proxy_port),
                                    log_level="warning", access_log=False)
             tasks.append(asyncio.create_task(uvicorn.Server(cconf).serve(), name="caido-proxy"))
-        except Exception as exc:  # el proxy es opcional: su fallo no tumba la consola
-            ingest._log("proxy de Caido no disponible: %s" % exc)
+        except Exception as exc:  # the proxy is optional: its failure doesn't take down the console
+            ingest._log("Caido proxy not available: %s" % exc)
     try:
         yield
     finally:

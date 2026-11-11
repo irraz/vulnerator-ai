@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -13,14 +13,13 @@
   <main class="login">
     <img class="login__logo" src="/static/logo.png" alt="Vulnerator AI — unholy pentest">
     <form class="login__card" method="post" action="/login">
-      <h1 class="login__title"><span class="brand__mark">VULNERATOR</span><span class="brand__ai">·AI</span></h1>
-      <p class="login__sub">OODA console</p>
+      <h1 class="login__title login__sub">OODA console</h1>
       <p class="login__msg" id="login-msg" hidden></p>
-      <label class="field">Usuario<input id="user" name="user" autocomplete="username" required autofocus></label>
-      <label class="field">Contraseña<input id="password" name="password" type="password" autocomplete="current-password" required></label>
+      <label class="field">Username<input id="user" name="user" autocomplete="username" required autofocus></label>
+      <label class="field">Password<input id="password" name="password" type="password" autocomplete="current-password" required></label>
       <input type="hidden" name="next" id="next" value="/">
-      <button class="btn login__btn" type="submit">Entrar</button>
-      <p class="login__note">La misma cuenta que el dashboard de Hermes.</p>
+      <button class="btn login__btn" type="submit">Sign in</button>
+      <p class="login__note">The same account as the Hermes dashboard.</p>
     </form>
   </main>
 </body>

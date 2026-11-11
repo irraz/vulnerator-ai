@@ -16,13 +16,13 @@ stops a run. Driving an engagement stays where it was (TUI, Webapp, `:8642` runs
 | **Copilot** | *Right now*: current OODA phase and step, the tools running at this moment with elapsed time, the last reasoning. Below: the tool timeline, the browser actions (playwright: navigate / click / type and the page they landed on), the HTTP traffic seen by **Caido** (method, status, URL, latency, size), and this session's findings. |
 | **Traces** | Langfuse-style view of the run, kept in the GUI's own SQLite store: KPIs (tool calls, time in tools, errors, window, tokens, cost), a **waterfall** of every tool call (start relative to the first step, width = duration, color = tool family, red = error, striped green = running) and a per-tool table (calls, total, mean, max, errors). Click a row for its arguments, result, timings and OODA phase. |
 | **PoC** | One entry per `record_finding`. For each: whether the findings store **accepted** or **rejected** it, the **OODA path** that led to it, the steps executed before it, and a **terminal replay** of the reproduction. When the evidence command matches a real `kali_run`/`kali_exec` of the session, the replay uses that execution's real output, exit code and duration instead of what the agent pasted. Download as asciinema `.cast` or Markdown. |
-| **Pantallas** | Live screens for demos, in one place: a feed of **Hermes' actions** (every tool call with args/result, OODA line, reasoning); the **agent's browser** (the visible Chromium, via noVNC — watch it navigate, click and type); and **Caido operated live** by the `caido-director` (its UI moves on its own, re-enacting each `caido_*` action — opens the Replay session, types the HTTPQL filter, opens the packet). Each screen embeds in place, opens in a new tab, or goes fullscreen to project. Browser and director are view-only. |
+| **Screens** | Live screens for demos, in one place: a feed of **Hermes' actions** (every tool call with args/result, OODA line, reasoning); the **agent's browser** (the visible Chromium, via noVNC — watch it navigate, click and type); and **Caido operated live** by the `caido-director` (its UI moves on its own, re-enacting each `caido_*` action — opens the Replay session, types the HTTPQL filter, opens the packet). Each screen embeds in place, opens in a new tab, or goes fullscreen to project. Browser and director are view-only. |
 | **Hermes** | Links to (and optional embed of) the Hermes **Dashboard** (`:9119`, Kanban, sessions, config) and **Webapp** (`:9120`, the Desktop workspace), with a live "online / unavailable" probe. |
 
 Confirmed PoCs that the store accepted are **recorded automatically** to the `vulnerator-web-data`
 volume (`/data/pocs/<session>/<finding>.cast|.md`) the moment the result arrives.
 
-## Live screens (the "Pantallas" tab)
+## Live screens (the "Screens" tab)
 
 For presentations, the console can show what the agent does with its visual tools, in real time:
 
@@ -36,7 +36,7 @@ For presentations, the console can show what the agent does with its visual tool
   history with no login and no onboarding. This is handled in code (`caido_proxy.py`) and survives
   wiping Caido's volume. Whoever wants their own Caido account sets it at install time
   (`CAIDO_PAT`). The "Abrir ↗" button on the Caido screen opens this interactive real Caido.
-- **Caido director (the Caido screen in Pantallas)** — the `caido-director` container runs its own
+- **Caido director (the Caido screen in Screens)** — the `caido-director` container runs its own
   *visible* Chromium on that pre-authenticated Caido UI and a controller (Playwright over CDP) that
   **subscribes to the console's event stream and re-enacts each `caido_*` action of the agent in the
   UI**: navigates to Replay/Automate/Intercept/HTTP History, types the HTTPQL filter, opens the
@@ -48,7 +48,7 @@ For presentations, the console can show what the agent does with its visual tool
   targets the visible browser uses `--ignore-certificate-errors` (Caido MITMs TLS with its own CA).
 
 Both are observers and opt-in; the browser is **view-only** by default (`BROWSER_VIEW_VIEWONLY=1`), so an
-audience watches without taking control. "Pantalla completa" projects a single screen.
+audience watches without taking control. "Fullscreen" projects a single screen.
 
 To revert to the self-contained headless browser: in `docker-compose.yml` restore `playwright-mcp`'s
 launch flags (`--headless/--browser/--no-sandbox/--isolated`), drop `--cdp-endpoint` and its

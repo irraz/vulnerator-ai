@@ -1,23 +1,23 @@
-"""Proxy de la UI de Caido con auto-login de invitado (STDLIB + httpx + starlette).
+"""Proxy for the Caido UI with guest auto-login (STDLIB + httpx + starlette).
 
-Objetivo: que la pestaña "Pantallas" abra la interfaz REAL de Caido ya DENTRO como invitado,
-sin la pantalla de login ni el onboarding. Caido autentica su SPA con la clave de localStorage
-``CAIDO_AUTHENTICATION`` (un token de invitado); como el iframe carga Caido en otro origen, la
-consola no puede sembrar ese localStorage (cross-origin). Este proxy sirve la UI de Caido desde
-el PROPIO origen de vulnerator-web e INYECTA un ``<script>`` al principio del ``<head>`` que
-siembra ese token ANTES de que arranque la SPA. Resultado: el iframe abre directo en el
-historial HTTP con el tráfico del engagement.
+Goal: have the "Screens" tab open the REAL Caido interface already INSIDE as a guest,
+without the login screen or the onboarding. Caido authenticates its SPA with the localStorage
+key ``CAIDO_AUTHENTICATION`` (a guest token); since the iframe loads Caido on another origin, the
+console cannot seed that localStorage (cross-origin). This proxy serves the Caido UI from
+vulnerator-web's OWN origin and INJECTS a ``<script>`` at the start of the ``<head>`` that
+seeds that token BEFORE the SPA starts. Result: the iframe opens straight into the
+HTTP history with the engagement traffic.
 
-Quien prefiera su cuenta Caido la configura al instalar (token de entorno); este proxy solo
-cubre el caso por defecto ZERO-TOUCH de invitado.
+Anyone who prefers their own Caido account configures it at install time (environment token); this
+proxy only covers the default ZERO-TOUCH guest case.
 
-- El token se obtiene por ``loginAsGuest`` (mismo mecanismo que kali-mcp, vía ``caido_client``)
-  y se cachea hasta poco antes de expirar.
-- Los assets de Caido son RELATIVOS, así que el proxy sirve en la RAÍZ de su puerto y las rutas
-  resuelven solas. Se pide ``Accept-Encoding: identity`` a upstream para poder inyectar en el
-  HTML sin pelearse con gzip.
-- DATO NO CONFIABLE: el contenido de Caido se transporta verbatim (salvo la inyección del
-  bootstrap en el HTML); no se interpreta.
+- The token is obtained via ``loginAsGuest`` (same mechanism as kali-mcp, via ``caido_client``)
+  and cached until shortly before it expires.
+- Caido's assets are RELATIVE, so the proxy serves at the ROOT of its port and the routes
+  resolve on their own. ``Accept-Encoding: identity`` is requested from upstream so the HTML
+  can be injected without fighting gzip.
+- UNTRUSTED DATA: Caido's content is transported verbatim (except for injecting the
+  bootstrap into the HTML); it is not interpreted.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from starlette.responses import Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-# Cabeceras hop-by-hop + las que cambian al reescribir el cuerpo: no se reenvían.
+# Hop-by-hop headers + those that change when rewriting the body: not forwarded.
 _DROP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
     "transfer-encoding", "upgrade", "content-encoding", "content-length", "host",
@@ -45,16 +45,16 @@ _DROP = {
 
 
 
-# Flags de onboarding que la UI de Caido marca al completar/desactivar el tutorial (capturado
-# del propio updateViewerSettings de la UI). Ponerlos todos a true = ni carrusel ni checklist.
+# Onboarding flags that the Caido UI marks when completing/disabling the tutorial (captured
+# from the UI's own updateViewerSettings). Setting them all to true = no carousel, no checklist.
 _ONBOARDING_DONE = {
     "createdProject": True, "docs": True, "installedPlugin": True, "intercept": True,
     "interceptedRequest": True, "labs": True, "launchedPreconfiguredBrowser": True,
     "plugins": True, "projects": True, "scopes": True, "sentRequestToReplay": True,
     "visitedSettings": True, "welcome": True,
 }
-# data COMPLETO por defecto (misma forma que escribe la UI) por si el invitado aún no tiene
-# fila de settings: así la escritura crea una fila válida y completa, no parcial.
+# COMPLETE default data (same shape the UI writes) in case the guest does not yet have a
+# settings row: this way the write creates a valid, complete row, not a partial one.
 _DEFAULT_DATA = {
     "css": "", "editorFontSize": 14, "fontFamily": "Arial", "fontSize": 14, "grids": {},
     "isCommunityStoreEnabled": False, "isSidebarCollapsed": False, "isSidebarHidden": False,
@@ -70,7 +70,7 @@ _VIEWER_SETTINGS_M = (
     "mutation($input: UpdateViewerSettingsInput!){ updateViewerSettings(input:$input)"
     "{ settings{ __typename } } }"
 )
-# Ajustes de INSTANCIA (globales). SetInstanceSettingsInput es @oneOf: un solo campo por llamada.
+# INSTANCE settings (global). SetInstanceSettingsInput is @oneOf: a single field per call.
 _INSTANCE_SET_M = (
     "mutation($input: SetInstanceSettingsInput!){ setInstanceSettings(input:$input)"
     "{ settings{ onboarding{ analytic } } } }"
@@ -79,11 +79,11 @@ _INSTANCE_Q = "query{ instanceSettings{ onboarding{ analytic } } }"
 
 
 def _mark_instance_onboarded(caido_client, token: str, url: str) -> bool:
-    """Marca el onboarding de INSTANCIA (pantalla 'Privacy-Safe Usage Analytics') como hecho.
+    """Marks the INSTANCE onboarding (the 'Privacy-Safe Usage Analytics' screen) as done.
 
-    Es global (no por invitado). Pone ``onboarding.analytic=true`` (paso completado) y desactiva
-    el envío de analíticas (``analytics.enabled=false``, privacidad por defecto). Idempotente.
-    Devuelve True si queda confirmado.
+    It is global (not per guest). Sets ``onboarding.analytic=true`` (step completed) and disables
+    sending analytics (``analytics.enabled=false``, privacy by default). Idempotent.
+    Returns True if it is confirmed.
     """
     try:
         caido_client.graphql(_INSTANCE_SET_M, {"input": {"onboarding": {"analytic": True}}},
@@ -93,53 +93,53 @@ def _mark_instance_onboarded(caido_client, token: str, url: str) -> bool:
         chk = caido_client.graphql(_INSTANCE_Q, url=url, token=token, timeout=10)
         return bool((((chk.get("data") or {}).get("instanceSettings") or {}).get("onboarding") or {}).get("analytic"))
     except Exception as exc:
-        sys.stderr.write("[caido-proxy] instance onboarding falló: %s\n" % exc)
+        sys.stderr.write("[caido-proxy] instance onboarding failed: %s\n" % exc)
         return False
 
 
 def _mark_onboarded(caido_client, token: str, url: str) -> bool:
-    """Marca el onboarding como COMPLETO para el invitado recién creado (code-level).
+    """Marks the onboarding as COMPLETE for the freshly created guest (code-level).
 
-    Lee los viewer settings del token, fija ``data.onboarding.*`` a true y los reescribe. Así
-    la UI, autenticada con ese token, NO muestra el carrusel "Learn the Essentials" ni el
-    checklist "Getting started" — entra directa al workspace. Best-effort: si algo falla, el
-    token sigue sirviendo (solo se vería el onboarding).
+    Reads the viewer settings for the token, sets ``data.onboarding.*`` to true and rewrites them.
+    This way the UI, authenticated with that token, does NOT show the "Learn the Essentials"
+    carousel or the "Getting started" checklist — it goes straight into the workspace. Best-effort:
+    if something fails, the token still works (only the onboarding would be seen).
     """
     try:
         cur = caido_client.graphql(_VIEWER_SETTINGS_Q, url=url, token=token, timeout=10)
         settings = {}
         if cur.get("status") == "ok":
             settings = ((cur.get("data") or {}).get("viewer") or {}).get("settings") or {}
-        # Parte de la fila existente si la hay; si no, de un data completo por defecto.
+        # Start from the existing row if there is one; otherwise from complete default data.
         data = dict(settings["data"]) if isinstance(settings.get("data"), dict) else dict(_DEFAULT_DATA)
         ob = dict(data.get("onboarding") or {})
         ob.update(_ONBOARDING_DONE)
         data["onboarding"] = ob
-        # updateViewerSettings exige data Y migrations (ambos JSON!). migrations puede no existir
-        # aún en un invitado nuevo -> [] por defecto.
+        # updateViewerSettings requires both data AND migrations (both JSON!). migrations may not
+        # exist yet on a new guest -> [] by default.
         migrations = settings.get("migrations")
         if migrations is None:
             migrations = []
         out = caido_client.graphql(_VIEWER_SETTINGS_M, {"input": {"data": data, "migrations": migrations}},
                                    url=url, token=token, timeout=10)
         if out.get("status") != "ok":
-            sys.stderr.write("[caido-proxy] updateViewerSettings falló: %s\n" % (out.get("errors") or out.get("error")))
+            sys.stderr.write("[caido-proxy] updateViewerSettings failed: %s\n" % (out.get("errors") or out.get("error")))
             return False
-        # Verifica leyendo de nuevo: solo True si el onboarding quedó COMPLETO.
+        # Verify by reading again: only True if the onboarding ended up COMPLETE.
         chk = caido_client.graphql(_VIEWER_SETTINGS_Q, url=url, token=token, timeout=10)
         cob = ((((chk.get("data") or {}).get("viewer") or {}).get("settings") or {}).get("data") or {}).get("onboarding") or {}
         return bool(cob) and all(cob.values())
     except Exception as exc:  # best-effort
-        sys.stderr.write("[caido-proxy] no se pudo marcar onboarding: %s\n" % exc)
+        sys.stderr.write("[caido-proxy] could not mark onboarding: %s\n" % exc)
         return False
 
 class GuestToken:
-    """Mantiene UN token de invitado y garantiza su onboarding completo (code-level).
+    """Keeps ONE guest token and guarantees its onboarding is complete (code-level).
 
-    Separa el login (crear el invitado) del onboarding (dejarlo sin tutoriales): mintea UN
-    invitado y, en cada ``get``, RE-APLICA el onboarding sobre ESE mismo invitado hasta que
-    cuaja — sin crear invitados nuevos (evita el churn). Así, en un volumen de Caido recién
-    creado, en cuanto su subsistema de settings está listo, el onboarding se fija y persiste.
+    Separates the login (creating the guest) from the onboarding (leaving it tutorial-free): mints ONE
+    guest and, on each ``get``, RE-APPLIES the onboarding on THAT same guest until it
+    sticks — without creating new guests (avoids churn). This way, on a freshly created
+    Caido volume, as soon as its settings subsystem is ready, the onboarding is set and persists.
     """
 
     def __init__(self, caido_url: str) -> None:
@@ -151,11 +151,11 @@ class GuestToken:
         self._lock = threading.Lock()
 
     def _mint(self) -> None:
-        """Crea el invitado y selecciona proyecto. NO hace onboarding (eso es aparte)."""
-        import caido_client  # perezoso (vive en la imagen)
+        """Creates the guest and selects a project. Does NOT do onboarding (that is separate)."""
+        import caido_client  # lazy (lives in the image)
         out = caido_client.graphql(caido_client._GUEST_LOGIN, url=self._url, timeout=15)
         if out.get("status") != "ok":
-            sys.stderr.write("[caido-proxy] loginAsGuest falló: %s\n" % out.get("error"))
+            sys.stderr.write("[caido-proxy] loginAsGuest failed: %s\n" % out.get("error"))
             return
         tok = ((out.get("data") or {}).get("loginAsGuest") or {}).get("token") or {}
         access = tok.get("accessToken")
@@ -164,7 +164,7 @@ class GuestToken:
         try:
             caido_client._ensure_project(access, self._url, 10)
         except Exception as exc:
-            sys.stderr.write("[caido-proxy] no se pudo asegurar proyecto: %s\n" % exc)
+            sys.stderr.write("[caido-proxy] could not ensure project: %s\n" % exc)
         auth = {
             "__typename": "AuthenticationToken", "accessToken": access,
             "expiresAt": tok.get("expiresAt"), "refreshToken": None, "scopes": ["PROFILE_READ"],
@@ -172,7 +172,7 @@ class GuestToken:
         self._access = access
         self._json = json.dumps(auth, separators=(",", ":"))
         self._onboarded = False
-        # Renueva a mitad de vida (o 30 min si no se parsea expiresAt).
+        # Renew at half-life (or 30 min if expiresAt cannot be parsed).
         self._renew_at = time.time() + 1800
         exp = tok.get("expiresAt")
         if isinstance(exp, str):
@@ -189,13 +189,13 @@ class GuestToken:
             return self._json
 
     def ensure_onboarded(self) -> bool:
-        """(Re)aplica el onboarding sobre el invitado compartido AHORA. Idempotente.
+        """(Re)applies the onboarding on the shared guest NOW. Idempotent.
 
-        Se llama en cada carga de la página HTML: como Caido usa UN invitado compartido y su SPA
-        puede reescribir settings, re-aplicarlo justo antes de servir garantiza que el navegador
-        SIEMPRE cargue con el onboarding completo (sin carrusel) por muchas veces que se abra.
+        Called on every HTML page load: since Caido uses ONE shared guest and its SPA
+        can rewrite settings, re-applying it right before serving guarantees that the browser
+        ALWAYS loads with the onboarding complete (no carousel) no matter how many times it is opened.
         """
-        import caido_client  # perezoso
+        import caido_client  # lazy
         with self._lock:
             if self._json is None or self._access is None or time.time() >= self._renew_at:
                 self._mint()
@@ -207,14 +207,14 @@ class GuestToken:
             return self._onboarded
 
 
-# Red de seguridad de CLIENTE contra el onboarding. El marcado por GraphQL (viewer+instancia)
-# es la vía principal, pero la SPA puede pintar el modal "Learn the Essentials" (overlay
-# bloqueante z-[99999] fixed inset-0) ANTES de que esos settings propaguen: una carrera que, en
-# cuanto se ve una vez, obliga a recargar. Este guard lo liquida pase lo que pase: colapsa el
-# checklist "Getting started" y, con un MutationObserver (+ barrido de respaldo), en cuanto
-# aparece un overlay a pantalla completa cuyo texto es el del onboarding, pulsa "Continue" y lo
-# quita del DOM. Identifica el overlay por su TEXTO, no por un z-index genérico, para no tocar
-# diálogos legítimos de Caido. Idempotente y pasivo si no hay onboarding.
+# CLIENT-side safety net against the onboarding. The GraphQL marking (viewer+instance)
+# is the main path, but the SPA may paint the "Learn the Essentials" modal (a blocking
+# z-[99999] fixed inset-0 overlay) BEFORE those settings propagate: a race that, once
+# seen, forces a reload. This guard kills it no matter what: it collapses the
+# "Getting started" checklist and, with a MutationObserver (+ a backup sweep), as soon as
+# a full-screen overlay whose text matches the onboarding appears, it clicks "Continue" and
+# removes it from the DOM. It identifies the overlay by its TEXT, not by a generic z-index, so as
+# not to touch legitimate Caido dialogs. Idempotent and passive if there is no onboarding.
 _ONBOARDING_GUARD = r"""<script>(function(){
 try{localStorage.setItem('layout.onboarding-checklist.is-expanded','false');}catch(e){}
 var RX=/Learn the Essentials|Privacy-Safe Usage Analytics/i;
@@ -235,15 +235,15 @@ var n=0,iv=setInterval(function(){kill();if(++n>60)clearInterval(iv);},400);
 
 
 def _bootstrap_script(token_json: str) -> str:
-    """``<script>`` que siembra el token de invitado y neutraliza el onboarding (code-level),
-    antes de que arranque la SPA de Caido."""
-    # json.dumps del string -> literal JS seguro (comillas/escapes correctos).
+    """``<script>`` that seeds the guest token and neutralizes the onboarding (code-level),
+    before Caido's SPA starts."""
+    # json.dumps of the string -> safe JS literal (correct quotes/escapes).
     return ("<script>try{localStorage.setItem('CAIDO_AUTHENTICATION',"
             + json.dumps(token_json) + ");}catch(e){}</script>" + _ONBOARDING_GUARD)
 
 
 def inject(html: str, token_json: str) -> str:
-    """Inserta el bootstrap justo después de ``<head>`` (antes de los módulos diferidos)."""
+    """Inserts the bootstrap right after ``<head>`` (before the deferred modules)."""
     script = _bootstrap_script(token_json)
     low = html.lower()
     i = low.find("<head>")
@@ -258,7 +258,7 @@ def inject(html: str, token_json: str) -> str:
 
 
 def create_caido_proxy_app(caido_base: str) -> Starlette:
-    """App ASGI que proxya la UI de Caido en ``caido_base`` inyectando el token de invitado."""
+    """ASGI app that proxies the Caido UI at ``caido_base`` injecting the guest token."""
     base = caido_base.rstrip("/")
     token = GuestToken(base)
 
@@ -278,7 +278,7 @@ def create_caido_proxy_app(caido_base: str) -> Starlette:
         out_headers = [(k, v) for k, v in up.headers.items() if k.lower() not in _DROP]
         if "text/html" in ct:
             html = up.text
-            # Re-aplica el onboarding sobre el invitado compartido justo antes de servir la UI.
+            # Re-apply the onboarding on the shared guest right before serving the UI.
             await asyncio.to_thread(token.ensure_onboarded)
             tok = token.get()
             if tok:
@@ -291,9 +291,9 @@ def create_caido_proxy_app(caido_base: str) -> Starlette:
     async def _startup() -> None:
         app.state.client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0),
                                              follow_redirects=False)
-        # Calienta el token de invitado (login + proyecto + onboarding) en segundo plano, para
-        # que el PRIMER navegador que abra ya reciba un token listo y no vea el onboarding por
-        # una carrera de propagación.
+        # Warm up the guest token (login + project + onboarding) in the background, so that
+        # the FIRST browser that opens already receives a ready token and does not see the
+        # onboarding due to a propagation race.
         async def _warm() -> None:
             for _ in range(20):
                 if await asyncio.to_thread(token.ensure_onboarded):
@@ -307,15 +307,15 @@ def create_caido_proxy_app(caido_base: str) -> Starlette:
     ws_base = "ws" + base[base.find(":"):]  # http(s)://caido:8080 -> ws(s)://caido:8080
 
     async def ws_handler(ws: WebSocket) -> None:
-        """Puentea un WebSocket del navegador <-> Caido (suscripciones GraphQL en vivo)."""
+        """Bridges a WebSocket between the browser <-> Caido (live GraphQL subscriptions)."""
         import websockets
         subs = ws.scope.get("subprotocols") or []
         target = ws_base + ws.url.path
         try:
             up = await websockets.connect(target, subprotocols=subs or None, open_timeout=10,
                                           max_size=None)
-        except Exception as exc:  # upstream no acepta: se cierra el del navegador
-            sys.stderr.write("[caido-proxy] ws upstream falló (%s): %s\n" % (target, exc))
+        except Exception as exc:  # upstream refuses: close the browser's socket
+            sys.stderr.write("[caido-proxy] ws upstream failed (%s): %s\n" % (target, exc))
             await ws.close()
             return
         await ws.accept(subprotocol=up.subprotocol)

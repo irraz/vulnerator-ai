@@ -1,14 +1,14 @@
-"""caido-director — re-escenifica en la UI de Caido las acciones que Hermes hace por API.
+"""caido-director — re-enacts in the Caido UI the actions Hermes performs via the API.
 
-Hermes conduce Caido por su API (tools ``caido_*``), así que su interfaz no "se mueve" sola.
-Este controlador escucha el stream de eventos de vulnerator-web (``/api/stream``) y, por cada
-acción de Caido del agente, REPRODUCE esa acción en una instancia real de la UI de Caido
-(Chromium con pantalla, visible por noVNC): abre la pestaña correspondiente, teclea el filtro
-HTTPQL, abre el paquete/sesión, etc. Los DATOS son reales (los del agente); el "paseo" por la
-UI lo coreografía este director — automático, sin intervención humana.
+Hermes drives Caido through its API (``caido_*`` tools), so its interface does not "move" on its
+own. This controller listens to the vulnerator-web event stream (``/api/stream``) and, for each
+Caido action the agent takes, REPLAYS that action on a real instance of the Caido UI (headed
+Chromium, visible over noVNC): it opens the corresponding tab, types the HTTPQL filter, opens the
+packet/session, etc. The DATA is real (the agent's); the "walkthrough" of the UI is choreographed
+by this director — automatically, without human intervention.
 
-Conexión: Playwright ``connect_over_cdp`` al Chromium headed local (127.0.0.1:9223) y conduce
-la página que muestra la UI de Caido (servida pre-autenticada por vulnerator-web).
+Connection: Playwright ``connect_over_cdp`` to the local headed Chromium (127.0.0.1:9223), driving
+the page that shows the Caido UI (served pre-authenticated by vulnerator-web).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ CAIDO_UI = os.environ.get("CAIDO_UI_URL", "http://vulnerator-web:7001/")
 USER = os.environ.get("VULNERATOR_WEB_USER", "admin")
 PW = os.environ.get("VULNERATOR_WEB_PASSWORD", "vulnerator")
 CDP = os.environ.get("CDP_URL", "http://127.0.0.1:9223")
-STEP = float(os.environ.get("CAIDO_DIRECTOR_STEP", "1.4"))  # pausa base entre micro-acciones
+STEP = float(os.environ.get("CAIDO_DIRECTOR_STEP", "1.4"))  # base pause between micro-actions
 
 _events: "queue.Queue[dict]" = queue.Queue(maxsize=500)
 
@@ -40,10 +40,10 @@ def log(msg: str) -> None:
     sys.stderr.flush()
 
 
-# Categorías de tool-call que merece la pena escenificar en Caido. Las `caido_*` (web) tienen
-# coreografía propia; para el resto, si la acción produjo tráfico HTTP real (lo hay capturado en
-# Caido por el proxy), el director lo enseña: filtra por su host/ruta y abre el paquete. "finding"
-# salta a la pestaña Findings. Se ignoran recon puro sin URL (dig/getent) y shell no-HTTP (nmap).
+# Tool-call categories worth staging in Caido. The `caido_*` (web) ones have their own
+# choreography; for the rest, if the action produced real HTTP traffic (captured in Caido by the
+# proxy), the director shows it: it filters by its host/path and opens the packet. "finding" jumps
+# to the Findings tab. Pure recon without a URL (dig/getent) and non-HTTP shell (nmap) are ignored.
 _STAGE_CATEGORIES = {"web", "browser", "recon", "finding"}
 _HTTP_CMD = re.compile(r"\b(curl|wget|http|ffuf|feroxbuster|gobuster|nuclei|sqlmap|wpscan|nikto|whatweb|httpx)\b", re.I)
 
@@ -54,7 +54,7 @@ def _is_stageable(ev: dict) -> bool:
     cat = ev.get("category")
     if cat in _STAGE_CATEGORIES:
         return True
-    # shell: solo si el comando parece un cliente HTTP (tiene tráfico que mostrar en Caido)
+    # shell: only if the command looks like an HTTP client (has traffic to show in Caido)
     if cat == "shell":
         args = ev.get("args") if isinstance(ev.get("args"), dict) else {}
         cmd = str(args.get("command") or args.get("code") or "")
@@ -63,13 +63,13 @@ def _is_stageable(ev: dict) -> bool:
 
 
 def sse_loop() -> None:
-    """Lee el SSE de vulnerator-web y encola las tool-calls escenificables (ver _is_stageable)."""
+    """Read vulnerator-web's SSE and enqueue the stageable tool-calls (see _is_stageable)."""
     auth = base64.b64encode(("%s:%s" % (USER, PW)).encode()).decode()
     after = None
     while True:
         try:
             if after is None:
-                # arranca cerca de "ahora" para no reproducir todo el histórico
+                # start near "now" so the whole history is not replayed
                 req = urllib.request.Request(GUI + "/api/status", headers={"Authorization": "Basic " + auth})
                 after = int(json.load(urllib.request.urlopen(req, timeout=10)).get("max_seq", 0))
             url = "%s/api/stream?after=%d" % (GUI, after)
@@ -93,7 +93,7 @@ def sse_loop() -> None:
                             except queue.Full:
                                 pass
         except Exception as exc:
-            log("sse reconectando: %s" % exc)
+            log("sse reconnecting: %s" % exc)
             time.sleep(3)
 
 
@@ -106,7 +106,7 @@ def connect_page(p):
             return br, pg
         except Exception:
             time.sleep(1.5)
-    raise RuntimeError("no se pudo conectar al Chromium (CDP)")
+    raise RuntimeError("could not connect to Chromium (CDP)")
 
 
 def wait_authed(pg) -> None:
@@ -140,9 +140,9 @@ _URL_RE = re.compile(r"https?://([A-Za-z0-9.\-]+)(?::\d+)?(/[^\s\"'`|>)]*)?")
 
 
 def extract_target(args: dict, summary: str):
-    """(host, path) de la petición HTTP a partir de los args (o del resumen). Datos reales del
-    propio agente: la URL que navegó/atacó. Si no hay nada HTTP, (None, None)."""
-    # 1) URL explícita en campos típicos o en el comando/resumen
+    """(host, path) of the HTTP request derived from the args (or the summary). Real data from the
+    agent itself: the URL it navigated to/attacked. If there is nothing HTTP, (None, None)."""
+    # 1) explicit URL in typical fields or in the command/summary
     for key in ("url", "command", "code", "goal", "target", "summary"):
         v = args.get(key) if key != "summary" else summary
         if isinstance(v, str):
@@ -154,7 +154,7 @@ def extract_target(args: dict, summary: str):
     if m:
         path = (m.group(2) or "").split("?")[0]
         return m.group(1).lower(), (path if path and path != "/" else "")
-    # 2) host "pelado" en target/targets/domain/host
+    # 2) "bare" host in target/targets/domain/host
     for key in ("target", "targets", "domain", "host"):
         v = args.get(key)
         for cand in (v if isinstance(v, list) else [v] if v else []):
@@ -165,8 +165,8 @@ def extract_target(args: dict, summary: str):
 
 
 def httpql_for(host: str, path: str) -> str:
-    """Filtro HTTPQL por host (y ruta si la hay). Host recortado al dominio registrable para que
-    case con www., subdominios, etc."""
+    """HTTPQL filter by host (and path if present). Host trimmed to the registrable domain so it
+    matches www., subdomains, etc."""
     core = host
     parts = host.split(".")
     if len(parts) >= 2 and not re.match(r"^(?:\d{1,3}\.){3}\d{1,3}$", host):
@@ -177,23 +177,23 @@ def httpql_for(host: str, path: str) -> str:
     return q
 
 
-# Fila de datos real de las tablas de Caido (History, Automate...). OJO: un selector genérico
-# por substring tipo "[class*=row]" hace falso positivo con las celdas de CABECERA, cuyas clases
-# utilitarias de Tailwind incluyen variantes como "flex-row" (contienen la subcadena "row") -
-# acaba clicando "ID"/"Host"/"Method" en vez de la primera petición real. `.c-item-row` es la
-# clase estable que Caido pone solo en las filas de datos (prefijo "c-" consistente en su UI).
+# Real data row of Caido's tables (History, Automate...). CAUTION: a generic substring selector
+# like "[class*=row]" yields a false positive on the HEADER cells, whose Tailwind utility classes
+# include variants such as "flex-row" (they contain the substring "row") - it ends up clicking
+# "ID"/"Host"/"Method" instead of the first real request. `.c-item-row` is the stable class Caido
+# puts only on data rows ("c-" prefix consistent across its UI).
 _ROW_SEL = ".c-item-row"
 
 
 def open_first_row(pg, settle_s: float = 2.5) -> bool:
-    """Espera a que la tabla se asiente tras el filtro (la query GraphQL es async) y abre la
-    primera fila de datos real. True si había algo que abrir."""
+    """Wait for the table to settle after the filter (the GraphQL query is async) and open the
+    first real data row. True if there was something to open."""
     rows = pg.locator(_ROW_SEL)
     deadline = time.time() + settle_s
     last = -1
     while time.time() < deadline:
         n = rows.count()
-        if n and n == last:  # dos lecturas seguidas iguales: ya no está re-renderizando
+        if n and n == last:  # two consecutive equal readings: no longer re-rendering
             break
         last = n
         time.sleep(0.25)
@@ -213,7 +213,7 @@ def open_last_session(pg) -> None:
 
 
 def show_in_history(pg, args: dict, summary: str) -> bool:
-    """HTTP History: filtra por el host/ruta de la petición real y abre el paquete. True si actuó."""
+    """HTTP History: filter by the host/path of the real request and open the packet. True if it acted."""
     host, path = extract_target(args, summary)
     if not host:
         return False
@@ -254,13 +254,13 @@ def choreograph(pg, ev: dict) -> None:
             elif "request(" in blob or "history" in blob:
                 show_in_history(pg, args, summary)
         elif cat == "finding":
-            # un hallazgo: enséñalo en la pestaña Findings de Caido
+            # a finding: show it in Caido's Findings tab
             nav(pg, "findings")
         else:
-            # navegador / recon / curl & co.: tráfico real capturado -> fíltralo y ábrelo
+            # browser / recon / curl & co.: real captured traffic -> filter it and open it
             if not show_in_history(pg, args, summary):
                 return
-        log("escenificado: %s" % (tool or cat))
+        log("staged: %s" % (tool or cat))
     except Exception as exc:
         log("choreograph error (%s): %s" % (tool, exc))
 
@@ -270,14 +270,14 @@ def main() -> None:
     with sync_playwright() as p:
         br, pg = connect_page(p)
         wait_authed(pg)
-        log("conectado y en la UI de Caido; esperando acciones del agente…")
+        log("connected and in the Caido UI; waiting for agent actions…")
         while True:
             try:
                 ev = _events.get(timeout=30)
             except queue.Empty:
                 continue
             choreograph(pg, ev)
-            # vacía ráfagas: si hay muchos encolados, procesa el último de cada tipo con calma
+            # drain bursts: if many are queued, process the last of each type calmly
             time.sleep(STEP / 2)
 
 

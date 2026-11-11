@@ -1,13 +1,13 @@
-/* Vulnerator Console — frontend (vanilla, sin dependencias).
+/* Vulnerator Console — frontend (vanilla, no dependencies).
  *
- * Datos: API de vulnerator-web (/api/*) + stream SSE (/api/stream, reanudable).
- * Seguridad: TODO lo que llega del agente/tools/Caido es DATO NO CONFIABLE; se pinta
- * SIEMPRE con textContent vía h(), nunca con innerHTML.
+ * Data: vulnerator-web API (/api/*) + SSE stream (/api/stream, resumable).
+ * Security: EVERYTHING coming from the agent/tools/Caido is UNTRUSTED DATA; it is ALWAYS
+ * rendered with textContent via h(), never with innerHTML.
  */
 "use strict";
 
 (() => {
-  // ───────────────────────────────────────────────────────── utilidades
+  // ───────────────────────────────────────────────────────── utilities
   const $ = (id) => document.getElementById(id);
 
   function h(tag, attrs, ...children) {
@@ -30,7 +30,7 @@
 
   const clear = (el) => { while (el.firstChild) el.removeChild(el.firstChild); };
 
-  let skew = 0; // segundos: reloj del servidor - reloj del navegador
+  let skew = 0; // seconds: server clock - browser clock
   const now = () => Date.now() / 1000 + skew;
 
   function fmtDur(s) {
@@ -44,20 +44,20 @@
   function fmtTime(ts) {
     if (!ts) return "—";
     const d = new Date(ts * 1000);
-    return d.toLocaleTimeString("es-ES", { hour12: false, timeZone: TZ });
+    return d.toLocaleTimeString("en-GB", { hour12: false, timeZone: TZ });
   }
   function fmtDateTime(ts) {
     if (!ts) return "—";
-    return new Date(ts * 1000).toLocaleString("es-ES", { hour12: false, dateStyle: "short", timeStyle: "medium", timeZone: TZ });
+    return new Date(ts * 1000).toLocaleString("en-GB", { hour12: false, dateStyle: "short", timeStyle: "medium", timeZone: TZ });
   }
   function fmtAgo(ts) {
     if (!ts) return "—";
     const s = Math.max(0, now() - ts);
-    if (s < 10) return "ahora";
-    if (s < 60) return "hace " + Math.floor(s) + "s";
-    if (s < 3600) return "hace " + Math.floor(s / 60) + "m";
-    if (s < 86400) return "hace " + Math.floor(s / 3600) + "h";
-    return "hace " + Math.floor(s / 86400) + "d";
+    if (s < 10) return "now";
+    if (s < 60) return Math.floor(s) + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
   }
   function fmtBytes(n) {
     if (n === null || n === undefined) return "—";
@@ -65,20 +65,20 @@
     if (n < 1048576) return (n / 1024).toFixed(1) + "k";
     return (n / 1048576).toFixed(1) + "M";
   }
-  function fmtInt(n) { return n === null || n === undefined ? "—" : Number(n).toLocaleString("es-ES"); }
+  function fmtInt(n) { return n === null || n === undefined ? "—" : Number(n).toLocaleString("en-US"); }
   function oneLine(s, n = 200) {
     s = String(s || "").replace(/\s+/g, " ").trim();
     return s.length > n ? s.slice(0, n - 1) + "…" : s;
   }
 
   const CAT_LABEL = {
-    shell: "shell", browser: "navegador", web: "web", finding: "hallazgo", recon: "recon",
-    tracking: "tracking", subagent: "subagente", tool: "otras",
+    shell: "shell", browser: "browser", web: "web", finding: "finding", recon: "recon",
+    tracking: "tracking", subagent: "subagent", tool: "other",
   };
   const OODA_LINE = /^[\s>*_`#]*OODA\s*[—–\-:]+\s*[*_`]*(OBSERVE|ORIENT|DECIDE|ACT|REPORT)\b/i;
   const isFinding = (ev) => String(ev.tool || "").endsWith("record_finding");
 
-  // Salida útil de una tool (espejo de event_model.tool_output_text).
+  // Useful output of a tool (mirror of event_model.tool_output_text).
   function unwrap(text) {
     const s = String(text || "").trim();
     if (!s || !"{[".includes(s[0])) return null;
@@ -121,7 +121,7 @@
 
   async function api(path) {
     const r = await fetch(path, { credentials: "same-origin", cache: "no-store" });
-    if (r.status === 401) { location.href = "/login?next=" + encodeURIComponent(location.pathname) + location.hash; throw new Error("sesión caducada"); }
+    if (r.status === 401) { location.href = "/login?next=" + encodeURIComponent(location.pathname) + location.hash; throw new Error("session expired"); }
     if (!r.ok) throw new Error(path + " → HTTP " + r.status);
     return r.json();
   }
@@ -136,16 +136,16 @@
   }
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // Zona horaria fija para TODA la consola (independiente del reloj/TZ del host).
+  // Fixed time zone for the WHOLE console (independent of the host clock/TZ).
   const TZ = "Europe/Madrid";
 
-  // ───────────────────────────────────────────────────────── estado
+  // ───────────────────────────────────────────────────────── state
   const S = {
-    childTraces: {},       // sid hija -> traza (nodos de subagente del grafo)
-    graphSel: null,        // nodo seleccionado del grafo: "hermes" | "fam:<cat>" | "sub:<sid>" | "tgt:<host>"
-    graphOpen: new Set(),  // call_id desplegadas en el panel del grafo
-    evCache: new Map(),    // seq -> evento completo (args/resultado) ya pedido
-    toolSelected: null,    // nombre de tool elegido en "Por herramienta" (tabla de Trazas)
+    childTraces: {},       // child sid -> trace (subagent nodes of the graph)
+    graphSel: null,        // selected graph node: "hermes" | "fam:<cat>" | "sub:<sid>" | "tgt:<host>"
+    graphOpen: new Set(),  // call_id expanded in the graph panel
+    evCache: new Map(),    // seq -> full event (args/result) already requested
+    toolSelected: null,    // tool name chosen in "By tool" (Traces table)
     status: null,
     sessions: [],
     sid: null,
@@ -162,13 +162,13 @@
     traceSelected: null,
     pocs: [],
     pocSelected: null,
-    pocSev: "all",         // filtro de severidad: all|critical|high|medium|low|info
-    knownPocs: null,       // Map id -> store_status (null hasta la primera carga)
+    pocSev: "all",         // severity filter: all|critical|high|medium|low|info
+    knownPocs: null,       // Map id -> store_status (null until the first load)
     player: null,
   };
 
-  // ───────────────────────────────────────────────────────── vistas / tabs
-  const VIEWS = ["terminal", "copilot", "traces", "pocs", "pantallas", "hermes"];
+  // ───────────────────────────────────────────────────────── views / tabs
+  const VIEWS = ["terminal", "copilot", "traces", "pocs", "screens", "hermes"];
 
   function showView(view) {
     if (!VIEWS.includes(view)) view = "terminal";
@@ -182,13 +182,13 @@
     if (view === "traces") loadTrace();
     else if (typeof wfTip !== "undefined") wfTip.hidden = true;
     if (view === "pocs") { loadPocs(); }
-    if (view === "pantallas") renderScreens();
+    if (view === "screens") renderScreens();
     if (view === "terminal") scrollTermSoon(true);
   }
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
   window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 
-  // ───────────────────────────────────────────────────────── salud
+  // ───────────────────────────────────────────────────────── health
   function setPill(id, state, label, title) {
     const el = $(id);
     el.dataset.state = state;
@@ -204,22 +204,22 @@
       const st = await api("/api/status");
       S.status = st;
       skew = st.now - Date.now() / 1000;
-      // Modo solo-observación: si el disparador de informe está desactivado en el backend
-      // (VULNERATOR_WEB_ALLOW_TRIGGER=0), ocultamos el botón "Generar informe".
+      // Observe-only mode: if the report trigger is disabled in the backend
+      // (VULNERATOR_WEB_ALLOW_TRIGGER=0), we hide the "Generate report" button.
       const gbtn = $("poc-genreport");
       if (gbtn) gbtn.hidden = (st.allow_trigger === false);
       const ing = st.ingest || {};
       const ver = ing.hermes_version ? "v" + String(ing.hermes_version).replace(/^v/, "") : "?";
       setPill("pill-hermes", ing.ok ? "ok" : "err", ver,
-        ing.ok ? "API de Hermes accesible" : "Hermes no responde: " + (ing.last_error || "sin datos"));
+        ing.ok ? "Hermes API reachable" : "Hermes not responding: " + (ing.last_error || "no data"));
       const age = ing.last_poll ? now() - ing.last_poll : 999;
       setPill("pill-ingest", ing.ok && age < 10 ? "ok" : "warn", undefined,
-        "Último sondeo " + fmtAgo(ing.last_poll) + " · " + (ing.sessions || 0) + " sesiones · " +
-        (ing.pocs_recorded || 0) + " PoC grabados");
+        "Last poll " + fmtAgo(ing.last_poll) + " · " + (ing.sessions || 0) + " sessions · " +
+        (ing.pocs_recorded || 0) + " PoCs recorded");
       const c = st.caido || {};
-      if (!c.enabled) setPill("pill-caido", "off", undefined, "Feed de Caido desactivado");
+      if (!c.enabled) setPill("pill-caido", "off", undefined, "Caido feed disabled");
       else setPill("pill-caido", c.ok ? "ok" : "err", undefined,
-        c.ok ? "Caido: " + fmtInt(c.requests) + " peticiones en el historial" : "Caido: " + (c.last_error || "sin datos"));
+        c.ok ? "Caido: " + fmtInt(c.requests) + " requests in the history" : "Caido: " + (c.last_error || "no data"));
       setupHermesLinks();
     } catch (e) {
       setPill("pill-hermes", "err", "?", String(e));
@@ -231,10 +231,10 @@
     const running = S.sessions.some((s) => (s.running || 0) > 0);
     const recent = now() - S.lastActivity < 15;
     setPill("pill-live", running || recent ? "on" : "off", undefined,
-      running ? "Hay herramientas ejecutándose ahora mismo" : recent ? "Actividad en los últimos segundos" : "Sin actividad");
+      running ? "Tools are running right now" : recent ? "Activity in the last few seconds" : "No activity");
   }
 
-  // ───────────────────────────────────────────────────────── sesiones
+  // ───────────────────────────────────────────────────────── sessions
   function sessionLabel(s) {
     return oneLine(s.title || s.preview || s.id, 90);
   }
@@ -271,7 +271,7 @@
         h("span", null, fmtAgo(s.last_active || s.started_at)),
         h("span", null, (s.spans || 0) + " tools"),
       ];
-      if (s.findings) meta.push(h("span", { class: "f" }, s.findings + " hallazgo" + (s.findings > 1 ? "s" : "")));
+      if (s.findings) meta.push(h("span", { class: "f" }, s.findings + " finding" + (s.findings > 1 ? "s" : "")));
       if (s.errors) meta.push(h("span", { class: "e" }, s.errors + " ✗"));
       list.append(h("li", null, h("button", {
         class: "sess" + (child ? " sess--child" : ""), type: "button",
@@ -304,11 +304,11 @@
       renderStrip();
       if ($("follow-active").checked || !S.sid) followActive();
       updateLive();
-    } catch (_) { /* el pill de Hermes refleja el fallo */ }
+    } catch (_) { /* the Hermes pill reflects the failure */ }
   }
   const refreshSessionsSoon = throttle(loadSessions, 1500);
 
-  // ───────────────────────────────────────────────────────── franja de sesión
+  // ───────────────────────────────────────────────────────── session strip
   function currentOoda() {
     for (let i = S.events.length - 1; i >= 0; i--) if (S.events[i].kind === "ooda") return S.events[i];
     return null;
@@ -321,23 +321,23 @@
     const o = currentOoda();
     const badge = $("strip-phase");
     badge.dataset.phase = o ? o.phase : (s.last_phase || "");
-    badge.textContent = o ? o.phase + " · " + o.step : (s.last_phase ? s.last_phase + " · " + (s.last_step || "?") : "SIN FASE");
+    badge.textContent = o ? o.phase + " · " + o.step : (s.last_phase ? s.last_phase + " · " + (s.last_step || "?") : "NO PHASE");
     $("strip-title").textContent = sessionLabel(s);
     const meta = $("strip-meta");
     clear(meta);
     const end = s.ended_at || s.last_active;
     const items = [
-      ["Modelo", s.model ? String(s.model).split("/").pop() : "—"],
-      ["Origen", s.source || "—"],
-      ["Inicio", fmtDateTime(s.started_at)],
-      ["Duración", s.started_at && end ? fmtDur(end - s.started_at) : "—"],
+      ["Model", s.model ? String(s.model).split("/").pop() : "—"],
+      ["Source", s.source || "—"],
+      ["Start", fmtDateTime(s.started_at)],
+      ["Duration", s.started_at && end ? fmtDur(end - s.started_at) : "—"],
       ["Tokens", fmtInt(s.input_tokens) + " / " + fmtInt(s.output_tokens)],
-      ["Coste", s.cost_usd != null ? "$" + Number(s.cost_usd).toFixed(4) : "—"],
+      ["Cost", s.cost_usd != null ? "$" + Number(s.cost_usd).toFixed(4) : "—"],
     ];
     for (const [k, v] of items) meta.append(h("div", null, h("dt", null, k), h("dd", null, v)));
   }
 
-  // ───────────────────────────────────────────────────────── selección de sesión
+  // ───────────────────────────────────────────────────────── session selection
   async function selectSession(sid) {
     if (!sid) return;
     S.sid = sid;
@@ -346,7 +346,7 @@
     S.loading = true; S.pending = [];
     renderSessions(); renderStrip();
     clear($("term"));
-    $("term").append(h("div", { class: "term__empty" }, "Cargando sesión…"));
+    $("term").append(h("div", { class: "term__empty" }, "Loading session…"));
     try {
       const doc = await api("/api/sessions/" + encodeURIComponent(sid) + "/events?tail=1200");
       if (S.sid !== sid) return;
@@ -355,7 +355,7 @@
       for (const ev of S.pending) if (ev.seq > S.lastSeq) { S.events.push(ev); S.lastSeq = ev.seq; }
     } catch (e) {
       clear($("term"));
-      $("term").append(h("div", { class: "term__empty" }, "No se pudo cargar la sesión: " + e));
+      $("term").append(h("div", { class: "term__empty" }, "Could not load the session: " + e));
       return;
     } finally {
       S.loading = false; S.pending = [];
@@ -365,14 +365,14 @@
     if (S.view === "copilot") renderCopilot();
     if (S.view === "traces") loadTrace();
     if (S.view === "pocs") renderPocList();
-    if (S.view === "pantallas") { renderPantActions(); renderStage(); }
+    if (S.view === "screens") { renderPantActions(); renderStage(); }
   }
 
   // ───────────────────────────────────────────────────────── terminal
   const term = $("term");
   let termFollow = true;
-  let termUnseen = 0;            // eventos llegados con el autoscroll en pausa
-  const termTools = new Set();   // tools vistas en la sesión (desplegable de filtro)
+  let termUnseen = 0;            // events arrived while autoscroll was paused
+  const termTools = new Set();   // tools seen in the session (filter dropdown)
   const tSearch = $("t-search"), tTool = $("t-tool");
 
   function applyTermFilters() {
@@ -382,14 +382,14 @@
   }
   ["t-reasoning", "t-output", "t-chat"].forEach((id) => $(id).addEventListener("change", applyTermFilters));
 
-  // ── seguir el directo / volver al directo
+  // ── follow the live feed / back to live
   function updateLiveBtn() {
     const btn = $("t-live");
     btn.hidden = termFollow;
     btn.classList.toggle("has-new", termUnseen > 0);
     btn.textContent = termUnseen
-      ? "↓ en vivo · " + termUnseen + (termUnseen === 1 ? " nuevo" : " nuevos")
-      : "↓ volver al directo";
+      ? "↓ live · " + termUnseen + (termUnseen === 1 ? " new" : " new")
+      : "↓ back to live";
   }
   function setFollow(on) {
     termFollow = on;
@@ -422,7 +422,7 @@
       : { cls: "s s--ok", text: "✓ " + fmtDur(dur) };
   }
 
-  // ── salidas JSON como fichas
+  // ── JSON outputs as cards
   const ST_OK = ["recorded", "done", "ok", "success", "succeeded", "completed", "accepted", "found", "saved"];
   const ST_ERR = ["error", "failed", "failure", "rejected", "denied", "invalid", "timeout", "blocked"];
   const ST_RUN = ["running", "pending", "started", "queued", "in_progress"];
@@ -438,13 +438,13 @@
   function isTextOutput(d) {
     return typeof d.output === "string" || ["stdout", "stderr"].some((k) => typeof d[k] === "string" && d[k]);
   }
-  // Escalares de primer nivel y de un nivel anidado (finding.title…), los importantes primero.
+  // First-level scalars and one nested level (finding.title…), important ones first.
   function jsonKeyFields(d) {
     const out = [];
     const push = (k, v) => { if (v !== null && v !== undefined && v !== "" && typeof v !== "object") out.push([k, v]); };
     for (const [k, v] of Object.entries(d)) {
       if (k === "status") continue;
-      if (Array.isArray(v)) out.push([k, v.length + (v.length === 1 ? " elemento" : " elementos")]);
+      if (Array.isArray(v)) out.push([k, v.length + (v.length === 1 ? " item" : " items")]);
       else if (v && typeof v === "object") { for (const [k2, v2] of Object.entries(v)) push(k + "." + k2, v2); }
       else push(k, v);
     }
@@ -453,12 +453,12 @@
   }
   function jsonCard(ev, d) {
     const kind = ev.error ? "err" : jsonState(d);
-    const label = d.status != null ? String(d.status) : (kind === "err" ? "error" : "resultado");
+    const label = d.status != null ? String(d.status) : (kind === "err" ? "error" : "result");
     const fields = jsonKeyFields(d);
     const shown = fields.slice(0, 6);
     const extra = fields.length - shown.length;
     const card = h("div", { class: "out out--card k-output" + (kind === "err" ? " out--err" : ""), "data-st": kind });
-    const btnLabel = () => (raw.hidden ? "ver JSON" + (extra > 0 ? " · +" + extra + " campos" : "") : "ocultar JSON");
+    const btnLabel = () => (raw.hidden ? "show JSON" + (extra > 0 ? " · +" + extra + " fields" : "") : "hide JSON");
     const raw = h("pre", { class: "jc__raw" }, JSON.stringify(d, null, 2));
     raw.hidden = true;
     const btn = h("button", { class: "linkbtn jc__toggle", type: "button", "aria-expanded": "false" });
@@ -477,8 +477,8 @@
         const bad = /(^|\.)(error|reason)$/.test(k) || (scope && v === true) || (/(^|\.)(returncode|exit_code)$/.test(k) && Number(v) !== 0);
         const wide = /(^|\.)(error|reason|message)$/.test(k) || String(v).length > 48;
         dl.append(h("div", { class: "jc__f" + (bad ? " is-bad" : "") + (wide ? " is-wide" : "") },
-          h("dt", null, scope ? "fuera de alcance" : k),
-          h("dd", null, scope ? (v === true ? "sí" : "no") : oneLine(String(v), 240))));
+          h("dt", null, scope ? "out of scope" : k),
+          h("dd", null, scope ? (v === true ? "yes" : "no") : oneLine(String(v), 240))));
       }
       card.append(dl);
     }
@@ -493,14 +493,14 @@
     const lines = text.replace(/\s+$/, "").split("\n");
     const maxLines = 14;
     const shown = lines.slice(0, maxLines).join("\n");
-    const txt = h("span", { class: "out__txt" }, shown || "(sin salida)");
+    const txt = h("span", { class: "out__txt" }, shown || "(no output)");
     const block = h("div", { class: "out k-output" + (ev.error ? " out--err" : "") }, txt);
     const hiddenLines = lines.length - maxLines;
     if (hiddenLines > 0 || ev.truncated) {
       const more = h("button", { class: "linkbtn out__more", type: "button" },
-        hiddenLines > 0 ? "ver las " + lines.length + " líneas" : "ver salida completa");
+        hiddenLines > 0 ? "show all " + lines.length + " lines" : "show full output");
       more.addEventListener("click", async () => {
-        more.textContent = "cargando…";
+        more.textContent = "loading…";
         try {
           const full = await api("/api/events/" + ev.seq);
           txt.textContent = full.output != null ? full.output : outputText(full.text);
@@ -528,7 +528,7 @@
         el = h("div", { class: "ln ln--ooda" },
           h("span", { class: "phase-badge", "data-phase": ev.phase }, ev.phase + " · " + ev.step),
           h("span", { class: "d" }, ev.text || ""));
-        // Datos antiguos (razonamiento emitido antes que su línea OODA): la cabecera va delante.
+        // Old data (reasoning emitted before its OODA line): the header goes in front.
         const last = term.lastElementChild;
         if (last && last.classList.contains("ln--reasoning") && last.dataset.mid && last.dataset.mid === String(ev.message_id)) {
           last.before(el);
@@ -538,7 +538,7 @@
         break;
       }
       case "user":
-        el = h("div", { class: "ln ln--user" }, h("span", { class: "who" }, "operador ▸"),
+        el = h("div", { class: "ln ln--user" }, h("span", { class: "who" }, "operator ▸"),
           h("span", { class: "clamp clamp-6" }, ev.text || ""));
         el.addEventListener("click", () => toggleOpen(el));
         break;
@@ -614,26 +614,26 @@
     }
   }
 
-  let termBulk = false;  // repintado completo: no cuenta como "nuevos"
+  let termBulk = false;  // full repaint: does not count as "new"
   function renderTerminal() {
     clear(term);
     S.calls = new Map();
     termTools.clear();
     while (tTool.options.length > 1) tTool.remove(1);
     if (!S.events.length) {
-      term.append(h("div", { class: "term__empty" }, "Esta sesión aún no tiene actividad."));
+      term.append(h("div", { class: "term__empty" }, "This session has no activity yet."));
     }
     termBulk = true;
     for (const ev of S.events) appendTermEvent(ev);
     termBulk = false;
     if (tTool.value && !termTools.has(tTool.value)) tTool.value = "";
     applyTermFilters();
-    if (termFilterActive()) applySearch(); else $("t-count").textContent = S.events.length + " eventos";
+    if (termFilterActive()) applySearch(); else $("t-count").textContent = S.events.length + " events";
     setFollow(true);
     scrollTermSoon(true);
   }
 
-  // ── buscar y filtrar por tool (resaltado con nodos de texto, nunca innerHTML)
+  // ── search and filter by tool (highlight with text nodes, never innerHTML)
   function termFilterActive() { return !!(tSearch.value.trim() || tTool.value); }
   function clearMarks() {
     term.querySelectorAll("mark.hl").forEach((m) => {
@@ -675,11 +675,11 @@
     term.classList.toggle("is-searching", active);
     if (!active) {
       kids.forEach((k) => k.classList.remove("is-out"));
-      $("t-count").textContent = S.events.length + " eventos";
+      $("t-count").textContent = S.events.length + " events";
       return;
     }
     const matches = (el) => !q || el.textContent.toLowerCase().includes(q);
-    // Una tool-call y su salida van juntas: el grupo se ve si cualquiera de las dos coincide.
+    // A tool-call and its output go together: the group is shown if either one matches.
     const groupHit = new Map();
     for (const el of kids) {
       const g = el.dataset.g;
@@ -694,7 +694,7 @@
       el.classList.toggle("is-out", !show);
       if (show) { hits++; if (q && budget > 0) budget -= markText(el, q, budget); }
     }
-    // Cabeceras OODA: visibles si su tramo conserva algo, o si la propia cabecera coincide.
+    // OODA headers: visible if their segment keeps something, or if the header itself matches.
     let header = null, any = false;
     const close = () => {
       if (!header) return;
@@ -708,8 +708,8 @@
     }
     close();
     const cnt = $("t-count");
-    cnt.textContent = hits ? hits + " de " + S.events.length : "sin coincidencias";
-    cnt.title = hits ? hits + (hits === 1 ? " línea coincide" : " líneas coinciden") + " (de " + S.events.length + " eventos)" : "";
+    cnt.textContent = hits ? hits + " of " + S.events.length : "no matches";
+    cnt.title = hits ? hits + (hits === 1 ? " line matches" : " lines match") + " (of " + S.events.length + " events)" : "";
   }
   const applySearchSoon = throttle(applySearch, 250);
   tSearch.addEventListener("input", applySearchSoon);
@@ -727,7 +727,7 @@
     tSearch.select();
   });
 
-  // Temporizadores de tools en curso (terminal + copilot).
+  // Timers for in-progress tools (terminal + copilot).
   setInterval(() => {
     for (const call of S.calls.values()) {
       if (call.result || !call.statusEl || !call.ev.ts) continue;
@@ -757,12 +757,12 @@
     badge.dataset.phase = o ? o.phase : "";
     badge.textContent = o ? o.phase : "—";
     $("now-step").textContent = o ? "step " + o.step + " · " + fmtAgo(o.ts) : "";
-    $("now-desc").textContent = o ? o.text : (S.sid ? "El agente aún no ha emitido su línea de estado OODA." : "Esperando actividad del agente…");
+    $("now-desc").textContent = o ? o.text : (S.sid ? "The agent has not emitted its OODA status line yet." : "Waiting for agent activity…");
 
     const running = $("now-running");
     clear(running);
     const live = [...S.calls.values()].filter((c) => !c.result && c.ev.ts);
-    if (!live.length) running.append(h("li", { class: "running--idle" }, "Nada en curso"));
+    if (!live.length) running.append(h("li", { class: "running--idle" }, "Nothing in progress"));
     for (const c of live) {
       running.append(h("li", null,
         h("span", { class: "el", "data-since": c.ev.ts }, fmtDur(now() - c.ev.ts)),
@@ -773,12 +773,12 @@
     for (let i = S.events.length - 1; i >= 0; i--) if (S.events[i].kind === "reasoning") { thought = S.events[i]; break; }
     $("now-thought").textContent = thought ? oneLine(thought.text, 420) : "—";
 
-    // Herramientas
+    // Tools
     const tools = $("cp-tools");
     clear(tools);
     const calls = S.events.filter((e) => e.kind === "tool.call");
-    $("cp-tools-meta").textContent = calls.length + " llamadas";
-    if (!calls.length) feedEmpty(tools, "Sin tool-calls todavía.");
+    $("cp-tools-meta").textContent = calls.length + " calls";
+    if (!calls.length) feedEmpty(tools, "No tool-calls yet.");
     for (const ev of calls.slice(-80).reverse()) {
       const c = S.calls.get(ev.call_id) || { ev, result: null };
       const st = statusText(c);
@@ -790,11 +790,11 @@
           : h("span", { class: "st " + st.cls }, st.text)));
     }
 
-    // Navegador
+    // Browser
     const br = $("cp-browser");
     clear(br);
     const bcalls = calls.filter((e) => e.category === "browser");
-    if (!bcalls.length) feedEmpty(br, "El agente no ha usado el navegador en esta sesión.");
+    if (!bcalls.length) feedEmpty(br, "The agent has not used the browser in this session.");
     for (const ev of bcalls.slice(-60).reverse()) {
       const c = S.calls.get(ev.call_id);
       const action = String(ev.tool_display || ev.tool || "").replace(/^browser_/, "");
@@ -813,34 +813,34 @@
         h("span", { class: "st " + statusText(c || { ev, result: null }).cls }, c && c.result ? (c.result.error ? "✗" : "✓") : "●")));
     }
 
-    // Tráfico web (global)
+    // Web traffic (global)
     renderWeb();
 
-    // Hallazgos
+    // Findings
     const fl = $("cp-findings");
     clear(fl);
     const finds = calls.filter(isFinding);
-    if (!finds.length) feedEmpty(fl, "Sin hallazgos registrados en esta sesión.");
+    if (!finds.length) feedEmpty(fl, "No findings recorded in this session.");
     for (const ev of finds.slice().reverse()) {
       const a = ev.args || {};
       const c = S.calls.get(ev.call_id);
-      // El veredicto del store manda: un "confirmed" rechazado NO se pinta como confirmado.
-      let verdict = "registrando…", vcls = "st", rejected = false, why = "";
+      // The store verdict wins: a rejected "confirmed" is NOT rendered as confirmed.
+      let verdict = "recording…", vcls = "st", rejected = false, why = "";
       if (c && c.result) {
         const d = unwrap(c.result.text);
         const ok = d && d.status === "recorded";
         rejected = !ok;
-        verdict = ok ? "registrado" : "rechazado";
+        verdict = ok ? "recorded" : "rejected";
         vcls = "st " + (ok ? "s--ok" : "s--err");
         if (rejected) why = (d && (d.error || d.message)) || "";
       }
       const chipCls = "chip chip--" + (rejected ? "rejected" : (a.state || "hypothesis"));
-      const chipTxt = rejected ? "rechazado" : (a.state || "?");
+      const chipTxt = rejected ? "rejected" : (a.state || "?");
       fl.append(h("li", null,
         h("span", { class: "tm" }, fmtTime(ev.ts)),
         h("span", { class: "bd" }, h("span", { class: chipCls }, chipTxt), " ",
-          h("span", { class: "c" }, a.title || "(sin título)"),
-          rejected && a.state ? h("span", { class: "c muted" }, " · pedía " + a.state) : null,
+          h("span", { class: "c" }, a.title || "(no title)"),
+          rejected && a.state ? h("span", { class: "c muted" }, " · requested " + a.state) : null,
           a.target ? h("div", { class: "c muted" }, a.target) : null,
           why ? h("div", { class: "c s--err" }, oneLine(why, 160)) : null),
         h("span", { class: vcls }, verdict)));
@@ -851,11 +851,11 @@
     const body = $("cp-web");
     clear(body);
     const c = (S.status && S.status.caido) || {};
-    $("cp-web-meta").textContent = !c.enabled ? "feed desactivado"
-      : c.ok ? S.web.length + " recientes · " + fmtInt(c.requests) + " en Caido" : "Caido no responde: " + (c.last_error || "—");
+    $("cp-web-meta").textContent = !c.enabled ? "feed disabled"
+      : c.ok ? S.web.length + " recent · " + fmtInt(c.requests) + " in Caido" : "Caido not responding: " + (c.last_error || "—");
     if (!S.web.length) {
       body.append(h("tr", null, h("td", { colspan: 6, class: "muted" },
-        "Sin tráfico capturado. Llega aquí todo lo que pasa por el proxy de Caido (caido_request, y kali_run con CAIDO_PROXY_CAPTURE=1).")));
+        "No traffic captured. Everything that goes through the Caido proxy arrives here (caido_request, and kali_run with CAIDO_PROXY_CAPTURE=1).")));
       return;
     }
     for (const ev of S.web.slice(-200).reverse()) {
@@ -877,10 +877,10 @@
       const doc = await api("/api/web?tail=200");
       S.web = doc.data || [];
       if (S.view === "copilot") renderWeb();
-    } catch (_) { /* opcional */ }
+    } catch (_) { /* optional */ }
   }
 
-  // ───────────────────────────────────────────────────────── trazas
+  // ───────────────────────────────────────────────────────── traces
   let traceDirty = false;
   const traceRefresh = throttle(() => { if (S.view === "traces") loadTrace(); }, 2000);
   function markTraceDirty() { traceDirty = true; if (S.view === "traces") traceRefresh(); }
@@ -892,7 +892,7 @@
       const doc = await api("/api/sessions/" + encodeURIComponent(sid) + "/trace");
       if (S.sid !== sid) return;
       if (doc.now) skew = doc.now - Date.now() / 1000;
-      // trazas de los subagentes (sesiones hijas) para sus nodos del grafo
+      // subagent traces (child sessions) for their graph nodes
       const kids = S.sessions.filter((s) => s.parent_id === sid).slice(0, 8);
       const docs = await Promise.all(kids.map((c) => api("/api/sessions/" + encodeURIComponent(c.id) + "/trace").catch(() => null)));
       if (S.sid !== sid) return;
@@ -902,7 +902,7 @@
       renderTrace();
     } catch (e) {
       clear($("tr-waterfall"));
-      $("tr-waterfall").append(h("p", { class: "empty" }, "No se pudo cargar la traza: " + e));
+      $("tr-waterfall").append(h("p", { class: "empty" }, "Could not load the trace: " + e));
     }
   }
 
@@ -921,8 +921,8 @@
   const pct = (v) => v + "%";
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
-  // Bandas OODA: de cada línea de estado a la siguiente (la última llega al final de la ventana).
-  // Sin líneas OODA en el stream, se deducen de la fase/step con que vienen etiquetados los spans.
+  // OODA bands: from each status line to the next (the last one reaches the end of the window).
+  // Without OODA lines in the stream, they are inferred from the phase/step the spans are tagged with.
   function oodaBands(spans, t1) {
     let marks = S.events.filter((e) => e.kind === "ooda" && e.ts && e.phase)
       .map((e) => ({ ts: e.ts, phase: e.phase, step: e.step, text: e.text || "" }));
@@ -939,7 +939,7 @@
     return marks.map((m, i) => ({ ...m, end: i + 1 < marks.length ? marks[i + 1].ts : t1 })).filter((b) => b.end > b.ts);
   }
 
-  // Tiempo de reloj con al menos una tool corriendo (unión de intervalos: las paralelas no cuentan doble).
+  // Wall-clock time with at least one tool running (union of intervals: parallel ones don't count twice).
   function unionLength(intervals) {
     const xs = intervals.filter(([a, b]) => b > a).sort((p, q) => p[0] - q[0]);
     let total = 0, cs = null, ce = null;
@@ -971,23 +971,23 @@
   function renderTrace() {
     const doc = S.trace;
     if (!doc) return;
-    if (S.wfDrag) { traceDirty = true; return; }  // no repintar a mitad de un arrastre de zoom
+    if (S.wfDrag) { traceDirty = true; return; }  // don't repaint mid zoom-drag
     const sum = doc.summary || {};
     const sess = doc.session || {};
     const m = traceModel();
     const execT = unionLength(m.iv);
     const thinkT = Math.max(m.wall - execT, 0);
-    const share = (v) => (m.wall ? Math.round((v / m.wall) * 100) + "% de la ventana" : null);
+    const share = (v) => (m.wall ? Math.round((v / m.wall) * 100) + "% of the window" : null);
 
     const k = $("tr-kpis");
     clear(k);
     k.append(
-      kpi("Tool-calls", fmtInt(sum.spans || 0), sum.running ? sum.running + " en curso" : (sum.spans ? "todas cerradas" : null)),
-      kpi("Ejecutando tools", fmtDur(execT), share(execT)),
-      kpi("Pensando · LLM", fmtDur(thinkT), share(thinkT)),
-      kpi("Errores", fmtInt(sum.errors || 0), sum.spans ? "de " + fmtInt(sum.spans) + " llamadas" : null, sum.errors ? "kpi--err" : null),
-      kpi("Tokens", fmtInt(sess.input_tokens), "entrada · " + fmtInt(sess.output_tokens) + " salida"),
-      kpi("Coste", sess.cost_usd != null ? "$" + Number(sess.cost_usd).toFixed(4) : "—", sess.model || null));
+      kpi("Tool-calls", fmtInt(sum.spans || 0), sum.running ? sum.running + " in progress" : (sum.spans ? "all closed" : null)),
+      kpi("Running tools", fmtDur(execT), share(execT)),
+      kpi("Thinking · LLM", fmtDur(thinkT), share(thinkT)),
+      kpi("Errors", fmtInt(sum.errors || 0), sum.spans ? "of " + fmtInt(sum.spans) + " calls" : null, sum.errors ? "kpi--err" : null),
+      kpi("Tokens", fmtInt(sess.input_tokens), "input · " + fmtInt(sess.output_tokens) + " output"),
+      kpi("Cost", sess.cost_usd != null ? "$" + Number(sess.cost_usd).toFixed(4) : "—", sess.model || null));
 
     renderSplit(m, execT, thinkT);
 
@@ -996,8 +996,8 @@
     const cats = [...new Set(m.spans.map((s) => s.category || "tool"))];
     for (const c of cats) leg.append(h("span", null, h("i", { class: "cat", "data-cat": c, style: { background: "var(--c)" } }), CAT_LABEL[c] || c));
     if (m.spans.some((s) => s.status === "error")) leg.append(h("span", null, h("i", { style: { background: "var(--err)" } }), "error"));
-    if (m.live) leg.append(h("span", null, h("i", { class: "is-running" }), "en curso"));
-    if (m.bands.length) leg.append(h("span", { class: "legend__sep" }, "fondo = fase OODA"));
+    if (m.live) leg.append(h("span", null, h("i", { class: "is-running" }), "in progress"));
+    if (m.bands.length) leg.append(h("span", { class: "legend__sep" }, "background = OODA phase"));
 
     renderWaterfall(m);
     renderGraph(m);
@@ -1010,7 +1010,7 @@
       const w = ((t.total || 0) / toolSum) * 100;
       const sel = S.toolSelected === t.tool;
       const row = h("tr", { class: "row-sel" + (sel ? " is-sel" : ""), tabindex: 0, role: "button",
-                             "aria-pressed": sel ? "true" : "false", "aria-label": "Ver a fondo " + t.tool },
+                             "aria-pressed": sel ? "true" : "false", "aria-label": "Inspect " + t.tool + " in depth" },
         h("td", null, h("span", { class: "cat", "data-cat": t.category }, t.tool)),
         h("td", { class: "num" }, fmtInt(t.calls)),
         h("td", { class: "num" }, fmtDur(t.total)),
@@ -1032,7 +1032,7 @@
     }
   }
 
-  // Barra apilada 100% + leyenda con valores (la identidad nunca va solo en el color).
+  // 100% stacked bar + legend with values (identity is never conveyed by color alone).
   function splitBar(segs, total) {
     const live = segs.filter((s) => s.value > 0);
     const fmtShare = (v) => { const p = (v / total) * 100; return (p < 10 ? p.toFixed(1) : Math.round(p)) + "%"; };
@@ -1052,16 +1052,16 @@
   function renderSplit(m, execT, thinkT) {
     const box = $("tr-split");
     clear(box);
-    if (!m.wall) { box.append(h("p", { class: "empty" }, "Sin actividad todavía.")); return; }
-    box.append(h("div", { class: "split__row" }, h("span", { class: "split__label" }, "Agente"),
-      ...splitBar([{ label: "ejecutando tools", value: execT, cls: "seg--exec" },
-                   { label: "pensando / LLM", value: thinkT, cls: "seg--think" }], m.wall)));
+    if (!m.wall) { box.append(h("p", { class: "empty" }, "No activity yet.")); return; }
+    box.append(h("div", { class: "split__row" }, h("span", { class: "split__label" }, "Agent"),
+      ...splitBar([{ label: "running tools", value: execT, cls: "seg--exec" },
+                   { label: "thinking / LLM", value: thinkT, cls: "seg--think" }], m.wall)));
     const per = {};
     for (const b of m.bands) per[b.phase] = (per[b.phase] || 0) + (b.end - b.ts);
     const phs = PHASES.filter((p) => per[p] > 0).map((p) => ({ label: p.toLowerCase(), value: per[p], phase: p }));
     const tot = phs.reduce((a, s) => a + s.value, 0);
     if (phs.length) {
-      box.append(h("div", { class: "split__row" }, h("span", { class: "split__label" }, "Fases OODA"), ...splitBar(phs, tot)));
+      box.append(h("div", { class: "split__row" }, h("span", { class: "split__label" }, "OODA phases"), ...splitBar(phs, tot)));
     }
   }
 
@@ -1071,9 +1071,9 @@
     return h("div", { class: "wf-line" + (cls ? " " + cls : "") }, h("span", { class: "wf-line__lab" }, label), content);
   }
 
-  // Vista general de toda la sesión: arrastrar selecciona el tramo a ampliar; doble clic, ver todo.
+  // Overview of the whole session: dragging selects the segment to zoom into; double-click shows all.
   function wfOverview(m, full, va, vb) {
-    const ov = h("div", { class: "wf-ov", title: "Arrastra para ampliar un tramo · doble clic para ver todo" });
+    const ov = h("div", { class: "wf-ov", title: "Drag to zoom into a segment · double-click to show all" });
     const OX = (t) => ((t - m.t0) / full) * 100;
     for (const b of m.bands) {
       ov.append(h("span", { class: "wf-ov__band", "data-phase": b.phase, style: { left: pct(OX(b.ts)), width: pct(Math.max(OX(b.end) - OX(b.ts), 0)) } }));
@@ -1095,7 +1095,7 @@
       const fx = (cx) => clamp((cx - rect.left) / rect.width, 0, 1);
       const x0 = fx(e.clientX);
       S.wfDrag = true;
-      try { ov.setPointerCapture(e.pointerId); } catch (_) { /* opcional */ }
+      try { ov.setPointerCapture(e.pointerId); } catch (_) { /* optional */ }
       win.hidden = false; win.style.left = pct(x0 * 100); win.style.width = "0%";
       const move = (ev) => { const x1 = fx(ev.clientX); win.style.left = pct(Math.min(x0, x1) * 100); win.style.width = pct(Math.abs(x1 - x0) * 100); };
       const up = (ev) => {
@@ -1121,10 +1121,10 @@
     clear(wfTip);
     wfTip.append(
       h("div", { class: "wf-tip__val" }, running ? fmtDur(m.nowS - a) : fmtDur(sp.duration != null ? sp.duration : b - a),
-        h("span", { class: running ? "s--run" : err ? "s--err" : "s--ok" }, running ? "● en curso" : err ? "✗ error" : "✓ ok")),
+        h("span", { class: running ? "s--run" : err ? "s--err" : "s--ok" }, running ? "● in progress" : err ? "✗ error" : "✓ ok")),
       h("div", { class: "wf-tip__tool" }, h("span", { class: "cat", "data-cat": sp.category }, sp.tool_display || sp.tool || "?"),
         sp.phase ? h("span", { class: "wf-ph", "data-phase": sp.phase }, (PH_SHORT[sp.phase] || sp.phase) + " · " + sp.step) : null),
-      h("div", { class: "wf-tip__meta" }, "inicio " + fmtOff(a - m.t0) + " · " + fmtTime(a)),
+      h("div", { class: "wf-tip__meta" }, "start " + fmtOff(a - m.t0) + " · " + fmtTime(a)),
       sp.summary ? h("div", { class: "wf-tip__sum" }, oneLine(sp.summary, 180)) : null);
     wfTip.hidden = false;
     const r = wfTip.getBoundingClientRect();
@@ -1135,7 +1135,7 @@
     wfTip.style.top = Math.max(8, y) + "px";
   }
 
-  let wfHoverFx = null;  // posición del cursor (0..1 de la pista): sobrevive al repintado periódico
+  let wfHoverFx = null;  // cursor position (0..1 of the track): survives the periodic repaint
   function renderWaterfall(m) {
     const wf = $("tr-waterfall");
     const keepScroll = wf.scrollTop;
@@ -1145,7 +1145,7 @@
       wfTip.hidden = true;
       $("tr-range").textContent = "";
       $("tr-reset").hidden = true;
-      wf.append(h("p", { class: "empty" }, "Sin tool-calls en esta sesión."));
+      wf.append(h("p", { class: "empty" }, "No tool-calls in this session."));
       return;
     }
     let [va, vb] = S.traceZoom || [0, full];
@@ -1154,17 +1154,17 @@
     const span = vb - va;
     const X = (t) => ((t - m.t0 - va) / span) * 100;
     $("tr-range").textContent = S.traceZoom
-      ? "tramo " + fmtOff(va) + " → " + fmtOff(vb) + " de " + fmtDur(full)
-      : "ventana " + fmtDur(full) + " · arrastra en la vista general para ampliar";
+      ? "segment " + fmtOff(va) + " → " + fmtOff(vb) + " of " + fmtDur(full)
+      : "window " + fmtDur(full) + " · drag in the overview to zoom in";
     $("tr-reset").hidden = !S.traceZoom;
 
     const step = niceStep(span);
     const tickTs = [];
     for (let t = Math.ceil(va / step - 1e-9) * step; t <= vb + 1e-9; t += step) tickTs.push(t);
 
-    // ── cabecera fija: vista general · carril OODA · eje
+    // ── fixed header: overview · OODA lane · axis
     const head = h("div", { class: "wf-head" });
-    head.append(wfLine("Vista general", wfOverview(m, full, va, vb)));
+    head.append(wfLine("Overview", wfOverview(m, full, va, vb)));
     if (m.bands.length) {
       const lane = h("div", { class: "wf-lane" });
       for (const b of m.bands) {
@@ -1176,7 +1176,7 @@
         seg.title = b.phase + " · step " + b.step + (b.text ? " — " + b.text : "") + " · " + fmtDur(b.end - b.ts);
         lane.append(seg);
       }
-      head.append(wfLine("Fases OODA", lane));
+      head.append(wfLine("OODA phases", lane));
     }
     const ticks = h("div", { class: "wf-ticks" });
     for (const t of tickTs) {
@@ -1189,7 +1189,7 @@
     head.append(wfLine("", ticks, "wf-line--axis"));
     wf.append(head);
 
-    // ── cuerpo: fondo (fases, rejilla, ahora, cursor) + filas
+    // ── body: background (phases, grid, now, cursor) + rows
     const body = h("div", { class: "wf-body" });
     const grid = h("div", { class: "wf-grid", "aria-hidden": "true" });
     for (const b of m.bands) {
@@ -1248,7 +1248,7 @@
       body.append(row);
     });
 
-    // cursor de tiempo + tooltip de la fila bajo el ratón
+    // time cursor + tooltip for the row under the mouse
     body.addEventListener("pointermove", (e) => {
       const track = body.querySelector(".wf-track");
       if (!track) return;
@@ -1265,9 +1265,9 @@
   }
   $("tr-reset").addEventListener("click", () => { S.traceZoom = null; renderTrace(); });
 
-  // ───────────────────────────────────────────────────────── grafo en vivo
-  // Objetivos ← Hermes (anillo OODA) → actores (familias de tools + subagentes). Solo datos reales:
-  // spans de la traza, args de los tool.call y las sesiones hijas. SVG a mano (CSP: sin librerías).
+  // ───────────────────────────────────────────────────────── live graph
+  // Targets ← Hermes (OODA ring) → actors (tool families + subagents). Real data only:
+  // trace spans, tool.call args and child sessions. Hand-drawn SVG (CSP: no libraries).
   const SVGNS = "http://www.w3.org/2000/svg";
   function sv(tag, attrs, ...children) {
     const el = document.createElementNS(SVGNS, tag);
@@ -1279,12 +1279,12 @@
     return el;
   }
   const FAM_ORDER = ["shell", "browser", "web", "recon", "finding", "tracking", "subagent", "tool"];
-  const FAM_NAME = { shell: "Shell · Kali", browser: "Navegador", web: "Caido", recon: "Recon", finding: "Hallazgos",
-                     tracking: "Tracking", subagent: "Delegación", tool: "Otras tools" };
+  const FAM_NAME = { shell: "Shell · Kali", browser: "Browser", web: "Caido", recon: "Recon", finding: "Findings",
+                     tracking: "Tracking", subagent: "Delegation", tool: "Other tools" };
   const HOST_URL = /\bhttps?:\/\/([a-z0-9.-]+)/gi;
   const HOST_IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
   const HOST_BARE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
-  // Fase continua de las animaciones aunque el SVG se rehaga cada pocos segundos.
+  // Continuous animation phase even though the SVG is rebuilt every few seconds.
   const animDelay = (period) => "-" + ((Date.now() % (period * 1000)) / 1000).toFixed(3) + "s";
 
   function hostsOf(args, summary) {
@@ -1355,7 +1355,7 @@
         for (const host of hostsOf({ target: args.target }, "")) {
           const t = touch(host);
           if (res) { if (recorded) t.ok += 1; else t.bad += 1; }
-          t.findings.push({ title: args.title || "(sin título)", state: args.state, recorded: !!recorded, done: !!res,
+          t.findings.push({ title: args.title || "(no title)", state: args.state, recorded: !!recorded, done: !!res,
                             why: res && !recorded ? oneLine(res.summary || res.text || "", 140) : "" });
         }
       }
@@ -1412,8 +1412,8 @@
       if (e.kind === "tool.result" && e.category === "finding") {
         const ok = !e.error && /"recorded"/.test(e.text || "");
         const call = S.events.find((x) => x.kind === "tool.call" && x.call_id === e.call_id);
-        const title = (call && call.args && call.args.title) || "hallazgo";
-        txt = (ok ? "★ HALLAZGO REGISTRADO · " : "✗ HALLAZGO RECHAZADO · ") + title; cls = ok ? "is-ok" : "is-err";
+        const title = (call && call.args && call.args.title) || "finding";
+        txt = (ok ? "★ FINDING RECORDED · " : "✗ FINDING REJECTED · ") + title; cls = ok ? "is-ok" : "is-err";
       } else if (e.kind === "tool.result" && e.error) {
         txt = "✗ " + (e.tool_display || e.tool) + " · " + oneLine(e.summary || e.text || "", 140); cls = "is-err";
       } else if (e.kind === "tool.call") {
@@ -1451,9 +1451,9 @@
       sv("radialGradient", { id: "g-glow" }, sv("stop", { offset: "0%", class: "g-glow-in" }), sv("stop", { offset: "100%", class: "g-glow-out" }))),
       sv("circle", { cx: HX, cy, r: 170, fill: "url(#g-glow)" }), edges, nodes);
 
-    // ── objetivos (izquierda)
+    // ── targets (left)
     if (!g.targets.length) {
-      nodes.append(sv("text", { x: TX, y: cy + 4, class: "g-meta", "text-anchor": "end" }, "sin objetivos detectados todavía"));
+      nodes.append(sv("text", { x: TX, y: cy + 4, class: "g-meta", "text-anchor": "end" }, "no targets detected yet"));
     }
     g.targets.forEach((t, j) => {
       const y = ty(j);
@@ -1462,25 +1462,25 @@
       const e = sv("path", { d: path, class: "g-edge g-edge--target" + (live ? " is-active" : ""), "data-gedge": "tgt:" + t.host, "stroke-width": (1.2 + Math.log2(1 + t.calls) * 0.7).toFixed(2) });
       if (live) e.style.animationDelay = animDelay(1);
       edges.append(e);
-      const grp = sv("g", { class: "g-target g-sel" + (live ? " is-running" : ""), "data-gsel": "tgt:" + t.host, tabindex: 0, role: "button", "aria-label": "Objetivo " + t.host },
+      const grp = sv("g", { class: "g-target g-sel" + (live ? " is-running" : ""), "data-gsel": "tgt:" + t.host, tabindex: 0, role: "button", "aria-label": "Target " + t.host },
         live ? sv("circle", { cx: TX, cy: y, r: 9, class: "g-halo" }) : null,
         sv("circle", { cx: TX, cy: y, r: 9, class: "g-target__dot" }),
         sv("text", { x: TX - 20, y: y - 2, class: "g-host", "text-anchor": "end" }, oneLine(t.host, 30)),
         sv("text", { x: TX - 20, y: y + 15, class: "g-meta", "text-anchor": "end" },
-          t.calls + (t.calls === 1 ? " llamada" : " llamadas"),
+          t.calls + (t.calls === 1 ? " call" : " calls"),
           t.ok ? sv("tspan", { class: "g-ok" }, " · " + t.ok + " ✓") : null,
           t.bad ? sv("tspan", { class: "g-bad" }, " · " + t.bad + " ✗") : null));
       if (live) grp.querySelector(".g-halo").style.animationDelay = animDelay(1.6);
       nodes.append(grp);
     });
     if (g.hiddenTargets > 0) {
-      nodes.append(sv("text", { x: TX - 20, y: ty(g.targets.length - 1) + 40, class: "g-meta", "text-anchor": "end" }, "+" + g.hiddenTargets + " objetivos más"));
+      nodes.append(sv("text", { x: TX - 20, y: ty(g.targets.length - 1) + 40, class: "g-meta", "text-anchor": "end" }, "+" + g.hiddenTargets + " more targets"));
     }
 
-    // ── Hermes (centro): anillo con las 4 fases OODA
+    // ── Hermes (center): ring with the 4 OODA phases
     const o = currentOoda();
     const busy = g.actors.some((a) => a.running.length);
-    const hg = sv("g", { class: "g-hermes g-sel" + (busy ? " is-running" : ""), "data-gsel": "hermes", tabindex: 0, role: "button", "aria-label": "Hermes, bucle OODA" });
+    const hg = sv("g", { class: "g-hermes g-sel" + (busy ? " is-running" : ""), "data-gsel": "hermes", tabindex: 0, role: "button", "aria-label": "Hermes, OODA loop" });
     if (busy) { const halo = sv("circle", { cx: HX, cy, r: 30, class: "g-halo g-halo--big" }); halo.style.animationDelay = animDelay(2.2); hg.append(halo); }
     ["OBSERVE", "ORIENT", "DECIDE", "ACT"].forEach((p, i) => {
       const a0 = -90 + i * 90 + 5;
@@ -1492,12 +1492,12 @@
       sv("text", { x: HX, y: cy - 62, class: "g-kicker", "text-anchor": "middle" }, "HERMES · OODA"),
       sv("text", { x: HX, y: cy + 68, class: "g-phase", "text-anchor": "middle", "data-phase": o ? o.phase : "" }, o ? o.phase + " · " + o.step : "—"),
       sv("text", { x: HX, y: cy + 88, class: "g-meta", "text-anchor": "middle" },
-        m.spans.length + " llamadas → " + g.hyp + " hallazgos → ", sv("tspan", { class: g.conf ? "g-ok" : "" }, g.conf + " confirmados")));
+        m.spans.length + " calls → " + g.hyp + " findings → ", sv("tspan", { class: g.conf ? "g-ok" : "" }, g.conf + " confirmed")));
     nodes.append(hg);
 
-    // ── actores (derecha): familias de tools y subagentes
+    // ── actors (right): tool families and subagents
     if (!g.actors.length) {
-      nodes.append(sv("text", { x: AX, y: cy + 4, class: "g-meta" }, "sin tool-calls todavía"));
+      nodes.append(sv("text", { x: AX, y: cy + 4, class: "g-meta" }, "no tool-calls yet"));
     }
     g.actors.forEach((ac, i) => {
       const y = ay(i);
@@ -1511,34 +1511,34 @@
       const key = sub ? "sub:" + ac.session.id : "fam:" + ac.cat;
       e.setAttribute("data-gedge", key);
       const grp = sv("g", { class: "g-actor g-sel cat" + (live ? " is-running" : "") + (sub ? " g-actor--sub" : ""), "data-cat": ac.cat,
-                             "data-gsel": key, tabindex: 0, role: "button", "aria-label": (sub ? "Subagente " : "Actor ") + (sub ? ac.session.title || ac.session.id : FAM_NAME[ac.cat] || ac.cat) });
+                             "data-gsel": key, tabindex: 0, role: "button", "aria-label": (sub ? "Subagent " : "Actor ") + (sub ? ac.session.title || ac.session.id : FAM_NAME[ac.cat] || ac.cat) });
       if (live) { const halo = sv("circle", { cx: AX, cy: y, r: 11, class: "g-halo" }); halo.style.animationDelay = animDelay(1.6); grp.append(halo); }
       if (sub) grp.append(sv("rect", { x: AX - 10, y: y - 10, width: 20, height: 20, rx: 3, class: "g-ring", transform: "rotate(45 " + AX + " " + y + ")" }));
       else grp.append(sv("circle", { cx: AX, cy: y, r: 11, class: "g-ring" }), sv("circle", { cx: AX, cy: y, r: 4, class: "g-core" }));
 
       const lx = AX + 24;
-      const title = sub ? "Subagente · " + oneLine((ac.session.title || ac.session.id).replace(/^subagente\s*·\s*/i, ""), 46) : FAM_NAME[ac.cat] || ac.cat;
+      const title = sub ? "Subagent · " + oneLine((ac.session.title || ac.session.id).replace(/^subagente\s*·\s*/i, ""), 46) : FAM_NAME[ac.cat] || ac.cat;
       const toolsTxt = sub ? "" : [...ac.tools.entries()].map(([n, c]) => n + (c > 1 ? " ×" + c : "")).join(" · ");
       grp.append(sv("text", { x: lx, y: y - 16, class: "g-title" }, title,
         toolsTxt ? sv("tspan", { class: "g-tools", dx: 10 }, oneLine(toolsTxt, 60)) : null));
 
-      // fichas: últimas llamadas (ok = color de familia, error = rojo, en curso = verde vivo)
+      // cards: latest calls (ok = family color, error = red, in progress = bright green)
       const last = ac.items.slice(-16);
       const dots = sv("g", { class: "g-dots" });
       last.forEach((it, k) => {
         const d = sv("rect", { x: lx + k * 11, y: y - 6, width: 8, height: 8, rx: 2, class: "g-dot", "data-status": it.sp.status, "data-call": it.sp.call_id });
-        d.append(sv("title", null, (it.sp.tool_display || it.sp.tool) + " · " + (it.sp.status === "running" ? "en curso" : fmtDur(it.b - it.a)) + " · " + oneLine(it.sp.summary || "", 80)));
+        d.append(sv("title", null, (it.sp.tool_display || it.sp.tool) + " · " + (it.sp.status === "running" ? "in progress" : fmtDur(it.b - it.a)) + " · " + oneLine(it.sp.summary || "", 80)));
         dots.append(d);
       });
       grp.append(dots);
       const n = ac.items.length;
       grp.append(sv("text", { x: lx + Math.max(last.length, 1) * 11 + 6, y: y + 2, class: "g-meta" },
-        n + (n === 1 ? " llamada" : " llamadas"),
+        n + (n === 1 ? " call" : " calls"),
         ac.errors ? sv("tspan", { class: "g-bad" }, " · " + ac.errors + " ✗") : null,
         !sub && ac.total ? " · " + fmtDur(ac.total) : null,
         sub ? " · " + fmtAgo(ac.session.last_active) : null));
 
-      // estado: lo que está corriendo ahora (o lo último que hizo)
+      // state: what is running now (or the last thing it did)
       let st, stCls = "g-status";
       if (live) {
         const r = ac.running[ac.running.length - 1];
@@ -1548,7 +1548,7 @@
         grp.append(t);
       } else {
         const it = ac.items[ac.items.length - 1];
-        st = it ? "último: " + oneLine(it.sp.summary || it.sp.tool || "", 58) + (it.sp.status === "error" ? "  ✗" : "  ✓ " + fmtDur(it.b - it.a)) : "sin actividad";
+        st = it ? "last: " + oneLine(it.sp.summary || it.sp.tool || "", 58) + (it.sp.status === "error" ? "  ✗" : "  ✓ " + fmtDur(it.b - it.a)) : "no activity";
         grp.append(sv("text", { x: lx, y: y + 22, class: stCls }, st));
       }
       nodes.append(grp);
@@ -1556,7 +1556,7 @@
     applyGraphSel();
   }
 
-  // ── selección: panel lateral con el detalle del nodo
+  // ── selection: side panel with the node detail
   function applyGraphSel() {
     const svg = $("tr-svg");
     const key = S.graphSel;
@@ -1572,8 +1572,8 @@
   }
 
   async function loadCallDetail(sp, box) {
-    const argsPre = h("pre", { class: "block" }, "…"), outPre = h("pre", { class: "block" }, sp.status === "running" ? "(en curso)" : "…");
-    box.append(h("div", { class: "gd-k" }, "Argumentos"), argsPre, h("div", { class: "gd-k" }, "Resultado"), outPre);
+    const argsPre = h("pre", { class: "block" }, "…"), outPre = h("pre", { class: "block" }, sp.status === "running" ? "(in progress)" : "…");
+    box.append(h("div", { class: "gd-k" }, "Arguments"), argsPre, h("div", { class: "gd-k" }, "Result"), outPre);
     const get = async (seq) => {
       if (!seq) return null;
       if (!S.evCache.has(seq)) S.evCache.set(seq, await api("/api/events/" + seq));
@@ -1581,7 +1581,7 @@
     };
     try {
       const c = await get(sp.call_seq);
-      argsPre.textContent = c ? JSON.stringify(c.args != null ? c.args : {}, null, 2) : "(no disponible)";
+      argsPre.textContent = c ? JSON.stringify(c.args != null ? c.args : {}, null, 2) : "(not available)";
       const r = await get(sp.result_seq);
       if (r) outPre.textContent = r.output != null ? r.output : outputText(r.text);
       else if (sp.status !== "running") outPre.textContent = sp.result_preview || "—";
@@ -1592,7 +1592,7 @@
     onToggle = onToggle || renderDrawer;
     const ol = h("ol", { class: "gd-calls" });
     const sorted = items.slice().sort((x, y) => (y.a || 0) - (x.a || 0));
-    if (!sorted.length) ol.append(h("li", { class: "muted" }, "Sin llamadas."));
+    if (!sorted.length) ol.append(h("li", { class: "muted" }, "No calls."));
     for (const it of sorted.slice(0, 80)) {
       const sp = it.sp, run = sp.status === "running", err = sp.status === "error";
       const open = S.graphOpen.has(sp.call_id);
@@ -1601,7 +1601,7 @@
         h("span", { class: "tm" }, fmtTime(it.a)),
         h("span", { class: "gd-call__body" },
           h("span", { class: "t cat", "data-cat": sp.category }, sp.tool_display || sp.tool || "?"),
-          showSub && it.sub ? h("span", { class: "gd-sub" }, " ↳ subagente") : null,
+          showSub && it.sub ? h("span", { class: "gd-sub" }, " ↳ subagent") : null,
           h("span", { class: "c" }, " " + oneLine(sp.summary || "", 160))),
         run ? h("span", { class: "st s--run", "data-since": it.a }, fmtDur(nowS - it.a))
             : h("span", { class: "st " + (err ? "s--err" : "s--ok") }, (err ? "✗ " : "✓ ") + fmtDur(sp.duration != null ? sp.duration : it.b - it.a)));
@@ -1621,8 +1621,8 @@
     return h("dl", { class: "gd-stats" }, ...pairs.filter(Boolean).map(([k, v, cls]) => h("div", null, h("dt", null, k), h("dd", { class: cls || null }, v))));
   }
 
-  // Detalle de una tool de la tabla "Por herramienta": todas sus llamadas de esta sesión, cada
-  // una desplegable a sus argumentos y resultado reales (reutiliza callList/gdStats del grafo).
+  // Detail of a tool from the "By tool" table: all its calls in this session, each
+  // expandable to its real arguments and result (reuses callList/gdStats from the graph).
   function renderToolDetail(m) {
     const box = $("tr-tool-detail");
     const name = S.toolSelected;
@@ -1634,15 +1634,15 @@
       .map((sp) => ({ sp, a: sp.started_at || sp.ended_at || 0, b: sp.ended_at || (sp.status === "running" ? m.nowS : sp.started_at || 0) }));
     const keep = box.scrollTop;
     clear(box);
-    const close = h("button", { type: "button", class: "btn btn--ghost btn--sm gd-close", "aria-label": "Cerrar" }, "✕");
+    const close = h("button", { type: "button", class: "btn btn--ghost btn--sm gd-close", "aria-label": "Close" }, "✕");
     close.addEventListener("click", () => { S.toolSelected = null; renderToolDetail(m); renderTrace(); });
     box.append(close,
       h("header", { class: "gd-head cat", "data-cat": agg.category },
         h("span", { class: "gd-kicker" }, "Tool"), h("h4", { class: "gd-title" }, name)),
-      gdStats([["Llamadas", fmtInt(agg.calls)], ["En curso", fmtInt(agg.running || 0), agg.running ? "s--run" : ""],
-               ["Errores", fmtInt(agg.errors), agg.errors ? "s--err" : ""], ["Media", fmtDur(agg.avg)],
-               ["Máx", fmtDur(agg.max)], ["Tiempo total", fmtDur(agg.total)]]),
-      h("div", { class: "gd-k" }, "Llamadas de esta sesión (clic para ver argumentos y resultado)"),
+      gdStats([["Calls", fmtInt(agg.calls)], ["In progress", fmtInt(agg.running || 0), agg.running ? "s--run" : ""],
+               ["Errors", fmtInt(agg.errors), agg.errors ? "s--err" : ""], ["Mean", fmtDur(agg.avg)],
+               ["Max", fmtDur(agg.max)], ["Total time", fmtDur(agg.total)]]),
+      h("div", { class: "gd-k" }, "Calls in this session (click to see arguments and result)"),
       callList(items, m.nowS, false, () => renderToolDetail(m)));
     box.hidden = false;
     box.scrollTop = keep;
@@ -1656,7 +1656,7 @@
     wrap.classList.add("has-drawer");
     const keep = dr.scrollTop;
     clear(dr);
-    const close = h("button", { type: "button", class: "btn btn--ghost btn--sm gd-close", "aria-label": "Cerrar" }, "✕");
+    const close = h("button", { type: "button", class: "btn btn--ghost btn--sm gd-close", "aria-label": "Close" }, "✕");
     close.addEventListener("click", () => selectGraph(null));
     let body = null;
     if (key === "hermes") {
@@ -1668,48 +1668,48 @@
         steps.append(h("li", null, h("span", { class: "wf-ph", "data-phase": b.phase }, (PH_SHORT[b.phase] || b.phase) + " " + b.step),
           h("span", { class: "c" }, b.text || ""), h("span", { class: "st" }, fmtDur(b.end - b.ts))));
       }
-      body = [h("header", { class: "gd-head" }, h("span", { class: "gd-kicker" }, "Hermes · bucle OODA"),
+      body = [h("header", { class: "gd-head" }, h("span", { class: "gd-kicker" }, "Hermes · OODA loop"),
                 h("h4", null, o ? o.phase + " · step " + o.step : "—"), o && o.text ? h("p", { class: "gd-lead" }, o.text) : null),
-        gdStats([["Tool-calls", fmtInt(m.spans.length)], ["Hallazgos", fmtInt(g.hyp)], ["Confirmados", fmtInt(g.conf), g.conf ? "s--ok" : ""],
-                 ["Subagentes", fmtInt(g.children.length)]]),
-        thought ? h("div", { class: "gd-k" }, "Último razonamiento") : null,
+        gdStats([["Tool-calls", fmtInt(m.spans.length)], ["Findings", fmtInt(g.hyp)], ["Confirmed", fmtInt(g.conf), g.conf ? "s--ok" : ""],
+                 ["Subagents", fmtInt(g.children.length)]]),
+        thought ? h("div", { class: "gd-k" }, "Latest reasoning") : null,
         thought ? h("p", { class: "gd-thought" }, oneLine(thought.text || "", 600)) : null,
-        h("div", { class: "gd-k" }, "Pasos OODA (más reciente arriba)"), steps];
+        h("div", { class: "gd-k" }, "OODA steps (most recent on top)"), steps];
     } else if (key.startsWith("fam:")) {
       const cat = key.slice(4), ac = g.actors.find((x) => x.kind === "fam" && x.cat === cat);
       if (!ac) { S.graphSel = null; dr.hidden = true; wrap.classList.remove("has-drawer"); return; }
-      body = [h("header", { class: "gd-head cat", "data-cat": cat }, h("span", { class: "gd-kicker" }, "Actor · familia de tools"),
+      body = [h("header", { class: "gd-head cat", "data-cat": cat }, h("span", { class: "gd-kicker" }, "Actor · tool family"),
                 h("h4", { class: "gd-title" }, FAM_NAME[cat] || cat),
                 h("p", { class: "gd-lead" }, [...ac.tools.entries()].map(([n, c]) => n + " ×" + c).join(" · "))),
-        gdStats([["Llamadas", fmtInt(ac.items.length)], ["En curso", fmtInt(ac.running.length), ac.running.length ? "s--run" : ""],
-                 ["Errores", fmtInt(ac.errors), ac.errors ? "s--err" : ""], ["Tiempo", fmtDur(ac.total)]]),
-        h("div", { class: "gd-k" }, "Llamadas (clic para ver argumentos y resultado)"), callList(ac.items, m.nowS)];
+        gdStats([["Calls", fmtInt(ac.items.length)], ["In progress", fmtInt(ac.running.length), ac.running.length ? "s--run" : ""],
+                 ["Errors", fmtInt(ac.errors), ac.errors ? "s--err" : ""], ["Time", fmtDur(ac.total)]]),
+        h("div", { class: "gd-k" }, "Calls (click to see arguments and result)"), callList(ac.items, m.nowS)];
     } else if (key.startsWith("sub:")) {
       const sid = key.slice(4), ac = g.actors.find((x) => x.kind === "sub" && x.session.id === sid);
       if (!ac) { S.graphSel = null; dr.hidden = true; wrap.classList.remove("has-drawer"); return; }
       const c = ac.session;
-      const go = h("button", { type: "button", class: "btn" }, "Abrir la sesión del subagente →");
+      const go = h("button", { type: "button", class: "btn" }, "Open the subagent session →");
       go.addEventListener("click", () => { $("follow-active").checked = false; S.graphSel = null; selectSession(sid); });
-      body = [h("header", { class: "gd-head cat", "data-cat": "subagent" }, h("span", { class: "gd-kicker" }, "Subagente delegado"),
-                h("h4", { class: "gd-title" }, c.title || c.id), h("p", { class: "gd-lead" }, (ac.running.length ? "activo" : "sin tools en curso") + " · " + fmtAgo(c.last_active))),
-        gdStats([["Llamadas", fmtInt(ac.items.length)], ["En curso", fmtInt(ac.running.length), ac.running.length ? "s--run" : ""],
-                 ["Errores", fmtInt(ac.errors), ac.errors ? "s--err" : ""],
-                 ["Coste", c.cost_usd != null ? "$" + Number(c.cost_usd).toFixed(4) : "—"]]),
+      body = [h("header", { class: "gd-head cat", "data-cat": "subagent" }, h("span", { class: "gd-kicker" }, "Delegated subagent"),
+                h("h4", { class: "gd-title" }, c.title || c.id), h("p", { class: "gd-lead" }, (ac.running.length ? "active" : "no tools in progress") + " · " + fmtAgo(c.last_active))),
+        gdStats([["Calls", fmtInt(ac.items.length)], ["In progress", fmtInt(ac.running.length), ac.running.length ? "s--run" : ""],
+                 ["Errors", fmtInt(ac.errors), ac.errors ? "s--err" : ""],
+                 ["Cost", c.cost_usd != null ? "$" + Number(c.cost_usd).toFixed(4) : "—"]]),
         h("div", { class: "gd-actions" }, go),
-        h("div", { class: "gd-k" }, "Llamadas del subagente"), callList(ac.items, m.nowS)];
+        h("div", { class: "gd-k" }, "Subagent calls"), callList(ac.items, m.nowS)];
     } else if (key.startsWith("tgt:")) {
       const host = key.slice(4), t = g.targets.find((x) => x.host === host);
       if (!t) { S.graphSel = null; dr.hidden = true; wrap.classList.remove("has-drawer"); return; }
       const fl = h("ul", { class: "gd-findings" });
       for (const f of t.findings) {
-        fl.append(h("li", null, h("span", { class: "chip chip--" + (f.done && !f.recorded ? "rejected" : (f.state || "hypothesis")) }, f.done && !f.recorded ? "rechazado" : (f.state || "?")),
+        fl.append(h("li", null, h("span", { class: "chip chip--" + (f.done && !f.recorded ? "rejected" : (f.state || "hypothesis")) }, f.done && !f.recorded ? "rejected" : (f.state || "?")),
           " ", f.title, f.why ? h("div", { class: "s--err" }, f.why) : null));
       }
-      body = [h("header", { class: "gd-head" }, h("span", { class: "gd-kicker" }, "Objetivo"), h("h4", { class: "gd-title gd-title--host" }, host)),
-        gdStats([["Llamadas", fmtInt(t.calls)], ["En curso", fmtInt(t.running), t.running ? "s--run" : ""],
-                 ["Hallazgos ✓", fmtInt(t.ok), t.ok ? "s--ok" : ""], ["Rechazados", fmtInt(t.bad), t.bad ? "s--err" : ""]]),
-        t.findings.length ? h("div", { class: "gd-k" }, "Hallazgos sobre este objetivo") : null, t.findings.length ? fl : null,
-        h("div", { class: "gd-k" }, "Llamadas que lo tocan"), callList(t.items, m.nowS, true)];
+      body = [h("header", { class: "gd-head" }, h("span", { class: "gd-kicker" }, "Target"), h("h4", { class: "gd-title gd-title--host" }, host)),
+        gdStats([["Calls", fmtInt(t.calls)], ["In progress", fmtInt(t.running), t.running ? "s--run" : ""],
+                 ["Findings ✓", fmtInt(t.ok), t.ok ? "s--ok" : ""], ["Rejected", fmtInt(t.bad), t.bad ? "s--err" : ""]]),
+        t.findings.length ? h("div", { class: "gd-k" }, "Findings on this target") : null, t.findings.length ? fl : null,
+        h("div", { class: "gd-k" }, "Calls that touch it"), callList(t.items, m.nowS, true)];
     }
     dr.append(close, ...(body || []).filter(Boolean));
     dr.hidden = false;
@@ -1721,7 +1721,7 @@
     }
   }
 
-  // ── zoom / pan del grafo (viewBox)
+  // ── graph zoom / pan (viewBox)
   (function setupGraphNav() {
     const svg = $("tr-svg");
     const view = () => (S.graphView || S.graphBox || [0, 0, 1440, 520]).slice();
@@ -1736,7 +1736,7 @@
       return [v[0] + ((e.clientX - r.left) / r.width) * v[2], v[1] + ((e.clientY - r.top) / r.height) * v[3]];
     };
     svg.addEventListener("wheel", (e) => {
-      if (!e.ctrlKey && !e.metaKey) return;  // la rueda sola sigue haciendo scroll de la página
+      if (!e.ctrlKey && !e.metaKey) return;  // the wheel alone still scrolls the page
       e.preventDefault();
       const [px, py] = toSvg(e);
       zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, px, py);
@@ -1751,7 +1751,7 @@
       const downNode = e.target.closest("[data-gsel]"), downCall = e.target.closest("[data-call]");
       let moved = false;
       svg.classList.add("is-panning");
-      try { svg.setPointerCapture(e.pointerId); } catch (_) { /* opcional */ }
+      try { svg.setPointerCapture(e.pointerId); } catch (_) { /* optional */ }
       const move = (ev) => {
         if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
         moved = true;
@@ -1774,10 +1774,10 @@
     }));
   })();
 
-  // ── Grafo / Cascada
+  // ── Graph / Waterfall
   function setTraceMode(mode) {
     S.traceMode = mode === "cascade" ? "cascade" : "graph";
-    try { localStorage.setItem("vweb.traceMode", S.traceMode); } catch (_) { /* opcional */ }
+    try { localStorage.setItem("vweb.traceMode", S.traceMode); } catch (_) { /* optional */ }
     $("tr-graph-card").hidden = S.traceMode !== "graph";
     $("tr-cascade-card").hidden = S.traceMode !== "cascade";
     document.querySelectorAll("[data-trmode]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.trmode === S.traceMode ? "true" : "false"));
@@ -1791,30 +1791,30 @@
     if (!quiet) {
       clear(box);
       box.hidden = false;
-      box.append(h("header", { class: "card__head" }, h("h3", null, "Detalle de la llamada"),
-        h("button", { class: "btn btn--ghost", type: "button", onclick: () => { box.hidden = true; S.traceSelected = null; } }, "Cerrar")));
+      box.append(h("header", { class: "card__head" }, h("h3", null, "Call detail"),
+        h("button", { class: "btn btn--ghost", type: "button", onclick: () => { box.hidden = true; S.traceSelected = null; } }, "Close")));
     } else {
       while (box.childNodes.length > 1) box.removeChild(box.lastChild);
     }
     const dur = sp.duration != null ? sp.duration : (sp.status === "running" && sp.started_at ? now() - sp.started_at : null);
     box.append(h("dl", { class: "detail-grid" },
       h("div", null, h("dt", null, "Tool"), h("dd", null, sp.tool || "?")),
-      h("div", null, h("dt", null, "Estado"), h("dd", { class: sp.status === "error" ? "s--err" : sp.status === "running" ? "s--run" : "s--ok" }, sp.status)),
-      h("div", null, h("dt", null, "Duración"), h("dd", null, fmtDur(dur))),
-      h("div", null, h("dt", null, "Fase OODA"), h("dd", null, sp.phase ? sp.phase + " · step " + sp.step : "—")),
-      h("div", null, h("dt", null, "Inicio"), h("dd", null, fmtDateTime(sp.started_at))),
-      h("div", null, h("dt", null, "Fin"), h("dd", null, fmtDateTime(sp.ended_at))),
-      h("div", null, h("dt", null, "Familia"), h("dd", null, CAT_LABEL[sp.category] || sp.category || "—")),
+      h("div", null, h("dt", null, "Status"), h("dd", { class: sp.status === "error" ? "s--err" : sp.status === "running" ? "s--run" : "s--ok" }, sp.status)),
+      h("div", null, h("dt", null, "Duration"), h("dd", null, fmtDur(dur))),
+      h("div", null, h("dt", null, "OODA phase"), h("dd", null, sp.phase ? sp.phase + " · step " + sp.step : "—")),
+      h("div", null, h("dt", null, "Start"), h("dd", null, fmtDateTime(sp.started_at))),
+      h("div", null, h("dt", null, "End"), h("dd", null, fmtDateTime(sp.ended_at))),
+      h("div", null, h("dt", null, "Family"), h("dd", null, CAT_LABEL[sp.category] || sp.category || "—")),
       h("div", null, h("dt", null, "call_id"), h("dd", null, sp.call_id))));
     const argsPre = h("pre", { class: "block" }, "…");
-    const outPre = h("pre", { class: "block" }, sp.result_preview || (sp.status === "running" ? "(en curso)" : "—"));
-    box.append(h("h3", { class: "muted", style: { fontSize: "11px", letterSpacing: ".2em", textTransform: "uppercase", marginTop: "6px" } }, "Argumentos"), argsPre,
-      h("h3", { class: "muted", style: { fontSize: "11px", letterSpacing: ".2em", textTransform: "uppercase", marginTop: "12px" } }, "Resultado"), outPre);
+    const outPre = h("pre", { class: "block" }, sp.result_preview || (sp.status === "running" ? "(in progress)" : "—"));
+    box.append(h("h3", { class: "muted", style: { fontSize: "11px", letterSpacing: ".2em", textTransform: "uppercase", marginTop: "6px" } }, "Arguments"), argsPre,
+      h("h3", { class: "muted", style: { fontSize: "11px", letterSpacing: ".2em", textTransform: "uppercase", marginTop: "12px" } }, "Result"), outPre);
     try {
       if (sp.call_seq) {
         const ev = await api("/api/events/" + sp.call_seq);
         argsPre.textContent = JSON.stringify(ev.args != null ? ev.args : {}, null, 2);
-      } else argsPre.textContent = "(no disponible)";
+      } else argsPre.textContent = "(not available)";
       if (sp.result_seq) {
         const ev = await api("/api/events/" + sp.result_seq);
         outPre.textContent = ev.output != null ? ev.output : outputText(ev.text);
@@ -1834,8 +1834,8 @@
       if (prev) {
         for (const p of list) {
           if (prev.get(p.id) === p.store_status) continue;
-          if (p.confirmed && p.store_status === "recorded") toast("ok", "PoC confirmado", p.title, () => openPoc(p));
-          else if (p.store_status === "rejected" && p.state === "confirmed") toast("err", "Hallazgo rechazado", p.title + " — sin evidencia reproducible", () => openPoc(p));
+          if (p.confirmed && p.store_status === "recorded") toast("ok", "PoC confirmed", p.title, () => openPoc(p));
+          else if (p.store_status === "rejected" && p.state === "confirmed") toast("err", "Finding rejected", p.title + " — no reproducible evidence", () => openPoc(p));
         }
       }
       S.knownPocs = next;
@@ -1849,13 +1849,13 @@
         const cur = list.find((p) => p.id === S.pocSelected.id);
         if (cur && cur.store_status !== S.pocSelected.store_status) openPoc(cur);
       }
-    } catch (_) { /* reintenta en el siguiente ciclo */ }
+    } catch (_) { /* retry on the next cycle */ }
   }
 
-  // Severidad: la resuelve el BACKEND (report.severity_for) y la manda con cada PoC
-  // (p.sev / p.sev_by / p.score / p.rationale). El front solo la PINTA — una sola fuente de verdad.
+  // Severity: resolved by the BACKEND (report.severity_for) and sent with each PoC
+  // (p.sev / p.sev_by / p.score / p.rationale). The front only RENDERS it — a single source of truth.
   const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
-  const SEV_LABEL = { critical: "CRÍTICA", high: "ALTA", medium: "MEDIA", low: "BAJA", info: "INFO" };
+  const SEV_LABEL = { critical: "CRITICAL", high: "HIGH", medium: "MEDIUM", low: "LOW", info: "INFO" };
   const SEV_ORDER = ["critical", "high", "medium", "low", "info"];
 
   function renderPocList() {
@@ -1865,7 +1865,7 @@
     if ($("poc-only-session").checked) base = base.filter((p) => p.session_id === S.sid);
     if ($("poc-only-confirmed").checked) base = base.filter((p) => p.confirmed);
 
-    // severidad por item + conteo por nivel (sobre la base ya filtrada)
+    // severity per item + count per level (over the already-filtered base)
     const counts = { all: base.length, critical: 0, high: 0, medium: 0, low: 0, info: 0 };
     for (const p of base) {
       p._sev = p.sev || "info"; p._sevBy = p.sev_by || "regex"; p._rationale = p.rationale || "";
@@ -1879,7 +1879,7 @@
     }
 
     let list = S.pocSev === "all" ? base.slice() : base.filter((p) => p._sev === S.pocSev);
-    // peores primero, y dentro de cada nivel lo más reciente arriba
+    // worst first, and within each level the most recent on top
     list.sort((a, b) => (SEV_RANK[b._sev] - SEV_RANK[a._sev]) || ((b.ts || 0) - (a.ts || 0)));
     $("poc-empty").hidden = list.length > 0;
 
@@ -1892,11 +1892,11 @@
       }, h("span", { class: "poc__title" },
           h("span", {
             class: "sevbadge sevbadge--" + p._sev + (p._sevBy === "ia" ? " sevbadge--ia" : ""),
-            title: p._sevBy === "ia" ? ("Severidad asignada por IA" + (p._rationale ? ": " + p._rationale : "")) : "Severidad (derivada del título)",
-          }, SEV_LABEL[p._sev] + (p._sevBy === "ia" ? " ·IA" : "")),
+            title: p._sevBy === "ia" ? ("Severity assigned by AI" + (p._rationale ? ": " + p._rationale : "")) : "Severity (derived from the title)",
+          }, SEV_LABEL[p._sev] + (p._sevBy === "ia" ? " ·AI" : "")),
           p.title),
         h("span", { class: "poc__meta" },
-          h("span", { class: "chip chip--" + (rejected ? "rejected" : (p.state || "hypothesis")) }, rejected ? "rechazado" : (p.state || "?")),
+          h("span", { class: "chip chip--" + (rejected ? "rejected" : (p.state || "hypothesis")) }, rejected ? "rejected" : (p.state || "?")),
           p.target ? h("span", null, oneLine(p.target, 40)) : null,
           h("span", null, fmtAgo(p.ts))))));
     }
@@ -1910,10 +1910,10 @@
   const genReportBtn = $("poc-genreport");
   if (genReportBtn) genReportBtn.addEventListener("click", async () => {
     const sid = S.sid || (S.sessions.find((s) => s.source === "api_server") || {}).id;
-    if (!sid) { toast("err", "Sin sesión", "Selecciona una sesión con hallazgos antes de generar el informe."); return; }
+    if (!sid) { toast("err", "No session", "Select a session with findings before generating the report."); return; }
     genReportBtn.disabled = true;
     const prev = genReportBtn.textContent;
-    genReportBtn.textContent = "Generando…";
+    genReportBtn.textContent = "Generating…";
     try {
       const r = await fetch("/api/report", {
         method: "POST", credentials: "same-origin",
@@ -1922,13 +1922,13 @@
       });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
-      toast("ok", "Informe en marcha", "El agente redacta el informe en una sesión nueva — ábrela para seguirlo.", () => {
+      toast("ok", "Report under way", "The agent writes the report in a new session — open it to follow along.", () => {
         if (d.run_id) selectSession(d.run_id);
       });
       refreshSessionsSoon();
       pollReportReady();
     } catch (e) {
-      toast("err", "No se pudo iniciar el informe", String(e));
+      toast("err", "Could not start the report", String(e));
     } finally {
       genReportBtn.disabled = false;
       genReportBtn.textContent = prev;
@@ -1943,11 +1943,11 @@
         const rr = await fetch("/api/report.html", { cache: "no-store" });
         if (rr.ok) {
           clearInterval(iv);
-          loadPocs();  // re-trae los PoC con la severidad (IA) ya aplicada por el backend
-          toast("ok", "Informe listo", "Pulsa aquí para abrir pentest-report.html.", () => window.open("/api/report.html", "_blank"));
+          loadPocs();  // re-fetches the PoCs with the severity (AI) already applied by the backend
+          toast("ok", "Report ready", "Click here to open pentest-report.html.", () => window.open("/api/report.html", "_blank"));
         }
-      } catch (_) { /* reintenta en el siguiente ciclo */ }
-      if (tries >= 90) clearInterval(iv);  // ~6 min máx
+      } catch (_) { /* retry on the next cycle */ }
+      if (tries >= 90) clearInterval(iv);  // ~6 min max
     }, 4000);
   }
 
@@ -1958,8 +1958,8 @@
     clear(box);
     box.append(
       h("div", { class: "report-frame__bar" },
-        h("span", { class: "muted", style: { fontSize: "11px" } }, "Informe completo — reproducción y verbatim"),
-        h("a", { class: "repbtn", href: "/api/report.html", target: "_blank" }, "Abrir en pestaña"),
+        h("span", { class: "muted", style: { fontSize: "11px" } }, "Full report — reproduction and verbatim"),
+        h("a", { class: "repbtn", href: "/api/report.html", target: "_blank" }, "Open in tab"),
         h("a", { class: "repbtn", href: "/api/report.md?dl=1" }, "MD"),
         h("a", { class: "repbtn", href: "/api/report.txt?dl=1" }, "TXT")),
       h("iframe", { class: "report-frame", src: "/api/report.html?ts=" + Date.now() }));
@@ -1971,15 +1971,15 @@
     renderPocList();
     const box = $("poc-detail");
     clear(box);
-    box.append(h("p", { class: "empty" }, "Cargando…"));
+    box.append(h("p", { class: "empty" }, "Loading…"));
     try {
       const doc = await api("/api/sessions/" + encodeURIComponent(p.session_id) + "/pocs");
       const poc = (doc.data || []).find((x) => x.call_id === p.call_id);
-      if (!poc) throw new Error("no encontrado");
+      if (!poc) throw new Error("not found");
       renderPocDetail(poc);
     } catch (e) {
       clear(box);
-      box.append(h("p", { class: "empty" }, "No se pudo cargar el PoC: " + e));
+      box.append(h("p", { class: "empty" }, "Could not load the PoC: " + e));
     }
   }
 
@@ -1998,26 +1998,26 @@
 
     const meta = [];
     const add = (k, v) => { if (v) meta.push(h("span", null, k + " ", h("b", null, v))); };
-    add("target", f.target); add("técnica", f.technique_id); add("confianza", f.confidence);
-    add("engagement", f.engagement_id); add("fase", poc.phase ? poc.phase + " · " + poc.step : null);
-    add("cuándo", fmtDateTime(poc.ts));
+    add("target", f.target); add("technique", f.technique_id); add("confidence", f.confidence);
+    add("engagement", f.engagement_id); add("phase", poc.phase ? poc.phase + " · " + poc.step : null);
+    add("when", fmtDateTime(poc.ts));
     box.append(h("div", { class: "poc-head" },
-      h("div", null, h("span", { class: "chip chip--" + (rejected ? "rejected" : (f.state || "hypothesis")) }, rejected ? "rechazado" : f.state)),
+      h("div", null, h("span", { class: "chip chip--" + (rejected ? "rejected" : (f.state || "hypothesis")) }, rejected ? "rejected" : f.state)),
       h("h2", null, f.title), h("div", { class: "meta" }, meta)));
 
-    if (rejected) box.append(h("div", { class: "verdict verdict--err" }, "El store de hallazgos lo rechazó: " + (poc.store_error || "evidencia insuficiente") + ". El agente debe aportar comando + salida verbatim o bajarlo a partial/hypothesis."));
+    if (rejected) box.append(h("div", { class: "verdict verdict--err" }, "The findings store rejected it: " + (poc.store_error || "insufficient evidence") + ". The agent must provide a command + verbatim output or downgrade it to partial/hypothesis."));
     else if (poc.store_status === "recorded" && poc.confirmed) box.append(h("div", { class: "verdict verdict--ok" }, exe
-      ? "PoC confirmado y registrado. El comando de la evidencia coincide con una ejecución real de la sesión (" + exe.tool + ", exit " + exe.returncode + ", " + fmtDur(exe.duration) + ")."
-      : "PoC confirmado y registrado. El comando de la evidencia no se encontró entre las ejecuciones de esta sesión: se reproduce la salida que pegó el agente."));
-    else if (poc.store_status === "recorded") box.append(h("div", { class: "verdict verdict--pending" }, "Hallazgo registrado como " + f.state + "."));
-    else box.append(h("div", { class: "verdict verdict--pending" }, "Registrando hallazgo…"));
+      ? "PoC confirmed and recorded. The evidence command matches a real execution from the session (" + exe.tool + ", exit " + exe.returncode + ", " + fmtDur(exe.duration) + ")."
+      : "PoC confirmed and recorded. The evidence command was not found among this session's executions: the output pasted by the agent is replayed."));
+    else if (poc.store_status === "recorded") box.append(h("div", { class: "verdict verdict--pending" }, "Finding recorded as " + f.state + "."));
+    else box.append(h("div", { class: "verdict verdict--pending" }, "Recording finding…"));
 
-    // Reproductor
+    // Player
     const screen = h("div", { class: "player__screen", "aria-live": "off" });
     const prog = h("i");
-    const playBtn = h("button", { class: "btn", type: "button" }, "▶ Reproducir");
+    const playBtn = h("button", { class: "btn", type: "button" }, "▶ Play");
     const restartBtn = h("button", { class: "btn btn--ghost", type: "button" }, "↺");
-    const speed = h("select", { class: "btn btn--ghost", "aria-label": "Velocidad" },
+    const speed = h("select", { class: "btn btn--ghost", "aria-label": "Speed" },
       ["1", "2", "4", "10"].map((v) => h("option", { value: v }, v + "×")));
     const base = "/api/sessions/" + encodeURIComponent(poc.session_id) + "/pocs/" + encodeURIComponent(poc.call_id);
     box.append(h("section", { class: "player" },
@@ -2034,18 +2034,18 @@
     restartBtn.addEventListener("click", () => S.player.restart());
     S.player.play();
 
-    // Ruta OODA
-    box.append(sectionTitle("Cómo llegó hasta aquí · ruta OODA"));
+    // OODA path
+    box.append(sectionTitle("How it got here · OODA path"));
     const path = h("ol", { class: "path" });
-    if (!poc.ooda_path.length) path.append(h("li", null, h("span", { class: "ph" }, "—"), h("span", { class: "muted" }, "El agente no emitió líneas de estado OODA.")));
+    if (!poc.ooda_path.length) path.append(h("li", null, h("span", { class: "ph" }, "—"), h("span", { class: "muted" }, "The agent did not emit OODA status lines.")));
     for (const s of poc.ooda_path) {
       path.append(h("li", { "data-phase": s.phase },
         h("span", { class: "ph" }, s.phase + " · " + s.step), h("span", null, s.text)));
     }
     box.append(path);
 
-    // Pasos
-    box.append(sectionTitle("Pasos ejecutados antes del hallazgo" + (poc.chain_omitted ? " · " + poc.chain_omitted + " anteriores omitidos" : "")));
+    // Steps
+    box.append(sectionTitle("Steps executed before the finding" + (poc.chain_omitted ? " · " + poc.chain_omitted + " earlier ones omitted" : "")));
     const steps = h("ol", { class: "steps" });
     const toolSteps = poc.chain.filter((s) => s.kind === "tool.call");
     if (!toolSteps.length) steps.append(h("li", null, h("span", { class: "muted" }, "—")));
@@ -2059,17 +2059,17 @@
     }
     box.append(steps);
 
-    // Evidencia
-    box.append(sectionTitle("Evidencia"));
+    // Evidence
+    box.append(sectionTitle("Evidence"));
     const command = (exe && exe.command) || rep.command;
     if (command) {
       box.append(h("pre", { class: "block" }, "$ " + command));
       const out = exe && exe.output != null ? exe.output : rep.evidence_output;
-      if (out) box.append(h("pre", { class: "block" }, out), h("p", { class: "note" }, exe ? "Salida real de la ejecución enlazada" + (exe.output_truncated ? " (recortada; el crudo íntegro está en la sesión)" : "") + "." : "Salida pegada por el agente en la evidencia."));
+      if (out) box.append(h("pre", { class: "block" }, out), h("p", { class: "note" }, exe ? "Real output of the linked execution" + (exe.output_truncated ? " (trimmed; the full raw output is in the session)" : "") + "." : "Output pasted by the agent into the evidence."));
     } else if (rep.artifact_ref) {
-      box.append(h("p", { class: "note" }, "Evidencia en el artefacto " + rep.artifact_ref.execution_id + "/" + rep.artifact_ref.name + " del plano de datos de Kali (:8901)."));
+      box.append(h("p", { class: "note" }, "Evidence in artifact " + rep.artifact_ref.execution_id + "/" + rep.artifact_ref.name + " of the Kali data plane (:8901)."));
     } else {
-      box.append(h("p", { class: "note" }, "La evidencia no incluye un comando reproducible."));
+      box.append(h("p", { class: "note" }, "The evidence does not include a reproducible command."));
     }
   }
 
@@ -2077,7 +2077,7 @@
     let i = 0, timer = null, playing = false, typing = null;
     const total = frames.length ? frames[frames.length - 1].t : 0;
     const cls = (s) => "fr fr--" + s;
-    function setBtn() { playBtn.textContent = playing ? "❚❚ Pausa" : (i >= frames.length ? "▶ Otra vez" : "▶ Reproducir"); }
+    function setBtn() { playBtn.textContent = playing ? "❚❚ Pause" : (i >= frames.length ? "▶ Again" : "▶ Play"); }
     function progress() { prog.style.width = (frames.length ? (i / frames.length) * 100 : 0) + "%"; }
     function render(fr, done) {
       const el = h("div", { class: cls(fr.stream) });
@@ -2144,7 +2144,7 @@
       const el = $(id);
       if (conf.up === undefined) { el.textContent = ""; return; }
       el.dataset.up = conf.up ? "true" : "false";
-      el.textContent = conf.up ? "● en línea" : "● no disponible";
+      el.textContent = conf.up ? "● online" : "● unavailable";
       el.title = conf.detail || "";
     };
     mark("h-dash-up", st.hermes.dashboard);
@@ -2153,7 +2153,7 @@
     setupScreens(st);
   }
 
-  // ── Pantallas (demo en vivo) ──────────────────────────────────────
+  // ── Screens (live demo) ──────────────────────────────────────
   function screenUrl(conf) {
     if (!conf || !conf.port) return null;
     return location.protocol + "//" + location.hostname + ":" + conf.port + "/";
@@ -2164,7 +2164,7 @@
   const SCREENS = {
     browser: { conf: () => S.status && S.status.screens && S.status.screens.browser, embed: (u) => novncUrl(u) },
     caido: { conf: () => S.status && S.status.screens && S.status.screens.caido_director,
-             embed: (u) => novncUrl(u) },  // noVNC del director: Caido manejándose solo
+             embed: (u) => novncUrl(u) },  // director's noVNC: Caido operating on its own
   };
   function setupScreens(st) {
     const sc = st.screens || {};
@@ -2173,16 +2173,16 @@
       if (!el) return;
       if (!conf || conf.up === undefined) { el.textContent = ""; return; }
       el.dataset.up = conf.up ? "true" : "false";
-      el.textContent = conf.up ? "● en línea" : "● no disponible";
+      el.textContent = conf.up ? "● online" : "● unavailable";
       el.title = conf.detail || "";
     };
     mk("sc-browser-up", sc.browser);
     mk("sc-caido-up", sc.caido_director);
     const bu = screenUrl(sc.browser), cu = screenUrl(sc.caido_director), ci = screenUrl(sc.caido);
     if (bu) { $("sc-browser-open").href = novncUrl(bu); $("sc-browser-url").textContent = bu; }
-    if (cu) { $("sc-caido-url").textContent = "dirigido · " + cu; }
+    if (cu) { $("sc-caido-url").textContent = "directed · " + cu; }
     else { $("sc-caido-url").textContent = ""; }
-    if (ci) { $("sc-caido-open").href = ci; }   // "Abrir ↗" = Caido interactivo real
+    if (ci) { $("sc-caido-open").href = ci; }   // "Open ↗" = real interactive Caido
   }
   function toggleScreen(which, force) {
     const def = SCREENS[which];
@@ -2194,17 +2194,17 @@
       if (which === "caido") S.caidoFrame = null;
       frame.querySelector("iframe").remove();
       $("sc-" + which + "-hint").hidden = false;
-      btn.setAttribute("aria-pressed", "false"); btn.textContent = "Mostrar";
+      btn.setAttribute("aria-pressed", "false"); btn.textContent = "Show";
       return;
     }
-    if (!base) { toast("err", "No disponible", "La pantalla de " + which + " no está publicada."); return; }
+    if (!base) { toast("err", "Unavailable", "The " + which + " screen is not published."); return; }
     if (showing) return;
     $("sc-" + which + "-hint").hidden = true;
     const ifr = h("iframe", { src: def.embed(base), title: which, referrerpolicy: "no-referrer",
       allow: "fullscreen", loading: "lazy" });
     frame.append(ifr);
     if (which === "caido") { S.caidoFrame = ifr; S.caidoBase = base; S.caidoRoute = "http-history"; }
-    btn.setAttribute("aria-pressed", "true"); btn.textContent = "Ocultar";
+    btn.setAttribute("aria-pressed", "true"); btn.textContent = "Hide";
   }
   function caidoRouteFor(tool) {
     const t = String(tool || "").toLowerCase();
@@ -2221,7 +2221,7 @@
     const route = caidoRouteFor(tool);
     if (!route || route === S.caidoRoute) return;
     S.caidoRoute = route;
-    // cambio de solo-fragmento: navegación suave del iframe (sin recarga)
+    // fragment-only change: smooth iframe navigation (no reload)
     S.caidoFrame.src = S.caidoBase.replace(/\/$/, "") + "/#/" + route;
   }
   function renderPantActions() {
@@ -2233,12 +2233,12 @@
     badge.textContent = o ? (o.phase + " · " + o.step) : "—";
     const running = [...S.calls.values()].filter((c) => !c.result && c.ev.ts);
     $("pant-now").textContent = running.length
-      ? ("ejecutando: " + running.map((c) => c.ev.tool_display || c.ev.tool).join(", "))
-      : (o ? o.text : (S.sid ? "en curso" : "sin sesión activa"));
-    // feed: OODA + tool-calls (con estado) + razonamiento, lo más reciente abajo
+      ? ("running: " + running.map((c) => c.ev.tool_display || c.ev.tool).join(", "))
+      : (o ? o.text : (S.sid ? "in progress" : "no active session"));
+    // feed: OODA + tool-calls (with status) + reasoning, most recent at the bottom
     const items = S.events.filter((e) => ["ooda", "tool.call", "reasoning"].includes(e.kind)).slice(-60);
     clear(feed);
-    if (!items.length) { feed.append(h("li", { class: "feed__empty" }, "Sin acciones todavía.")); return; }
+    if (!items.length) { feed.append(h("li", { class: "feed__empty" }, "No actions yet.")); return; }
     for (const ev of items) {
       if (ev.kind === "ooda") {
         feed.append(h("li", { class: "pact pact--ooda" },
@@ -2266,8 +2266,8 @@
   function renderScreens() {
     if (S.status) setupScreens(S.status);
     renderPantActions();
-    // auto-muestra las dos pantallas si están disponibles (lo esperable al abrir la pestaña)
-    // (misma fuente que "Mostrar ambas": la pantalla de Caido es el director, no el Caido real)
+    // auto-shows both screens if available (the expected behavior when opening the tab)
+    // (same source as "Show both": the Caido screen is the director, not the real Caido)
     mountAvailableScreens();
     syncBothBtn();
   }
@@ -2280,9 +2280,9 @@
       if (frame.requestFullscreen) frame.requestFullscreen().catch(() => {});
     }
   }));
-  // ── Modo escenario (proyectar en una charla) ──────────────────────
-  // Oculta la consola (barra, sesiones, franja) y deja: cabecera con la fase OODA en grande +
-  // navegador y Caido lado a lado + ticker de acciones. Todo con clases (CSP estricta).
+  // ── Stage mode (project in a talk) ──────────────────────
+  // Hides the console (topbar, sessions, strip) and leaves: a header with the OODA phase in large +
+  // browser and Caido side by side + actions ticker. All with classes (strict CSP).
   function screenUp(which) {
     const conf = SCREENS[which].conf();
     return !!(conf && conf.up && screenUrl(conf));
@@ -2298,7 +2298,7 @@
     const badge = $("stage-phase");
     badge.dataset.phase = o ? o.phase : "";
     badge.textContent = o ? (o.phase + " · " + o.step) : "—";
-    $("stage-text").textContent = o ? (o.text || "") : (S.sid ? "En curso" : "Esperando actividad del agente…");
+    $("stage-text").textContent = o ? (o.text || "") : (S.sid ? "In progress" : "Waiting for agent activity…");
     const run = $("stage-run");
     const running = [...S.calls.values()].filter((c) => !c.result && c.ev.ts)
       .sort((a, b) => b.ev.ts - a.ev.ts);
@@ -2311,13 +2311,13 @@
         h("span", { class: "stage-head__clock", "data-since": c.ev.ts }, fmtDur(now() - c.ev.ts)),
         ...(running.length > 1 ? [h("span", { class: "stage-head__more" }, "+" + (running.length - 1))] : []));
     } else {
-      run.append(h("span", { class: "stage-head__idle" }, "sin tools en curso"));
+      run.append(h("span", { class: "stage-head__idle" }, "no tools in progress"));
     }
     mountAvailableScreens();
   }
   function enterStage() {
     if (S.stage) return;
-    if (S.view !== "pantallas") showView("pantallas");
+    if (S.view !== "screens") showView("screens");
     S.stage = true;
     document.body.classList.add("is-stage");
     mountAvailableScreens();
@@ -2327,7 +2327,7 @@
     S.stageFs = false;
     const root = document.documentElement;
     if (root.requestFullscreen && !document.fullscreenElement) {
-      root.requestFullscreen().then(() => { S.stageFs = true; }).catch(() => { /* sin fullscreen: sigue en escenario */ });
+      root.requestFullscreen().then(() => { S.stageFs = true; }).catch(() => { /* no fullscreen: stays in stage mode */ });
     }
   }
   function exitStage() {
@@ -2339,18 +2339,18 @@
     S.stageFs = false;
     renderPantActions();
   }
-  // «Mostrar ambas»: monta navegador y Caido a la vez (o los oculta si ya están los dos)
+  // "Show both": mounts browser and Caido at once (or hides them if both are already shown)
   function syncBothBtn() {
     const both = ["browser", "caido"].every((w) => $("sc-" + w + "-frame").querySelector("iframe"));
     const btn = $("screens-both");
     btn.setAttribute("aria-pressed", both ? "true" : "false");
-    btn.textContent = both ? "Ocultar ambas" : "Mostrar ambas";
+    btn.textContent = both ? "Hide both" : "Show both";
   }
   $("screens-both").addEventListener("click", () => {
     const shown = ["browser", "caido"].filter((w) => $("sc-" + w + "-frame").querySelector("iframe"));
     if (shown.length === 2) { shown.forEach((w) => toggleScreen(w)); syncBothBtn(); return; }
     const avail = ["browser", "caido"].filter((w) => screenUrl(SCREENS[w].conf()));
-    if (!avail.length) { toast("err", "No disponible", "Ni el navegador ni Caido están publicados todavía."); return; }
+    if (!avail.length) { toast("err", "Unavailable", "Neither the browser nor Caido are published yet."); return; }
     avail.forEach((w) => toggleScreen(w, true));
     syncBothBtn();
   });
@@ -2358,7 +2358,7 @@
   $("stage-enter").addEventListener("click", enterStage);
   $("stage-exit").addEventListener("click", exitStage);
   document.addEventListener("fullscreenchange", () => {
-    // Esc en fullscreen lo consume el navegador: al salir de fullscreen salimos también del escenario
+    // Esc in fullscreen is consumed by the browser: when leaving fullscreen we also exit stage mode
     if (S.stage && S.stageFs && !document.fullscreenElement) { S.stageFs = false; exitStage(); }
   });
   document.addEventListener("keydown", (e) => {
@@ -2388,7 +2388,7 @@
     setTimeout(() => el.remove(), 12000);
   }
 
-  // ───────────────────────────────────────────────────────── stream en vivo
+  // ───────────────────────────────────────────────────────── live stream
   function onEvent(ev) {
     if (ev.kind === "web.request") {
       S.web.push(ev);
@@ -2403,11 +2403,11 @@
         S.events.push(ev); S.lastSeq = ev.seq;
         if (S.events.length > 6000) S.events.splice(0, 1000);
         appendTermEvent(ev);
-        if (!termFilterActive()) $("t-count").textContent = S.events.length + " eventos";
+        if (!termFilterActive()) $("t-count").textContent = S.events.length + " events";
         if (ev.kind === "ooda") renderStrip();
         markCopilotDirty();
         markTraceDirty();
-        if (S.view === "pantallas") renderPantActions();
+        if (S.view === "screens") renderPantActions();
       }
     }
     if (isFinding(ev)) pocRefresh();
@@ -2418,11 +2418,11 @@
   function openStream(after) {
     const es = new EventSource("/api/stream?after=" + encodeURIComponent(after));
     es.addEventListener("ev", (e) => {
-      try { onEvent(JSON.parse(e.data)); } catch (_) { /* evento malformado: se ignora */ }
+      try { onEvent(JSON.parse(e.data)); } catch (_) { /* malformed event: ignored */ }
     });
   }
 
-  // ───────────────────────────────────────────────────────── arranque
+  // ───────────────────────────────────────────────────────── boot
   async function boot() {
     applyTermFilters();
     await loadStatus();
@@ -2430,8 +2430,8 @@
     await Promise.all([loadWebTail(), loadPocs()]);
     if (!S.sid) {
       term.append(h("div", { class: "term__empty" },
-        "Esperando al agente. En cuanto un engagement ejecute su primer paso verás aquí, en vivo, " +
-        "cada línea OODA, su razonamiento y cada comando con su salida."));
+        "Waiting for the agent. As soon as an engagement runs its first step you'll see here, live, " +
+        "every OODA line, its reasoning and each command with its output."));
     }
     showView(location.hash.slice(1) || "terminal");
     openStream(S.status ? S.status.max_seq : 0);

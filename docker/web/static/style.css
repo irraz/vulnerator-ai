@@ -1,7 +1,7 @@
-/* Vulnerator Console — consola de operador del bucle OODA.
-   Layout: barra superior (marca · vistas · salud) / sesiones a la izquierda / vista a la derecha.
-   Identidad heredada de la landing y de la skin de Hermes: metal y rojo oscuro; el verde
-   matriz queda RESERVADO para "en vivo" y "confirmado". Tema oscuro deliberado (consola). */
+/* Vulnerator Console — operator console for the OODA loop.
+   Layout: top bar (brand · views · health) / sessions on the left / view on the right.
+   Identity inherited from the landing page and the Hermes skin: metal and dark red; the matrix
+   green is RESERVED for "live" and "confirmed". Deliberately dark theme (console). */
 
 :root {
   color-scheme: dark;
@@ -13,7 +13,7 @@
   --edge-2: #2a3145;
   --text: #e6e8ec;
   --muted: #9aa0ac;
-  --dim: #7e8597;           /* ≥4.5:1 sobre --panel/--panel-2 (AA) */
+  --dim: #7e8597;           /* ≥4.5:1 over --panel/--panel-2 (AA) */
   --accent: #b03a3a;
   --accent-soft: #c75a5a;
   --magenta: #c25b9a;
@@ -22,14 +22,14 @@
   --warn: #ffa726;
   --err: #ef5350;
 
-  /* fases OODA */
+  /* OODA phases */
   --ph-observe: #8fa3bf;
   --ph-orient: #c25b9a;
   --ph-decide: #d4b26a;
-  --ph-act: #8b7cf6;        /* violeta: no se confunde con --err */
+  --ph-act: #8b7cf6;        /* violet: not confused with --err */
   --ph-report: #9aa0ac;
 
-  /* familias de tools */
+  /* tool families */
   --c-shell: #e6e8ec;
   --c-browser: #7fb3c9;
   --c-web: #c25b9a;
@@ -71,7 +71,7 @@ button, input, select { font: inherit; color: inherit; }
 .muted { color: var(--muted); }
 .num { text-align: right; }
 
-/* ── Barra superior ──────────────────────────────────────────────── */
+/* ── Top bar ──────────────────────────────────────────────── */
 .topbar {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 24px;
@@ -79,12 +79,11 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--bg-deep);
   border-bottom: 1px solid var(--edge);
 }
-.brand { display: flex; align-items: baseline; gap: 0; white-space: nowrap; }
-.brand__mark {
-  font-weight: 800; letter-spacing: .32em; font-size: var(--fs-l); color: var(--text);
-  text-shadow: 0 0 18px rgba(176, 58, 58, .45);
+.brand { display: flex; align-items: center; gap: 0; white-space: nowrap; }
+.brand__logo {
+  height: 40px; width: auto; display: block;
+  filter: drop-shadow(0 0 14px rgba(176, 58, 58, .35));
 }
-.brand__ai { font-weight: 800; letter-spacing: .2em; color: var(--accent-soft); font-size: var(--fs-l); }
 .brand__sub {
   margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--edge-2);
   color: var(--muted); font-size: var(--fs-xs); letter-spacing: .28em; text-transform: uppercase;
@@ -152,7 +151,7 @@ button, input, select { font: inherit; color: inherit; }
 .view { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .main { min-width: 0; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 40px 20px; display: flex; flex-direction: column; gap: 14px; }
 
-/* ── Franja de sesión ────────────────────────────────────────────── */
+/* ── Session strip ────────────────────────────────────────────── */
 .strip { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--edge); }
 .strip__title { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .strip__title h1 { font-size: var(--fs-l); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -175,7 +174,7 @@ button, input, select { font: inherit; color: inherit; }
 [data-phase="ACT"] { --c: var(--ph-act); }
 [data-phase="REPORT"] { --c: var(--ph-report); }
 
-/* ── Toolbar y controles ─────────────────────────────────────────── */
+/* ── Toolbar and controls ─────────────────────────────────────────── */
 .toolbar { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: var(--fs-s); color: var(--muted); }
 .toolbar__spacer { flex: 1; }
 .toolbar__note { font-size: var(--fs-xs); color: var(--dim); }
@@ -270,7 +269,7 @@ button, input, select { font: inherit; color: inherit; }
 .feed .bd .c { color: var(--muted); word-break: break-word; }
 .feed .st { font-size: var(--fs-xs); white-space: nowrap; }
 .feed__empty { color: var(--dim); font-size: var(--fs-s); padding: 6px 0; }
-.feed li.feed__empty { display: block; }  /* .feed li es grid de 3 columnas */
+.feed li.feed__empty { display: block; }  /* .feed li is a 3-column grid */
 .table-wrap { overflow-x: auto; max-height: 360px; overflow-y: auto; }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
 th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 500; color: var(--dim); font-size: var(--fs-xs); letter-spacing: .14em; text-transform: uppercase; padding: 4px 8px; border-bottom: 1px solid var(--edge-2); }
@@ -289,7 +288,7 @@ td.url { word-break: break-all; color: var(--muted); }
 .chip--discarded { color: var(--dim); text-decoration: line-through; }
 .chip--rejected { color: var(--err); }
 
-/* ── Filtro de severidad (PoC) ───────────────────────────────────── */
+/* ── Severity filter (PoC) ───────────────────────────────────── */
 .sevbar { gap: 6px; flex-wrap: wrap; }
 .sevfilter {
   display: inline-flex; align-items: center; gap: 6px;
@@ -347,7 +346,7 @@ td.url { word-break: break-all; color: var(--muted); }
 .report-frame { width: 100%; height: 100%; min-height: 70vh; border: 0; background: #fff; border-radius: 6px; }
 .report-frame__bar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 
-/* ── Trazas ──────────────────────────────────────────────────────── */
+/* ── Traces ──────────────────────────────────────────────────────── */
 .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--edge); border: 1px solid var(--edge); border-radius: var(--radius); overflow: hidden; }
 .kpi { background: var(--panel); padding: 12px 14px; min-width: 0; }
 .kpi dt { font-size: var(--fs-xs); letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
@@ -360,7 +359,7 @@ td.url { word-break: break-all; color: var(--muted); }
 .legend i.is-running { background: repeating-linear-gradient(45deg, var(--live) 0 3px, rgba(0, 255, 65, .3) 3px 6px); }
 .legend__sep { color: var(--dim); margin-left: auto; }
 
-/* Reparto del tiempo: barras apiladas 100 % con hueco de 2px entre segmentos */
+/* Time breakdown: 100% stacked bars with a 2px gap between segments */
 .split { display: flex; flex-direction: column; gap: 16px; }
 .split__row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px 14px; align-items: center; }
 .split__label { font-size: var(--fs-xs); letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
@@ -378,7 +377,7 @@ td.url { word-break: break-all; color: var(--muted); }
 .split__key { --c: var(--muted); width: 14px; height: 3px; border-radius: 2px; background: var(--c); align-self: center; }
 .split__key.seg--think { background: var(--dim); box-shadow: none; }
 
-/* Cascada: cabecera fija (vista general + carril OODA + eje), fondo por fase y filas */
+/* Waterfall: fixed header (overview + OODA lane + axis), per-phase background and rows */
 .wf-tools { display: flex; gap: 10px; align-items: center; min-width: 0; }
 .btn--sm { padding: 3px 9px; font-size: var(--fs-xs); white-space: nowrap; flex: none; }
 .waterfall { --wf-lab: clamp(180px, 30%, 380px); --wf-gap: 12px; position: relative; font-size: var(--fs-s); max-height: 640px; overflow: auto; }
@@ -581,7 +580,7 @@ pre.block {
 .logout { color: var(--dim); font-size: var(--fs-xs); letter-spacing: .12em; text-transform: uppercase; text-decoration: none; padding: 3px 6px; }
 .logout:hover { color: var(--accent-soft); }
 
-/* ── Pantallas (demo en vivo) ────────────────────────────────────── */
+/* ── Screens (live demo) ────────────────────────────────────── */
 .screens { display: flex; flex-direction: column; gap: 14px; }
 .screen { background: var(--panel); border: 1px solid var(--edge); border-radius: var(--radius); overflow: hidden; }
 .screen__bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-deep); border-bottom: 1px solid var(--edge); }
@@ -593,21 +592,21 @@ pre.block {
 .screen__frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #050608; }
 .screen__hint { color: var(--dim); font-size: var(--fs-s); max-width: 48ch; text-align: center; padding: 0 16px; }
 
-/* Pantallas: panel de acciones de Hermes en vivo */
+/* Screens: live Hermes action panel */
 .screen--actions .screen__bar h3 { display: flex; align-items: center; gap: 10px; }
 .feed--pant { max-height: 300px; overflow-y: auto; padding: 4px 12px; }
 .pact { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(28, 33, 48, .7); font-size: var(--fs-s); align-items: baseline; }
 .pact .bd { min-width: 0; word-break: break-word; }
 .pact .c { color: var(--muted); }
-/* .feed li fija 3 columnas con más especificidad: aquí la insignia va en una columna auto y el texto ocupa el resto */
+/* .feed li sets 3 columns with more specificity: here the badge takes an auto column and the text takes the rest */
 .feed .pact--ooda { margin-top: 6px; grid-template-columns: 62px auto minmax(0, 1fr); }
 .pact--ooda .phase-badge { justify-self: start; }
 .pact--ooda .bd { color: var(--text); }
 .pact--think .bd { font-style: italic; }
 
-/* ── Modo escenario ──────────────────────────────────────────────── */
-/* Pantallas fuera de escenario: si no hay iframe montado (no disponible o sin «Mostrar»),
-   el marco es una franja compacta con el aviso, no una caja negra 16:9. */
+/* ── Stage mode ──────────────────────────────────────────────── */
+/* Screens outside the stage: if no iframe is mounted (unavailable or not "Show"n),
+   the frame is a compact strip with the notice, not a black 16:9 box. */
 .screen__frame:not(:has(iframe)) { aspect-ratio: auto; min-height: 140px; padding: 20px 0; }
 .pant-toolbar .btn { font-weight: 600; letter-spacing: .06em; }
 kbd {
@@ -616,25 +615,25 @@ kbd {
 }
 .stage-head { display: none; }
 
-/* Pantallas normal: navegador | Caido lado a lado (16:9 cada uno) y debajo, a lo ancho,
-   el feed de acciones de Hermes como ticker de altura limitada. <1100px: una columna. */
+/* Normal Screens: browser | Caido side by side (16:9 each) and below, full width,
+   the Hermes action feed as a height-limited ticker. <1100px: one column. */
 #screen-browser { grid-area: browser; }
 #screen-caido { grid-area: caido; }
-#screen-actions { grid-area: ticker; order: 2; }  /* apilado: pantallas primero, feed debajo */
+#screen-actions { grid-area: ticker; order: 2; }  /* stacked: screens first, feed below */
 @media (min-width: 1100px) {
   .screens {
     display: grid; gap: 14px; align-items: start;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas: "browser caido" "ticker ticker";
   }
-  /* barra en dos filas fijas (título / acciones) para que ambos marcos queden alineados */
+  /* bar in two fixed rows (title / actions) so both frames stay aligned */
   .screens .screen:not(.screen--actions) .screen__bar { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
   .screens .screen__actions { flex-wrap: nowrap; min-width: 0; }
   .screens .screen__url { flex: 1; min-width: 0; max-width: none; }
 }
 
-/* Escenario: la consola desaparece; queda la cabecera, las pantallas y el ticker.
-   Tipografía y grises más grandes/claros para proyector (redefinición local de tokens). */
+/* Stage: the console disappears; the header, the screens and the ticker remain.
+   Larger/lighter typography and grays for a projector (local token override). */
 body.is-stage {
   --fs-xs: 14px; --fs-s: 16px; --fs-m: 18px; --fs-l: 24px; --fs-xl: 30px;
   --dim: #9aa0ac; --muted: #c3c7cf;
@@ -644,11 +643,11 @@ body.is-stage .topbar,
 body.is-stage .sessions,
 body.is-stage .strip,
 body.is-stage .pant-toolbar,
-body.is-stage #view-pantallas > .note,
+body.is-stage #view-screens > .note,
 body.is-stage .toasts { display: none !important; }
 body.is-stage .layout { display: block; min-height: 0; }
 body.is-stage .main { padding: 0; gap: 0; height: 100vh; height: 100dvh; }
-body.is-stage #view-pantallas { height: 100%; gap: 0; }
+body.is-stage #view-screens { height: 100%; gap: 0; }
 body.is-stage .screens {
   height: 100%; display: grid; gap: 10px; padding: 10px 12px 12px; align-items: stretch;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -657,13 +656,13 @@ body.is-stage .screens {
   background: var(--bg);
 }
 
-/* Cabecera: marca · fase OODA grande + texto del paso · tool en curso con reloj · salir */
+/* Header: brand · large OODA phase + step text · running tool with a clock · log out */
 body.is-stage .stage-head {
   grid-area: head; display: flex; align-items: center; gap: 24px; min-width: 0;
   padding: 10px 16px; background: var(--bg-deep); border: 1px solid var(--edge); border-radius: var(--radius);
 }
 .stage-head__brand { flex: none; }
-.stage-head__brand .brand__mark, .stage-head__brand .brand__ai { font-size: 20px; }
+.stage-head__brand .brand__logo { height: 32px; }
 .stage-head__phase { display: flex; align-items: center; gap: 16px; min-width: 0; flex: 1; }
 .phase-badge--stage { font-size: 26px; padding: 6px 16px; letter-spacing: .16em; border-width: 2px; }
 .stage-head__text {
@@ -681,7 +680,7 @@ body.is-stage .stage-head {
 .stage-head__idle { color: var(--dim); font-size: 16px; }
 .stage-head__exit { flex: none; }
 
-/* Pantallas lado a lado; las que no tienen iframe no ocupan sitio */
+/* Screens side by side; the ones without an iframe take no space */
 body.is-stage #screen-browser { grid-area: browser; }
 body.is-stage #screen-caido { grid-area: caido; }
 body.is-stage #screen-actions { grid-area: ticker; }
@@ -690,17 +689,17 @@ body.is-stage .screen:not(.screen--actions):not(:has(iframe)) { display: none; }
 body.is-stage .screen__actions { display: none; }
 body.is-stage .screen__bar { padding: 6px 12px; }
 body.is-stage .screen__frame { flex: 1; min-height: 0; aspect-ratio: auto; }
-/* solo una pantalla disponible: ocupa todo el ancho */
+/* only one screen available: it takes the full width */
 body.is-stage .screens:not(:has(#sc-browser-frame iframe)) #screen-caido,
 body.is-stage .screens:not(:has(#sc-caido-frame iframe)) #screen-browser { grid-column: 1 / -1; }
 
-/* Ticker de acciones de Hermes: 4 líneas, lo último abajo (renderPantActions ya baja el scroll) */
+/* Hermes action ticker: 4 lines, newest at the bottom (renderPantActions already scrolls down) */
 body.is-stage #screen-actions .screen__bar { display: none; }
 body.is-stage #pant-feed { max-height: calc(4 * 2.3em); overflow: hidden; padding: 4px 16px; font-size: var(--fs-s); }
 body.is-stage #pant-feed .pact { font-size: var(--fs-s); padding: 5px 0; }
 body.is-stage #pant-feed .pact--ooda { margin-top: 0; }
 
-/* Ninguna pantalla disponible: el feed de acciones pasa a ocupar el centro */
+/* No screen available: the action feed moves to take the center */
 body.is-stage .screens:not(:has(iframe)) {
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas: "head head" "ticker ticker";
@@ -716,7 +715,7 @@ body.is-stage .screens:not(:has(iframe)) #screen-actions .screen__bar { display:
 }
 
 /* ── Terminal v2 ─────────────────────────────────────────────────── */
-/* buscar · filtrar por tool */
+/* search · filter by tool */
 .tsearch { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .tsearch__q, .tsearch__tool {
   height: 28px; padding: 0 9px; background: var(--panel); border: 1px solid var(--edge-2); border-radius: var(--radius);
@@ -729,7 +728,7 @@ body.is-stage .screens:not(:has(iframe)) #screen-actions .screen__bar { display:
 .term .is-out { display: none !important; }
 mark.hl { background: rgba(255, 167, 38, .32); color: var(--text); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 167, 38, .45); }
 
-/* contenedor: botón flotante "volver al directo" */
+/* container: floating "back to live" button */
 .term-wrap { position: relative; }
 .term__live {
   position: absolute; left: 0; right: 0; bottom: 16px; width: max-content; margin: 0 auto; z-index: 4;
@@ -740,11 +739,11 @@ mark.hl { background: rgba(255, 167, 38, .32); color: var(--text); border-radius
 .term__live:hover { border-color: var(--accent-soft); }
 .term__live.has-new { border-color: rgba(0, 255, 65, .55); color: var(--live); }
 
-/* cabecera OODA del paso en curso fija arriba (cada una cubre a la anterior al llegar) */
+/* OODA header of the running step pinned at the top (each one covers the previous as it arrives) */
 .term .ln--ooda { position: sticky; top: -12px; z-index: 2; background: #050608; padding-bottom: 6px; }
 .term .ln--ooda:first-child { padding-top: 0; }
 
-/* tool en curso: barra rayada bajo la línea (como las barras "en curso" de Trazas) + estado latiendo */
+/* running tool: striped bar under the line (like the "running" bars in Traces) + pulsing state */
 .ln--call { position: relative; }
 .ln--call.is-running { padding-bottom: 5px; }
 .ln--call.is-running::after {
@@ -754,7 +753,7 @@ mark.hl { background: rgba(255, 167, 38, .32); color: var(--text); border-radius
 }
 .ln--call.is-running .s { animation: pulse 1.4s ease-in-out infinite; }
 
-/* salida JSON como ficha */
+/* JSON output as a card */
 .out--card { white-space: normal; display: flex; flex-direction: column; gap: 6px; }
 .jc__head { display: flex; gap: 12px; align-items: center; }
 .jc__st {
@@ -780,7 +779,7 @@ mark.hl { background: rgba(255, 167, 38, .32); color: var(--text); border-radius
   .tsearch__q { flex: 1; width: auto; }
 }
 
-/* ── Trazas · grafo en vivo ─────────────────────────────────────── */
+/* ── Traces · live graph ─────────────────────────────────────── */
 .seg { display: inline-flex; align-self: flex-start; padding: 3px; gap: 3px; background: var(--bg-deep); border: 1px solid var(--edge); border-radius: 999px; }
 .seg__btn { padding: 6px 16px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; font-size: var(--fs-s); letter-spacing: .12em; text-transform: uppercase; }
 .seg__btn:hover { color: var(--text); }
@@ -847,7 +846,7 @@ mark.hl { background: rgba(255, 167, 38, .32); color: var(--text); border-radius
 .g-status.is-run { fill: var(--live); }
 .g-elapsed { fill: var(--live); font-weight: 700; }
 
-/* Grafo: nodos clicables y panel de detalle */
+/* Graph: clickable nodes and detail panel */
 .g-sel { cursor: pointer; outline: none; }
 .g-sel:hover .g-ring, .g-sel:hover .g-target__dot, .g-sel:hover .g-hermes__core { filter: drop-shadow(0 0 8px var(--c, var(--accent-soft))); }
 .g-sel:focus-visible .g-ring, .g-sel:focus-visible .g-target__dot, .g-sel:focus-visible .g-hermes__core { stroke: var(--text); }
@@ -902,13 +901,13 @@ svg.has-sel .g-edge.is-sel { opacity: 1; stroke-width: 2.6; }
   .gd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* con el panel abierto, el grafo se encoge a su lado (no queda tapado) */
+/* with the panel open, the graph shrinks beside it (so it is not covered) */
 @media (min-width: 701px) {
   .graph.has-drawer { display: grid; grid-template-columns: minmax(0, 1fr) min(440px, 40%); align-items: stretch; }
   .graph.has-drawer .graph__drawer { position: relative; inset: auto; width: auto; margin: 54px 10px 10px 0; max-height: 78vh; }
 }
 
-/* "Por herramienta": filas clicables + panel de detalle (reutiliza gd-* del grafo) */
+/* "Per tool": clickable rows + detail panel (reuses gd-* from the graph) */
 .tools tbody tr.row-sel { cursor: pointer; }
 .tools tbody tr.row-sel:hover { background: var(--panel-2); }
 .tools tbody tr.row-sel:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: -2px; }

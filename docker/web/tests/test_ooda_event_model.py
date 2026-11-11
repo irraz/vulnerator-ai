@@ -1,4 +1,4 @@
-"""Tests de ``ooda_parse`` y ``event_model`` (stdlib pura, sin red)."""
+"""Tests for ``ooda_parse`` and ``event_model`` (pure stdlib, no network)."""
 
 from __future__ import annotations
 
@@ -69,8 +69,8 @@ def test_message_to_events_assistant_with_tool_call():
 
 
 def test_reasoning_belongs_to_its_own_ooda_step():
-    """El razonamiento de un mensaje se emite DESPUÉS de su línea OODA y, en el store, hereda
-    la fase/step de ESE paso (no la del anterior). Fixture sintética (RFC 5737)."""
+    """A message's reasoning is emitted AFTER its OODA line and, in the store, inherits
+    the phase/step of THAT step (not the previous one). Synthetic fixture (RFC 5737)."""
     msgs = [
         {"id": 1, "role": "assistant", "timestamp": 100.0,
          "content": "OODA — OBSERVE (step 1): map services on 192.0.2.10"},
@@ -125,4 +125,4 @@ def test_content_parts_and_untrusted_html_kept_as_text():
     msg = {"id": 99, "role": "user", "timestamp": 1.0,
            "content": [{"type": "text", "text": "<img src=x onerror=alert(1)>"}]}
     ev = em.message_to_events("s", msg)[0]
-    assert ev["text"] == "<img src=x onerror=alert(1)>"  # verbatim: el frontend lo pinta como texto
+    assert ev["text"] == "<img src=x onerror=alert(1)>"  # verbatim: the frontend renders it as text

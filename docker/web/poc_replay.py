@@ -1,24 +1,24 @@
-"""PoC replay: cómo llegó el agente a un hallazgo y cómo lo reprodujo (STDLIB PURA).
+"""PoC replay: how the agent reached a finding and how it reproduced it (PURE STDLIB).
 
-Entrada: los eventos normalizados de UNA sesión (``trace_store.session_events``), en orden.
-Salida: un registro por cada llamada a ``record_finding`` con:
+Input: the normalized events of ONE session (``trace_store.session_events``), in order.
+Output: one record per ``record_finding`` call with:
 
-  - ``finding``: los campos del hallazgo tal como el agente los registró (título, estado,
-    fase, target, técnica, evidencia...), y si el store lo ACEPTÓ (``status: recorded``) o
-    lo RECHAZÓ (p. ej. un ``confirmed`` sin evidencia reproducible).
-  - ``chain``: la cadena de razonamiento que lo precede — líneas de estado OODA,
-    razonamiento, comentarios del asistente y cada tool-call con su resultado — desde el
-    inicio de la sesión (acotada a los últimos ``CHAIN_MAX`` pasos, con recuento de omitidos).
-  - ``reproduction``: el comando EXACTO de la evidencia y su salida verbatim. Si ese
-    comando se ejecutó de verdad en la sesión (``kali_run``/``kali_exec``), se ENLAZA la
-    ejecución real (salida, duración, returncode) en lugar de fiarse solo de lo que el
-    agente pegó en la evidencia.
-  - ``replay``: un guion de terminal ``[{t, stream, text}]`` que la GUI reproduce paso a
-    paso, exportable como grabación asciinema v2 (``to_asciicast``) y como Markdown
-    (``to_markdown``) para adjuntar al informe.
+  - ``finding``: the fields of the finding as the agent recorded them (title, state,
+    phase, target, technique, evidence...), and whether the store ACCEPTED it
+    (``status: recorded``) or REJECTED it (e.g. a ``confirmed`` without reproducible evidence).
+  - ``chain``: the reasoning chain that precedes it — OODA status lines, reasoning,
+    assistant comments and each tool-call with its result — from the start of the session
+    (bounded to the last ``CHAIN_MAX`` steps, with a count of omitted ones).
+  - ``reproduction``: the EXACT command from the evidence and its verbatim output. If that
+    command was actually run in the session (``kali_run``/``kali_exec``), the real execution
+    (output, duration, returncode) is LINKED instead of relying solely on what the agent
+    pasted into the evidence.
+  - ``replay``: a terminal script ``[{t, stream, text}]`` that the GUI plays back step by
+    step, exportable as an asciinema v2 recording (``to_asciicast``) and as Markdown
+    (``to_markdown``) to attach to the report.
 
-Disciplina: todo el contenido es DATO NO CONFIABLE; aquí solo se ordena, se acota y se
-formatea como texto. Nada se ejecuta: el "replay" REPRODUCE lo grabado, no re-ejecuta.
+Discipline: all content is UNTRUSTED DATA; here it is only ordered, bounded and formatted as
+text. Nothing is executed: the "replay" REPLAYS what was recorded, it does not re-execute.
 """
 
 from __future__ import annotations
@@ -28,16 +28,16 @@ from typing import Any, Iterable, Optional
 
 import event_model as em
 
-# Pasos máximos de la cadena que se devuelven (los más recientes antes del hallazgo).
+# Maximum chain steps returned (the most recent ones before the finding).
 CHAIN_MAX = 160
-# Recorte del texto de cada paso de la cadena (razonamiento/comentario/salida).
+# Text clipping for each chain step (reasoning/comment/output).
 STEP_TEXT_MAX = 1500
-# Líneas máximas de salida en el guion de replay y anchura de cada una.
+# Maximum output lines in the replay script and the width of each one.
 REPLAY_MAX_LINES = 400
 REPLAY_LINE_MAX = 400
-# Tiempo máximo de reproducción de la salida (se comprime la duración real si es mayor).
+# Maximum playback time for the output (the real duration is compressed if longer).
 REPLAY_OUTPUT_SECONDS = 6.0
-# Últimas líneas OODA que abren el replay (contexto inmediato del PoC).
+# Last OODA lines that open the replay (immediate context of the PoC).
 REPLAY_OODA_LEAD = 6
 
 
@@ -53,11 +53,11 @@ def _norm_cmd(cmd: Any) -> str:
 
 def _clip(text: Any, limit: int = STEP_TEXT_MAX) -> str:
     s, trunc = em.clip(text, limit)
-    return s + ("\n…[recortado]" if trunc else "")
+    return s + ("\n…[clipped]" if trunc else "")
 
 
 def _result_status(result_ev: Optional[dict[str, Any]]) -> Optional[str]:
-    """``recorded`` / ``rejected`` / None (sin resultado aún) para un record_finding."""
+    """``recorded`` / ``rejected`` / None (no result yet) for a record_finding."""
     if result_ev is None:
         return None
     doc = em.unwrap_result(result_ev.get("text") or "")
@@ -89,7 +89,7 @@ def _returncode(text: str) -> Optional[int]:
 
 
 def _step(ev: dict[str, Any], result: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """Un paso de la cadena (forma compacta y acotada)."""
+    """A chain step (compact, bounded form)."""
     kind = ev.get("kind")
     step: dict[str, Any] = {
         "seq": ev.get("seq"), "ts": ev.get("ts"), "kind": kind,
@@ -124,7 +124,7 @@ def _dur(call: Optional[dict[str, Any]], result: Optional[dict[str, Any]]) -> Op
 def _find_execution(
     command: str, calls: list[dict[str, Any]], results: dict[str, dict[str, Any]]
 ) -> Optional[tuple[dict[str, Any], Optional[dict[str, Any]]]]:
-    """La ejecución REAL (más reciente) cuyo comando casa con el de la evidencia."""
+    """The REAL execution (most recent) whose command matches the one in the evidence."""
     target = _norm_cmd(command)
     if not target:
         return None
@@ -144,7 +144,7 @@ def _find_execution(
 
 
 def build_pocs(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Construye un registro PoC por cada ``record_finding`` de la sesión (orden de aparición)."""
+    """Builds one PoC record per ``record_finding`` in the session (order of appearance)."""
     evs = sorted((e for e in events if isinstance(e, dict)), key=lambda e: e.get("seq") or 0)
     results: dict[str, dict[str, Any]] = {}
     for ev in evs:
@@ -157,7 +157,7 @@ def build_pocs(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     for ev in evs:
         kind = ev.get("kind")
         if kind == em.KIND_TOOL_RESULT or kind == em.KIND_WEB:
-            continue  # los resultados se adjuntan a su llamada
+            continue  # results are attached to their call
         if is_record_finding(ev):
             pocs.append(_build_one(ev, results, chain, calls))
         if kind == em.KIND_TOOL_CALL:
@@ -178,7 +178,7 @@ def _build_one(
     result = results.get(call.get("call_id") or "")
     evidence = args.get("evidence") if isinstance(args.get("evidence"), dict) else {}
     finding = {
-        "title": str(args.get("title") or "(sin título)"),
+        "title": str(args.get("title") or "(untitled)"),
         "state": str(args.get("state") or ""),
         "phase": args.get("phase") or None,
         "target": args.get("target") or None,
@@ -244,12 +244,12 @@ def _split_lines(text: str) -> list[str]:
     for ln in lines[:REPLAY_MAX_LINES]:
         out.append(ln if len(ln) <= REPLAY_LINE_MAX else ln[: REPLAY_LINE_MAX - 1] + "…")
     if len(lines) > REPLAY_MAX_LINES:
-        out.append("… [%d líneas más en la evidencia completa]" % (len(lines) - REPLAY_MAX_LINES))
+        out.append("… [%d more lines in the full evidence]" % (len(lines) - REPLAY_MAX_LINES))
     return out
 
 
 def build_replay(poc: dict[str, Any]) -> list[dict[str, Any]]:
-    """Guion de terminal ``[{t, stream, text}]`` (``t`` en segundos desde el inicio)."""
+    """Terminal script ``[{t, stream, text}]`` (``t`` in seconds from the start)."""
     frames: list[dict[str, Any]] = []
     t = 0.0
 
@@ -280,24 +280,24 @@ def build_replay(poc: dict[str, Any]) -> list[dict[str, Any]]:
         for ln in lines:
             add("out", ln, dt)
         if exe and exe.get("returncode") is not None:
-            add("note", "# exit %s · %.2fs reales" % (exe["returncode"], real), 0.2)
+            add("note", "# exit %s · %.2fs real" % (exe["returncode"], real), 0.2)
     elif rep.get("artifact_ref"):
         ref = rep["artifact_ref"]
-        add("note", "# evidencia en artefacto: %s/%s" % (ref.get("execution_id"), ref.get("name")), 0.4)
+        add("note", "# evidence in artifact: %s/%s" % (ref.get("execution_id"), ref.get("name")), 0.4)
     else:
-        add("note", "# sin comando reproducible en la evidencia", 0.4)
+        add("note", "# no reproducible command in the evidence", 0.4)
 
     if poc["store_status"] == "rejected":
-        add("err", "✗ record_finding rechazado: %s" % (poc.get("store_error") or "evidencia insuficiente"), 0.5)
+        add("err", "✗ record_finding rejected: %s" % (poc.get("store_error") or "insufficient evidence"), 0.5)
     elif poc["store_status"] == "recorded":
-        add("ok", "✓ hallazgo %s registrado: %s" % (f["state"] or "?", f["title"]), 0.5)
+        add("ok", "✓ finding %s recorded: %s" % (f["state"] or "?", f["title"]), 0.5)
     else:
-        add("note", "… registrando hallazgo", 0.5)
+        add("note", "… recording finding", 0.5)
     return frames
 
 
 def to_asciicast(poc: dict[str, Any], width: int = 120, height: int = 34) -> str:
-    """Grabación asciinema v2 (``asciinema play poc.cast``) del replay del PoC."""
+    """Asciinema v2 recording (``asciinema play poc.cast``) of the PoC replay."""
     colors = {"ooda": "\x1b[38;5;174m", "cmd": "\x1b[1;37m", "out": "\x1b[0;37m",
               "note": "\x1b[38;5;245m", "ok": "\x1b[1;32m", "err": "\x1b[1;31m"}
     header = {
@@ -308,7 +308,7 @@ def to_asciicast(poc: dict[str, Any], width: int = 120, height: int = 34) -> str
     }
     lines = [json.dumps(header, ensure_ascii=False)]
     for fr in poc["replay"]:
-        text = fr["text"].replace("\x1b", "␛")  # nunca reinyectar secuencias de escape crudas
+        text = fr["text"].replace("\x1b", "␛")  # never re-inject raw escape sequences
         out = "%s%s\x1b[0m\r\n" % (colors.get(fr["stream"], ""), text)
         lines.append(json.dumps([fr["t"], "o", out], ensure_ascii=False))
     return "\n".join(lines) + "\n"
@@ -324,59 +324,59 @@ def _fence(text: str) -> str:
 
 
 def to_markdown(poc: dict[str, Any]) -> str:
-    """Ficha Markdown del PoC (cadena OODA + reproducción) para adjuntar al informe."""
+    """Markdown sheet of the PoC (OODA chain + reproduction) to attach to the report."""
     f = poc["finding"]
     rep = poc["reproduction"]
     exe = rep.get("execution") or {}
     out = ["# PoC — %s" % f["title"], ""]
     meta = [
-        ("Estado", f.get("state")), ("Registro", poc.get("store_status")),
-        ("Target", f.get("target")), ("Técnica", f.get("technique_id")),
-        ("Confianza", f.get("confidence")), ("Engagement", f.get("engagement_id")),
-        ("Fase OODA", "%s (step %s)" % (poc.get("phase"), poc.get("step")) if poc.get("phase") else None),
-        ("Sesión", poc.get("session_id")),
+        ("State", f.get("state")), ("Record", poc.get("store_status")),
+        ("Target", f.get("target")), ("Technique", f.get("technique_id")),
+        ("Confidence", f.get("confidence")), ("Engagement", f.get("engagement_id")),
+        ("OODA phase", "%s (step %s)" % (poc.get("phase"), poc.get("step")) if poc.get("phase") else None),
+        ("Session", poc.get("session_id")),
     ]
     for k, v in meta:
         if v:
             out.append("- **%s:** %s" % (k, v))
     if poc.get("store_error"):
-        out.append("- **Motivo del rechazo:** %s" % poc["store_error"])
-    out += ["", "## Cómo llegó hasta aquí (ruta OODA)", ""]
+        out.append("- **Rejection reason:** %s" % poc["store_error"])
+    out += ["", "## How it got here (OODA path)", ""]
     if poc["ooda_path"]:
         for s in poc["ooda_path"]:
             out.append("%s. **%s** — %s" % (s.get("step"), s.get("phase"), s.get("text")))
     else:
-        out.append("_El agente no emitió líneas de estado OODA en esta sesión._")
-    out += ["", "## Pasos ejecutados", ""]
+        out.append("_The agent did not emit OODA status lines in this session._")
+    out += ["", "## Executed steps", ""]
     for s in poc["chain"]:
         if s["kind"] == em.KIND_TOOL_CALL:
             res = s.get("result") or {}
             dur = res.get("duration")
             out.append("- `%s` %s%s%s" % (
                 s.get("tool"), em.one_line(s.get("summary"), 160).replace("`", "'"),
-                " — %s" % res.get("status") if res else " — sin resultado",
+                " — %s" % res.get("status") if res else " — no result",
                 " (%.2fs)" % dur if isinstance(dur, (int, float)) else "",
             ))
     if poc.get("chain_omitted"):
-        out.append("- _(%d pasos anteriores omitidos)_" % poc["chain_omitted"])
-    out += ["", "## Reproducción", ""]
+        out.append("- _(%d earlier steps omitted)_" % poc["chain_omitted"])
+    out += ["", "## Reproduction", ""]
     command = exe.get("command") or rep.get("command")
     if command:
         fence = _fence(command)
-        out += ["Comando exacto:", "", fence + "sh", command, fence, ""]
+        out += ["Exact command:", "", fence + "sh", command, fence, ""]
         output = exe.get("output") if exe.get("output") is not None else rep.get("evidence_output")
         if output:
             fence = _fence(output)
-            src = "salida real de la ejecución enlazada" if exe else "salida pegada en la evidencia"
-            out += ["Salida (%s):" % src, "", fence, output.rstrip("\n"), fence, ""]
+            src = "real output of the linked execution" if exe else "output pasted in the evidence"
+            out += ["Output (%s):" % src, "", fence, output.rstrip("\n"), fence, ""]
         if exe:
-            out.append("_Ejecutado con `%s` · exit %s · %.2fs._" % (
+            out.append("_Executed with `%s` · exit %s · %.2fs._" % (
                 exe.get("tool"), exe.get("returncode"), exe.get("duration") or 0.0))
     elif rep.get("artifact_ref"):
         ref = rep["artifact_ref"]
-        out.append("Evidencia en artefacto `%s/%s` (plano de datos de Kali, `:8901`)." % (
+        out.append("Evidence in artifact `%s/%s` (Kali data plane, `:8901`)." % (
             ref.get("execution_id"), ref.get("name")))
     else:
-        out.append("_Sin comando reproducible en la evidencia._")
+        out.append("_No reproducible command in the evidence._")
     out.append("")
     return "\n".join(out)

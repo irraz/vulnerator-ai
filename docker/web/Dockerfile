@@ -1,13 +1,13 @@
-# vulnerator-web — la GUI web de Vulnerator-AI (consola de operador del bucle OODA).
+# vulnerator-web — Vulnerator-AI's web GUI (operator console for the OODA loop).
 #
-# OBSERVADOR: lee la API de sesiones de Hermes (:8642) y el historial de Caido, y sirve en
-# :9100 la terminal en vivo, el panel Copilot, las trazas de tool-calls (store SQLite propio),
-# los PoC con su reproducción grabada, y los accesos al Dashboard/Webapp de Hermes. No lanza,
-# dirige ni para runs.
+# OBSERVER: it reads Hermes' session API (:8642) and Caido's history, and serves on
+# :9100 the live terminal, the Copilot panel, the tool-call traces (its own SQLite store),
+# the PoCs with their recorded reproduction, and the links to Hermes' Dashboard/Webapp. It does
+# not launch, steer or stop runs.
 #
-# Base python:3.13-slim (NO Kali): wrapper HTTP fino, sin CLIs de pentest. Multi-arch.
+# Base python:3.13-slim (NOT Kali): a thin HTTP wrapper, no pentest CLIs. Multi-arch.
 #
-# Build (desde la raíz del repo):
+# Build (from the repo root):
 #   docker buildx build --platform linux/arm64,linux/amd64 \
 #     -f docker/web/Dockerfile -t vulnerator-ai-web:dev .
 
@@ -25,17 +25,18 @@ WORKDIR /opt/vulnerator-web
 COPY docker/web/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Módulos stdlib-puros (testeables sin SDK) + la capa web fina. caido_client es el MISMO
-# módulo que usa kali-mcp (stdlib pura): el feed de tráfico web no duplica el cliente.
+# Pure-stdlib modules (testable without an SDK) + the thin web layer. caido_client is the SAME
+# module kali-mcp uses (pure stdlib): the web-traffic feed does not duplicate the client.
 COPY docker/kali/caido_client.py ./caido_client.py
 COPY docker/web/ooda_parse.py docker/web/event_model.py docker/web/trace_store.py \
      docker/web/poc_replay.py docker/web/ingest.py docker/web/caido_proxy.py docker/web/web_app.py \
      docker/web/report.py docker/web/vulnerator_watch.py ./
 COPY docker/web/static ./static
 COPY media/vulnerator-ai-logo-transparent.png ./static/logo.png
+COPY media/vulnerator-ai-logo-header.png ./static/logo-header.png
 
-# Usuario sin privilegios. /data (volumen nombrado) guarda el store de trazas y los PoC
-# grabados; Docker siembra el volumen vacío con este dueño.
+# Unprivileged user. /data (named volume) holds the trace store and the recorded
+# PoCs; Docker seeds the empty volume with this owner.
 RUN useradd --system --uid 10001 --no-create-home --home-dir /opt/vulnerator-web vweb \
     && mkdir -p /data/pocs \
     && chown -R vweb:vweb /data
@@ -50,7 +51,7 @@ ENV VULNERATOR_WEB_HOST=0.0.0.0 \
 VOLUME ["/data"]
 EXPOSE 9100
 
-# /healthz es la única ruta sin auth (match exacto). python:3.13-slim no trae curl.
+# /healthz is the only route without auth (exact match). python:3.13-slim ships no curl.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 \
   CMD ["python3", "-c", "import os,sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('VULNERATOR_WEB_PORT','9100'), timeout=3).status==200 else 1)"]
 

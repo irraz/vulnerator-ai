@@ -1,20 +1,20 @@
-"""Ingesta en vivo de la GUI: sesiones de Hermes + tráfico de Caido -> ``TraceStore``.
+"""Live ingestion for the GUI: Hermes sessions + Caido traffic -> ``TraceStore``.
 
-Tres piezas, todas OBSERVADORAS (solo leen; nunca lanzan, dirigen ni paran al agente):
+Three pieces, all OBSERVERS (read only; they never launch, steer, or stop the agent):
 
-  - ``Notifier``: despertador asyncio. El ingestor lo toca al insertar eventos y cada
-    stream SSE abierto en el navegador despierta y lee ``seq > cursor`` del store.
-  - ``SessionIngestor``: sondea ``GET /api/sessions`` (con subagentes) y, para cada sesión que
-    cambió, pide sus mensajes NUEVOS (``GET /api/sessions/{id}/messages``) y los ingiere. Al
-    ver el resultado de un ``record_finding`` CONFIRMADO, graba el PoC a disco (``.cast`` +
-    ``.md``) en ``poc_dir`` — la "grabación" del PoC sobrevive al contenedor (volumen).
-  - ``CaidoFeed``: sondea el historial de Caido (el mismo ``caido_client`` que usa
-    ``kali-mcp``, sesión de invitado) y lo ingiere como eventos ``web.request``: qué está
-    tocando el agente en la web, en vivo.
+  - ``Notifier``: asyncio wake-up. The ingestor pokes it when inserting events and each
+    SSE stream open in the browser wakes up and reads ``seq > cursor`` from the store.
+  - ``SessionIngestor``: polls ``GET /api/sessions`` (with subagents) and, for each session that
+    changed, requests its NEW messages (``GET /api/sessions/{id}/messages``) and ingests them. When
+    it sees the result of a CONFIRMED ``record_finding``, it records the PoC to disk (``.cast`` +
+    ``.md``) in ``poc_dir`` — the PoC "recording" survives the container (volume).
+  - ``CaidoFeed``: polls Caido's history (the same ``caido_client`` that
+    ``kali-mcp`` uses, guest session) and ingests it as ``web.request`` events: what the
+    agent is touching on the web, live.
 
-Version-tolerante: el contrato de ``:8642`` es de Hermes; se leen campos con ``.get`` y un
-fallo de red/forma se refleja en ``status`` (``last_error``) sin tumbar el bucle. "No se
-finge": si Hermes o Caido no responden, el estado lo dice; no se inventan datos.
+Version-tolerant: the ``:8642`` contract belongs to Hermes; fields are read with ``.get`` and a
+network/shape failure is reflected in ``status`` (``last_error``) without killing the loop. "No
+pretending": if Hermes or Caido do not respond, the state says so; no data is made up.
 """
 
 from __future__ import annotations
@@ -33,14 +33,14 @@ import event_model as em
 import poc_replay
 from trace_store import TraceStore
 
-# Página de mensajes por petición (máximo que acepta Hermes).
+# Page of messages per request (the maximum Hermes accepts).
 PAGE = 500
-# Mensajes recientes que se piden en una sincronización incremental.
+# Recent messages requested in an incremental sync.
 INCREMENTAL = 200
-# Sesiones con actividad en los últimos N s se re-sincronizan en cada vuelta aunque sus
-# contadores no cambien (red de seguridad barata frente a un contador perezoso).
+# Sessions with activity in the last N s are re-synced on every pass even if their
+# counters do not change (a cheap safety net against a lazy counter).
 ACTIVE_WINDOW_S = 90.0
-# Gracia para ingerir una petición de Caido aún sin respuesta (después queda "pendiente").
+# Grace period to ingest a Caido request that still has no response (afterwards it stays "pending").
 CAIDO_PENDING_GRACE_S = 20.0
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -52,7 +52,7 @@ def _log(msg: str) -> None:
 
 
 class Notifier:
-    """Despertador para los streams: ``notify()`` despierta a todos los ``wait()`` pendientes."""
+    """Wake-up for the streams: ``notify()`` wakes all pending ``wait()`` calls."""
 
     def __init__(self) -> None:
         self._version = 0
@@ -74,7 +74,7 @@ class Notifier:
             cond.notify_all()
 
     def notify(self) -> None:
-        """Versión síncrona segura desde el event loop (programa la notificación)."""
+        """Synchronous version safe to call from the event loop (schedules the notification)."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -83,7 +83,7 @@ class Notifier:
         loop.create_task(self.notify_async())
 
     async def wait(self, seen_version: int, timeout: float) -> int:
-        """Espera hasta que ``version`` supere ``seen_version`` o venza ``timeout``."""
+        """Waits until ``version`` exceeds ``seen_version`` or ``timeout`` elapses."""
         cond = self._c()
         async with cond:
             if self._version > seen_version:
@@ -104,10 +104,10 @@ def session_fingerprint(meta: dict[str, Any]) -> tuple:
 
 def select_ready_entries(entries: list[dict[str, Any]], now: float,
                          grace: float = CAIDO_PENDING_GRACE_S) -> list[dict[str, Any]]:
-    """Entradas de Caido listas para ingerir: con respuesta, o sin ella pasada la gracia.
+    """Caido entries ready to ingest: with a response, or without one past the grace period.
 
-    La dedup del store es por id; si se ingiriera una petición antes de llegar su respuesta,
-    su código de estado no se actualizaría nunca. Por eso se espera un poco a la respuesta.
+    The store's dedup is by id; if a request were ingested before its response arrived,
+    its status code would never be updated. That is why we wait a bit for the response.
     """
     ready = []
     for e in entries:
@@ -116,7 +116,7 @@ def select_ready_entries(entries: list[dict[str, Any]], now: float,
         if isinstance(e.get("response"), dict) and e["response"].get("statusCode") is not None:
             ready.append(e)
             continue
-        from trace_store import _caido_ts  # local: helper puro del store
+        from trace_store import _caido_ts  # local: pure helper from the store
         created = _caido_ts(e.get("createdAt"))
         if created and now - created >= grace:
             ready.append(e)
@@ -125,7 +125,7 @@ def select_ready_entries(entries: list[dict[str, Any]], now: float,
 
 
 class HermesSessions:
-    """Cliente mínimo (lectura) de la API de sesiones de Hermes en ``:8642``."""
+    """Minimal (read-only) client for Hermes' sessions API at ``:8642``."""
 
     def __init__(self, base_url: str, api_key: str, timeout: float = 20.0) -> None:
         self._base = base_url.rstrip("/")
@@ -164,7 +164,7 @@ class HermesSessions:
 
 
 class SessionIngestor:
-    """Bucle de sondeo de sesiones -> store (+ grabación de PoCs confirmados)."""
+    """Session polling loop -> store (+ recording of confirmed PoCs)."""
 
     def __init__(self, store: TraceStore, notifier: Notifier, hermes: HermesSessions, *,
                  interval: float = 1.5, session_limit: int = 50,
@@ -194,13 +194,13 @@ class SessionIngestor:
                 self.status.update(ok=True, last_error=None)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # red/forma: se refleja en status, el bucle sigue
+            except Exception as exc:  # network/shape: reflected in status, the loop continues
                 self.status.update(ok=False, last_error=em.one_line(str(exc), 300))
             self.status["last_poll"] = time.time()
             await asyncio.sleep(self.interval)
 
     async def poll_once(self) -> int:
-        """Una vuelta: lista sesiones y sincroniza las que cambiaron. Devuelve eventos nuevos."""
+        """One pass: lists sessions and syncs the ones that changed. Returns the number of new events."""
         sessions = await self.hermes.list_sessions(self.session_limit)
         self.status["sessions"] = len(sessions)
         now = time.time()
@@ -229,7 +229,7 @@ class SessionIngestor:
             msgs = await self.hermes.messages(sid, order="latest", limit=INCREMENTAL)
             fresh = [m for m in msgs if _mid(m) is not None and _mid(m) not in seen]
             if len(msgs) >= INCREMENTAL and len(fresh) == len(msgs):
-                msgs = await self._full(sid)  # posible hueco: re-sincroniza entero
+                msgs = await self._full(sid)  # possible gap: re-sync the whole thing
         else:
             msgs = await self._full(sid)
         new = self.store.ingest_messages(sid, msgs)
@@ -240,7 +240,7 @@ class SessionIngestor:
     async def _full(self, sid: str) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         offset = 0
-        for _ in range(200):  # tope de seguridad: 100k mensajes
+        for _ in range(200):  # safety cap: 100k messages
             page = await self.hermes.messages(sid, order="oldest", offset=offset, limit=PAGE)
             out.extend(page)
             if len(page) < PAGE:
@@ -249,7 +249,7 @@ class SessionIngestor:
         return out
 
     def _maybe_record_pocs(self, sid: str, new_events: list[dict[str, Any]]) -> None:
-        """Si llegó el resultado de un ``record_finding``, graba los PoCs confirmados a disco."""
+        """If a ``record_finding`` result arrived, records the confirmed PoCs to disk."""
         if self.poc_dir is None:
             return
         if not any(ev.get("kind") == em.KIND_TOOL_RESULT
@@ -258,7 +258,7 @@ class SessionIngestor:
         try:
             pocs = poc_replay.build_pocs(self.store.session_events(sid))
         except Exception as exc:
-            _log("no se pudo construir el PoC de %s: %s" % (sid, exc))
+            _log("could not build the PoC for %s: %s" % (sid, exc))
             return
         for poc in pocs:
             if not poc["confirmed"] or poc["store_status"] != "recorded":
@@ -269,30 +269,30 @@ class SessionIngestor:
                 write_poc_files(self.poc_dir, poc)
                 self._saved_pocs.add(poc["id"])
                 self.status["pocs_recorded"] = len(self._saved_pocs)
-                _log("PoC grabado: %s" % em.one_line(poc["finding"]["title"], 120))
+                _log("PoC recorded: %s" % em.one_line(poc["finding"]["title"], 120))
             except OSError as exc:
-                _log("no se pudo grabar el PoC: %s" % exc)
+                _log("could not record the PoC: %s" % exc)
 
 
 def safe_component(value: Any, fallback: str, limit: int) -> str:
-    """Un componente de ruta seguro: solo ``[A-Za-z0-9_.-]``, sin puntos/guiones iniciales.
+    """A safe path component: only ``[A-Za-z0-9_.-]``, no leading dots/dashes.
 
-    Quitar los puntos del borde impide ``.``/``..`` (recorrido) y ficheros ocultos aunque el
-    valor (título del hallazgo, id de sesión: DATO NO CONFIABLE) venga manipulado.
+    Stripping the edge dots prevents ``.``/``..`` (traversal) and hidden files even if the
+    value (finding title, session id: UNTRUSTED DATA) comes in tampered with.
     """
     out = _SAFE_NAME.sub("-", str(value or "")).strip("-.")[:limit].strip("-.")
     return out or fallback
 
 
 def poc_basename(poc: dict[str, Any]) -> str:
-    """Nombre de fichero seguro para un PoC (sin separadores ni recorridos)."""
+    """Safe file name for a PoC (no separators or traversals)."""
     title = safe_component(poc["finding"]["title"], "poc", 60)
     call = safe_component(poc.get("call_id"), "call", 40)
     return "%s__%s" % (title, call)
 
 
 def write_poc_files(poc_dir: Path, poc: dict[str, Any]) -> Path:
-    """Escribe ``<poc_dir>/<sesión>/<poc>.cast`` y ``.md`` (atómico por fichero)."""
+    """Writes ``<poc_dir>/<session>/<poc>.cast`` and ``.md`` (atomic per file)."""
     folder = poc_dir / safe_component(poc.get("session_id"), "session", 80)
     folder.mkdir(parents=True, exist_ok=True)
     base = folder / poc_basename(poc)
@@ -311,7 +311,7 @@ def _mid(m: dict[str, Any]) -> Optional[int]:
 
 
 class CaidoFeed:
-    """Sondeo del historial de Caido -> eventos ``web.request``."""
+    """Polling of Caido's history -> ``web.request`` events."""
 
     def __init__(self, store: TraceStore, notifier: Notifier,
                  search: Callable[..., dict[str, Any]], *, interval: float = 3.0,
@@ -338,7 +338,7 @@ class CaidoFeed:
     async def poll_once(self) -> int:
         result = await asyncio.to_thread(self.search, "", self.limit)
         if not isinstance(result, dict) or result.get("status") != "done":
-            reason = (result or {}).get("status") if isinstance(result, dict) else "sin respuesta"
+            reason = (result or {}).get("status") if isinstance(result, dict) else "no response"
             detail = (result or {}).get("error") if isinstance(result, dict) else None
             self.status.update(ok=False, last_error=em.one_line(
                 "%s%s" % (reason, (": %s" % detail) if detail else ""), 300))

@@ -1,22 +1,22 @@
-"""Normalización de mensajes de sesión de Hermes a EVENTOS de la GUI (STDLIB PURA).
+"""Normalization of Hermes session messages into GUI EVENTS (PURE STDLIB).
 
-Fuente: ``GET /api/sessions/{id}/messages`` de la API de Hermes (``:8642``). Hermes persiste
-la llamada a una tool ANTES de ejecutarla y su resultado al terminar (ver
-``agent/turn_tool_round.py`` / ``agent/tool_executor.py`` en hermes-agent), así que sondear
-los mensajes da casi en vivo TODO lo que hace el agente, venga la sesión de la API, de la
-TUI, de la Webapp o de un subagente delegado.
+Source: ``GET /api/sessions/{id}/messages`` from the Hermes API (``:8642``). Hermes persists
+a tool call BEFORE executing it and its result once finished (see
+``agent/turn_tool_round.py`` / ``agent/tool_executor.py`` in hermes-agent), so polling
+the messages gives almost live EVERYTHING the agent does, whether the session comes from the
+API, the TUI, the Webapp or a delegated subagent.
 
-Cada mensaje se convierte en 0..N eventos con un esquema estable e interno de la GUI:
+Each message is converted into 0..N events with a stable, GUI-internal schema:
 
     {key, session_id, message_id, ts, kind, role?, phase?, step?, tool?, tool_display?,
      category?, call_id?, args?, summary?, text?, truncated?}
 
-``kind`` ∈ ``KINDS``. ``key`` es único y estable (dedup idempotente al re-sincronizar).
+``kind`` ∈ ``KINDS``. ``key`` is unique and stable (idempotent dedup on re-sync).
 
-Disciplina de seguridad: TODO el contenido (texto del asistente, razonamiento, args y salida
-de tools) es DATO NO CONFIABLE (puede traer prompt-injection o HTML). Aquí solo se
-transporta, se acota en tamaño y se etiqueta; NUNCA se interpreta ni se ejecuta. El frontend
-lo pinta siempre como texto (``textContent``), nunca como HTML.
+Security discipline: ALL content (assistant text, reasoning, args and tool output) is
+UNTRUSTED DATA (it may carry prompt-injection or HTML). Here it is only transported, size-
+bounded and labeled; it is NEVER interpreted or executed. The frontend always renders it as
+text (``textContent``), never as HTML.
 """
 
 from __future__ import annotations
@@ -39,16 +39,16 @@ KINDS = (
     KIND_TOOL_CALL, KIND_TOOL_RESULT, KIND_WEB,
 )
 
-# Tope de bytes de texto por evento que se PERSISTE (la salida completa de un escaneo puede
-# ser enorme; el crudo íntegro vive en el plano de artefactos de Kali :8901).
+# Cap on text bytes per event that is PERSISTED (the full output of a scan can be
+# huge; the complete raw data lives in the Kali artifacts plane :8901).
 TEXT_MAX = 64 * 1024
-# Tope del resumen de una línea que se enseña en listas/terminal.
+# Cap on the one-line summary shown in lists/terminal.
 SUMMARY_MAX = 240
 
-# Prefijos con los que Hermes nombra las tools de cada servidor MCP del perfil.
+# Prefixes Hermes uses to name the tools of each MCP server in the profile.
 _MCP_PREFIXES = ("mcp_kali_", "mcp_playwright_", "mcp_vulnerator_", "mcp_")
 
-# Campos de args que mejor resumen una llamada, por orden de preferencia.
+# Args fields that best summarize a call, in order of preference.
 _SUMMARY_KEYS = (
     "command", "url", "httpql", "query", "element", "text", "goal", "title",
     "domain", "target", "path", "code", "prompt", "input",
@@ -56,7 +56,7 @@ _SUMMARY_KEYS = (
 
 
 def clip(text: Any, limit: int = TEXT_MAX) -> tuple[str, bool]:
-    """Coacciona a str y acota a ``limit`` caracteres. Devuelve ``(texto, truncado)``."""
+    """Coerces to str and bounds to ``limit`` characters. Returns ``(text, truncated)``."""
     if text is None:
         return "", False
     if not isinstance(text, str):
@@ -70,14 +70,14 @@ def clip(text: Any, limit: int = TEXT_MAX) -> tuple[str, bool]:
 
 
 def one_line(text: Any, limit: int = SUMMARY_MAX) -> str:
-    """Resumen de una sola línea (sin saltos), acotado."""
+    """Single-line summary (no line breaks), bounded."""
     s, _ = clip(text, limit * 4)
     s = " ".join(s.split())
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 def tool_display_name(name: str | None) -> str:
-    """Nombre corto de la tool sin el prefijo del servidor MCP (``mcp_kali_kali_run`` -> ``kali_run``)."""
+    """Short tool name without the MCP server prefix (``mcp_kali_kali_run`` -> ``kali_run``)."""
     n = name or ""
     for prefix in _MCP_PREFIXES:
         if n.startswith(prefix) and len(n) > len(prefix):
@@ -86,7 +86,7 @@ def tool_display_name(name: str | None) -> str:
 
 
 def tool_category(name: str | None) -> str:
-    """Familia de la tool para colorear/filtrar: shell, browser, web, finding, recon, ..."""
+    """Tool family for coloring/filtering: shell, browser, web, finding, recon, ..."""
     n = (name or "").lower()
     if "record_finding" in n or "read_findings" in n:
         return "finding"
@@ -109,7 +109,7 @@ def tool_category(name: str | None) -> str:
 
 
 def content_text(content: Any) -> str:
-    """Texto plano de un ``content`` de mensaje (str o lista de partes multimodales)."""
+    """Plain text of a message ``content`` (str or list of multimodal parts)."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -121,7 +121,7 @@ def content_text(content: Any) -> str:
                 if isinstance(part.get("text"), str):
                     parts.append(part["text"])
                 elif part.get("type") in ("image_url", "image", "input_image"):
-                    parts.append("[imagen]")
+                    parts.append("[image]")
             elif isinstance(part, str):
                 parts.append(part)
         return "\n".join(parts)
@@ -129,7 +129,7 @@ def content_text(content: Any) -> str:
 
 
 def parse_args(raw: Any) -> Any:
-    """Args de una tool-call: JSON-string -> objeto; si no parsea, se devuelve el string."""
+    """Args of a tool-call: JSON-string -> object; if it does not parse, the string is returned."""
     if isinstance(raw, (dict, list)):
         return raw
     if isinstance(raw, str):
@@ -144,9 +144,9 @@ def parse_args(raw: Any) -> Any:
 
 
 def parse_tool_calls(raw: Any) -> list[dict[str, Any]]:
-    """Lista normalizada ``[{id, name, args}]`` a partir de ``tool_calls`` (str JSON o lista).
+    """Normalized list ``[{id, name, args}]`` from ``tool_calls`` (JSON str or list).
 
-    Tolera las variantes OpenAI (``{id, function:{name, arguments}}``) y planas
+    Tolerates the OpenAI variants (``{id, function:{name, arguments}}``) and flat ones
     (``{id|call_id, name, arguments|args|input}``).
     """
     if isinstance(raw, str):
@@ -176,7 +176,7 @@ def parse_tool_calls(raw: Any) -> list[dict[str, Any]]:
 
 
 def summarize_args(args: Any) -> str:
-    """Resumen de una línea de los args de una tool (el comando, la URL, la query...)."""
+    """One-line summary of a tool's args (the command, the URL, the query...)."""
     if isinstance(args, dict):
         for key in _SUMMARY_KEYS:
             val = args.get(key)
@@ -199,7 +199,7 @@ def _ts(message: dict[str, Any]) -> float:
 
 
 def message_to_events(session_id: str, message: dict[str, Any]) -> list[dict[str, Any]]:
-    """Convierte UN mensaje de sesión de Hermes en 0..N eventos de la GUI (orden estable)."""
+    """Converts ONE Hermes session message into 0..N GUI events (stable order)."""
     if not isinstance(message, dict):
         return []
     mid = message.get("id")
@@ -223,9 +223,9 @@ def message_to_events(session_id: str, message: dict[str, Any]) -> list[dict[str
             emit("user", KIND_USER, text=text, truncated=trunc, summary=one_line(text))
 
     elif role == "assistant":
-        # La línea OODA va PRIMERO: es la cabecera del paso. El razonamiento del mismo mensaje
-        # pertenece a ese paso (se pinta debajo de su cabecera y hereda su fase/step en el
-        # store); emitido antes, quedaría colgado del paso anterior.
+        # The OODA line goes FIRST: it is the step header. The reasoning of the same message
+        # belongs to that step (it is rendered below its header and inherits its phase/step in the
+        # store); if emitted earlier, it would end up attached to the previous step.
         body = content_text(message.get("content"))
         for i, hit in enumerate(ooda_parse.parse_text(body)):
             emit("ooda%d" % i, KIND_OODA, phase=hit["phase"], step=hit["step"],
@@ -257,12 +257,12 @@ def message_to_events(session_id: str, message: dict[str, Any]) -> list[dict[str
 
 
 def unwrap_result(text: str) -> Any:
-    """Decodifica el resultado de una tool (texto) a objeto, quitando envoltorios comunes.
+    """Decodes a tool's result (text) into an object, stripping common wrappers.
 
-    Hermes guarda el resultado de una tool MCP como texto; según la versión puede ser el JSON
-    del dict de la tool, un ``{"result": {...}}`` o la lista de partes de contenido MCP
-    (``[{"type":"text","text":"{...}"}]``). Devuelve el dict/lista interior o ``None`` si no
-    es JSON. Nunca lanza.
+    Hermes stores the result of an MCP tool as text; depending on the version it can be the JSON
+    of the tool's dict, a ``{"result": {...}}`` or the list of MCP content parts
+    (``[{"type":"text","text":"{...}"}]``). Returns the inner dict/list or ``None`` if it is not
+    JSON. Never raises.
     """
     s = (text or "").strip()
     if not s or s[0] not in "{[":
@@ -299,7 +299,7 @@ def unwrap_result(text: str) -> Any:
 
 
 def tool_output_text(text: str) -> str:
-    """La SALIDA útil de una tool: ``output`` de kali_run, ``stdout``/``stderr``, o el texto."""
+    """The useful OUTPUT of a tool: ``output`` from kali_run, ``stdout``/``stderr``, or the text."""
     doc = unwrap_result(text)
     if isinstance(doc, dict):
         if isinstance(doc.get("output"), str):
@@ -315,12 +315,12 @@ _FAIL_STATUSES = ("error", "failed", "failure", "timeout", "denied", "blocked",
 
 
 def looks_like_error(text: str) -> bool:
-    """Heurística acotada: ¿la salida de la tool es un error/fallo explícito?
+    """Bounded heuristic: is the tool's output an explicit error/failure?
 
-    Solo mira la forma ESTRUCTURADA (dict con ``error``/``isError``/``status`` de fallo, o un
-    prefijo ``Error``/``Traceback``) para no marcar como fallo un escaneo cuya salida menciona
-    "error" en medio. Un ``returncode`` != 0 de ``kali_run`` NO es fallo (es resultado legítimo
-    del comando: nmap sin hallazgos, grep sin match).
+    It only looks at the STRUCTURED form (dict with a failure ``error``/``isError``/``status``, or an
+    ``Error``/``Traceback`` prefix) so as not to flag as a failure a scan whose output mentions
+    "error" in the middle. A ``returncode`` != 0 from ``kali_run`` is NOT a failure (it is a legitimate
+    result of the command: nmap with no findings, grep with no match).
     """
     doc = unwrap_result(text)
     if isinstance(doc, dict):
@@ -336,7 +336,7 @@ def looks_like_error(text: str) -> bool:
 
 
 def messages_to_events(session_id: str, messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Aplica :func:`message_to_events` a una secuencia (orden por id de mensaje)."""
+    """Applies :func:`message_to_events` to a sequence (ordered by message id)."""
     msgs = [m for m in messages if isinstance(m, dict) and m.get("id") is not None]
     try:
         msgs.sort(key=lambda m: (float(m.get("timestamp") or 0), int(m["id"])))

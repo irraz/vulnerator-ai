@@ -1,6 +1,6 @@
-# caido-director — UI de Caido conducida automáticamente para reflejar las acciones del agente.
-# Chromium con pantalla (Xvfb) + x11vnc + noVNC + Playwright (connect_over_cdp) que ejecuta
-# director.py. Base debian bookworm. Solo noVNC (:6080) se publica; el puerto de depuración no.
+# caido-director — Caido UI driven automatically to mirror the agent's actions.
+# Headed Chromium (Xvfb) + x11vnc + noVNC + Playwright (connect_over_cdp) running director.py.
+# Base debian bookworm. Only noVNC (:6080) is published; the debugging port is not.
 # syntax=docker/dockerfile:1
 FROM debian:bookworm-slim
 

@@ -1,20 +1,20 @@
-"""Parser de la línea de estado OODA del agente (STDLIB PURA).
+"""Parser for the agent's OODA status line (PURE STDLIB).
 
-El SOUL.md obliga a Hermes a abrir CADA respuesta con una línea de estado exacta:
+SOUL.md forces Hermes to open EVERY response with an exact status line:
 
-    OODA — <PHASE> (step <N>): <descripción de una línea>
+    OODA — <PHASE> (step <N>): <one-line description>
 
-Esa línea es la señal más barata y fiable de "en qué fase está el bucle" sin pedirle nada
-más al modelo. Este módulo la extrae del texto del asistente para que la GUI pueda etiquetar
-cada tool-call, span y hallazgo con la fase/paso OODA en la que ocurrió.
+That line is the cheapest and most reliable signal of "which phase the loop is in" without
+asking the model for anything else. This module extracts it from the assistant text so the
+GUI can tag each tool-call, span and finding with the OODA phase/step in which it occurred.
 
-Tolerancia (el texto lo escribe un LLM, no un parser): admite guion largo, medio o normal
-(``—`` ``–`` ``-``), negritas/backticks de Markdown alrededor, mayúsculas/minúsculas y
-espacios extra. ``REPORT`` se acepta además de las cuatro fases porque el SOUL lo usa como
-fase de cierre en el todo_list.
+Tolerance (the text is written by an LLM, not a parser): it accepts em, en or normal dashes
+(``—`` ``–`` ``-``), surrounding Markdown bold/backticks, upper/lower case and extra
+whitespace. ``REPORT`` is accepted in addition to the four phases because SOUL uses it as the
+closing phase in the todo_list.
 
-Disciplina: el texto del asistente es DATO NO CONFIABLE. Aquí solo se reconoce un patrón y
-se devuelven campos acotados; nunca se interpreta ni se ejecuta nada derivado de él.
+Discipline: the assistant text is UNTRUSTED DATA. Here only a pattern is recognized and
+bounded fields are returned; nothing derived from it is ever interpreted or executed.
 """
 
 from __future__ import annotations
@@ -24,16 +24,16 @@ from typing import Any
 
 PHASES = ("OBSERVE", "ORIENT", "DECIDE", "ACT", "REPORT")
 
-# Longitud máxima de la descripción devuelta (la línea es "de una línea" por contrato;
-# esto solo acota un texto anómalo).
+# Maximum length of the returned description (the line is "one-line" by contract;
+# this only bounds anomalous text).
 _DESC_MAX = 400
 
 _LINE_RE = re.compile(
-    r"""^[\s>*_`#]*            # adornos markdown al inicio (quote, negrita, cursiva, código)
-        OODA\s*[—–\-:]+\s*      # 'OODA —' (cualquier guion)
+    r"""^[\s>*_`#]*            # markdown decorations at the start (quote, bold, italic, code)
+        OODA\s*[—–\-:]+\s*      # 'OODA —' (any dash)
         [*_`]*(?P<phase>OBSERVE|ORIENT|DECIDE|ACT|REPORT)[*_`]*
         \s*\(\s*step\s*(?P<step>\d{1,6})\s*\)   # '(step N)'
-        [*_`]*\s*[:：\-—–]?[*_`]*\s*         # ':' con negritas antes o después
+        [*_`]*\s*[:：\-—–]?[*_`]*\s*         # ':' with bold before or after
         (?P<desc>.*?)[\s*_`]*$
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -41,7 +41,7 @@ _LINE_RE = re.compile(
 
 
 def parse_line(line: str) -> dict[str, Any] | None:
-    """Reconoce UNA línea de estado OODA. Devuelve ``{phase, step, description}`` o None."""
+    """Recognizes ONE OODA status line. Returns ``{phase, step, description}`` or None."""
     if not isinstance(line, str):
         return None
     m = _LINE_RE.match(line.strip())
@@ -58,7 +58,7 @@ def parse_line(line: str) -> dict[str, Any] | None:
 
 
 def parse_text(text: str) -> list[dict[str, Any]]:
-    """Extrae TODAS las líneas de estado OODA de un bloque de texto, en orden."""
+    """Extracts ALL OODA status lines from a block of text, in order."""
     if not isinstance(text, str) or "OODA" not in text.upper():
         return []
     out = []

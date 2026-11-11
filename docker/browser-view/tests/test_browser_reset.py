@@ -1,4 +1,4 @@
-"""Tests de las funciones puras de browser_reset.py (sin red, sin Chrome real)."""
+"""Tests for the pure functions of browser_reset.py (no network, no real Chrome)."""
 import sys
 from pathlib import Path
 
@@ -9,7 +9,7 @@ import browser_reset as br  # noqa: E402
 def test_pick_live_root_ignores_children_and_picks_most_recent():
     sessions = [
         {"id": "root-old", "parent_session_id": None, "last_active": 100},
-        {"id": "child-1", "parent_session_id": "root-old", "last_active": 999},  # no cuenta
+        {"id": "child-1", "parent_session_id": "root-old", "last_active": 999},  # does not count
         {"id": "root-new", "parent_session_id": None, "last_active": 200},
     ]
     assert br.pick_live_root(sessions) == "root-new"
@@ -29,21 +29,21 @@ def test_pick_live_root_empty_or_only_children_returns_none():
 
 
 def test_should_reset_only_on_genuine_change_after_first_sighting():
-    # primer avistamiento: no resetea aunque "cambie" de None a algo (es el arranque del watcher)
+    # first sighting: does not reset even if it "changes" from None to something (watcher startup)
     assert br.should_reset(None, "s1", seen_any=False) is False
-    # ya habíamos visto una sesión antes: un id distinto SÍ dispara el reset
+    # we had already seen a session before: a different id DOES trigger the reset
     assert br.should_reset("s1", "s2", seen_any=True) is True
-    # la misma sesión (incluidos sus subagentes) no dispara nada
+    # the same session (including its subagents) triggers nothing
     assert br.should_reset("s1", "s1", seen_any=True) is False
-    # sin sesión activa ahora mismo: nada que resetear
+    # no active session right now: nothing to reset
     assert br.should_reset("s1", None, seen_any=True) is False
 
 
 def test_ws_frame_short_payload_uses_single_length_byte():
     frame = br._ws_frame(b"hola")
-    assert frame[0] == 0x81  # FIN + opcode texto
-    assert frame[1] & 0x80  # bit de máscara puesto
-    assert (frame[1] & 0x7F) == 4  # longitud literal para payloads < 126
+    assert frame[0] == 0x81  # FIN + text opcode
+    assert frame[1] & 0x80  # mask bit set
+    assert (frame[1] & 0x7F) == 4  # literal length for payloads < 126
 
 
 def test_ws_frame_medium_payload_uses_16bit_length():

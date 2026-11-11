@@ -1,23 +1,23 @@
-"""browser_reset.py — reinicia el navegador VISIBLE cuando cambia el OBJETIVO.
+"""browser_reset.py — resets the VISIBLE browser when the TARGET changes.
 
-Problema que arregla (a nivel de código, no un host-fix): el navegador con pantalla de
-`browser-view` solo se mueve cuando Hermes llama a una tool `browser_*`. Al terminar un
-engagement y arrancar otro (otro ``/v1/runs``), el agente suele empezar con recon por
-``kali_run`` antes de tocar el navegador — así que la pantalla se queda mostrando el SITIO DEL
-ENGAGEMENT ANTERIOR (p. ej. el login de WordPress del objetivo de ayer) mientras el nuevo ya está
-en marcha contra un objetivo distinto. Parece "colgado"; en realidad es que nadie lo resetea.
+Problem it fixes (at the code level, not a host-fix): the headed browser in `browser-view` only
+moves when Hermes calls a `browser_*` tool. When one engagement ends and another starts (another
+``/v1/runs``), the agent usually begins with recon via ``kali_run`` before touching the browser —
+so the screen stays showing the SITE OF THE PREVIOUS ENGAGEMENT (e.g. yesterday's target WordPress
+login) while the new one is already underway against a different target. It looks "stuck"; in
+reality nobody is resetting it.
 
-Este watcher sondea las sesiones de ``vulnerator-web`` (misma API que consume la consola) y, en
-cuanto la sesión RAÍZ más activa cambia (un ``/v1/runs`` nuevo = un engagement nuevo; delegar en
-un SUBAGENTE de la MISMA sesión no cuenta como "cambiar de objetivo"), navega todas las pestañas
-de página de Chrome de vuelta a la pantalla de bienvenida neutra. Si Hermes ya ha empezado a
-navegar en el nuevo engagement para cuando esto corre, su propia llamada ``browser_navigate``
-manda igualmente (este reset es solo para no dejar visible el objetivo de otro engagement).
+This watcher polls the ``vulnerator-web`` sessions (same API the console consumes) and, as soon as
+the most active ROOT session changes (a new ``/v1/runs`` = a new engagement; delegating to a
+SUBAGENT of the SAME session does not count as "changing target"), it navigates all of Chrome's
+page tabs back to the neutral welcome screen. If Hermes has already started navigating in the new
+engagement by the time this runs, its own ``browser_navigate`` call wins anyway (this reset only
+exists to avoid leaving another engagement's target visible).
 
-STDLIB pura (sin dependencias, como ``cdp_proxy.py``): HTTP con ``urllib`` y un cliente WebSocket
-mínimo escrito a mano, directo al Chrome local (``127.0.0.1:9223``, no hace falta pasar por el
-proxy de Host — es el mismo contenedor). Best-effort en todo: un fallo aquí nunca debe tumbar el
-proceso ni afectar al uso normal del navegador.
+Pure STDLIB (no dependencies, like ``cdp_proxy.py``): HTTP with ``urllib`` and a minimal hand-written
+WebSocket client, directly to the local Chrome (``127.0.0.1:9223``, no need to go through the Host
+proxy — it is the same container). Best-effort throughout: a failure here must never bring down the
+process or affect normal browser usage.
 """
 
 from __future__ import annotations
@@ -44,11 +44,11 @@ def log(msg: str) -> None:
     sys.stderr.flush()
 
 
-# --------------------------------------------------------------------------- lógica pura (tests)
+# --------------------------------------------------------------------------- pure logic (tests)
 def pick_live_root(sessions: list[dict]) -> str | None:
-    """El id de la sesión RAÍZ (``parent_session_id`` vacío) con la actividad más reciente, o
-    ``None`` si no hay ninguna. Las sesiones hijas (subagentes delegados) no cuentan: delegar
-    dentro del MISMO engagement no es "cambiar de objetivo"."""
+    """The id of the ROOT session (empty ``parent_session_id``) with the most recent activity, or
+    ``None`` if there is none. Child sessions (delegated subagents) do not count: delegating within
+    the SAME engagement is not "changing target"."""
     roots = [s for s in sessions if not s.get("parent_session_id") and s.get("id")]
     if not roots:
         return None
@@ -56,13 +56,13 @@ def pick_live_root(sessions: list[dict]) -> str | None:
 
 
 def should_reset(prev: str | None, cur: str | None, seen_any: bool) -> bool:
-    """True si toca resetear: hay una sesión raíz actual, YA habíamos visto alguna antes (así que
-    esto no es el primer arranque del watcher), y es distinta de la última vista."""
+    """True if a reset is due: there is a current root session, we had ALREADY seen one before (so
+    this is not the watcher's first startup), and it differs from the last one seen."""
     return bool(cur) and seen_any and cur != prev
 
 
 def _ws_frame(payload: bytes) -> bytes:
-    """Frame WebSocket de texto enmascarado (RFC 6455: cliente->servidor exige máscara)."""
+    """Masked text WebSocket frame (RFC 6455: client->server requires a mask)."""
     mask = os.urandom(4)
     masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     n = len(payload)
@@ -83,7 +83,7 @@ def _ws_handshake(path: str, host: str) -> bytes:
     ).encode()
 
 
-# --------------------------------------------------------------------------- red (best-effort)
+# --------------------------------------------------------------------------- network (best-effort)
 def _get_chrome_json(path: str) -> list | dict:
     host = "%s:%d" % (CHROME_HOST, CHROME_PORT)
     req = urllib.request.Request("http://%s%s" % (host, path), headers={"Host": host})
@@ -104,29 +104,29 @@ def _fetch_sessions() -> list[dict]:
 
 
 async def _navigate_page(page_id: str, url: str) -> bool:
-    """WS directo al target de PÁGINA (no al de navegador) y ``Page.navigate``. Devuelve True si
-    Chrome confirmó; cualquier fallo se registra y no propaga (best-effort)."""
+    """Direct WS to the PAGE target (not the browser one) and ``Page.navigate``. Returns True if
+    Chrome confirmed; any failure is logged and not propagated (best-effort)."""
     host = "%s:%d" % (CHROME_HOST, CHROME_PORT)
     path = "/devtools/page/%s" % page_id
     try:
         r, w = await asyncio.open_connection(CHROME_HOST, CHROME_PORT)
     except OSError as exc:
-        log("no se pudo conectar a Chrome para %s: %s" % (page_id, exc))
+        log("could not connect to Chrome for %s: %s" % (page_id, exc))
         return False
     try:
         w.write(_ws_handshake(path, host))
         await w.drain()
         head = await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), timeout=5)
         if b" 101 " not in head.split(b"\r\n", 1)[0]:
-            log("Chrome no confirmó el upgrade WS para %s" % page_id)
+            log("Chrome did not confirm the WS upgrade for %s" % page_id)
             return False
         msg = json.dumps({"id": 1, "method": "Page.navigate", "params": {"url": url}}).encode()
         w.write(_ws_frame(msg))
         await w.drain()
         await asyncio.wait_for(r.read(4096), timeout=6)
         return True
-    except Exception as exc:  # best-effort: nunca tumba el watcher
-        log("fallo navegando %s: %s" % (page_id, exc))
+    except Exception as exc:  # best-effort: never brings down the watcher
+        log("failed navigating %s: %s" % (page_id, exc))
         return False
     finally:
         try:
@@ -136,12 +136,12 @@ async def _navigate_page(page_id: str, url: str) -> bool:
 
 
 async def reset_browser() -> int:
-    """Navega todas las pestañas de PÁGINA (no las internas ``browser_ui``) a la pantalla de
-    bienvenida. Devuelve cuántas se resetearon."""
+    """Navigate all PAGE tabs (not the internal ``browser_ui`` ones) to the welcome screen.
+    Returns how many were reset."""
     try:
         tabs = await asyncio.to_thread(_get_chrome_json, "/json")
     except Exception as exc:
-        log("no se pudo listar pestañas: %s" % exc)
+        log("could not list tabs: %s" % exc)
         return 0
     n = 0
     for t in tabs:
@@ -154,22 +154,22 @@ async def reset_browser() -> int:
 async def watch() -> None:
     last: str | None = None
     seen_any = False
-    log("vigilando cambios de objetivo en %s (sondeo cada %.0fs)" % (GUI_BASE, POLL_S))
+    log("watching for target changes on %s (polling every %.0fs)" % (GUI_BASE, POLL_S))
     while True:
         try:
             sessions = await asyncio.to_thread(_fetch_sessions)
             cur = pick_live_root(sessions)
             if should_reset(last, cur, seen_any):
-                log("objetivo nuevo (sesión %s, antes %s): reiniciando el navegador…" % (cur, last))
+                log("new target (session %s, before %s): resetting the browser…" % (cur, last))
                 n = await reset_browser()
-                log("reset hecho: %d pestaña(s)" % n)
+                log("reset done: %d tab(s)" % n)
             if cur is not None:
                 seen_any = True
             last = cur
         except urllib.error.URLError as exc:
-            log("vulnerator-web aún no responde: %s" % exc)
-        except Exception as exc:  # el watcher no debe morir por un fallo puntual
-            log("sondeo falló: %s" % exc)
+            log("vulnerator-web not responding yet: %s" % exc)
+        except Exception as exc:  # the watcher must not die from a one-off failure
+            log("poll failed: %s" % exc)
         await asyncio.sleep(POLL_S)
 
 

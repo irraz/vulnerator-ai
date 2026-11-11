@@ -14,6 +14,10 @@
   <a href="https://deepwiki.com/irraz/vulnerator-ai">
     <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
   </a>
+  &nbsp;
+  <a href="https://discord.gg/AqDmcXp3c">
+    <img src="https://img.shields.io/badge/discord-join-b03a3a?style=for-the-badge&logo=discord&logoColor=white&labelColor=0a0a0a" alt="Discord">
+  </a>
 </p>
 
 <p align="center">
@@ -113,10 +117,10 @@ to end. To bring everything up from scratch, follow **[`docs/RUNBOOK.md`](docs/R
   (`.cast` / `.md`). Links to the Hermes Dashboard (`:9119`) and Webapp (`:9120`). Observer only.
   Terminal client: `python3 docker/web/vulnerator_watch.py`. See **[`docs/web-gui.md`](docs/web-gui.md)**.
 - **browser-view** — a *visible* Chromium (Xvfb + x11vnc + noVNC) that `playwright-mcp` drives over
-  CDP, so the agent's browsing is shown live in the console's **Pantallas** tab (`:6080`).
+  CDP, so the agent's browsing is shown live in the console's **Screens** tab (`:6080`).
 - **caido-director** — a visible Chromium on the pre-authenticated Caido UI, driven by a controller
   that re-enacts the agent's `caido_*` actions (opens the Replay session, types the HTTPQL filter,
-  opens the packet…), shown live in **Pantallas** (`:6090`).
+  opens the packet…), shown live in **Screens** (`:6090`).
 
 No `api` service: the agent talks directly to the MCPs; the GUI only observes. See
 **[`docs/design.md`](docs/design.md)** for the full architecture and the curated Kali toolset.
