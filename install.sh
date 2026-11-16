@@ -13,6 +13,16 @@
 #   5. Brings the default stack up (WITHOUT the Juice Shop lab) with
 #      docker compose up -d --build.
 #
+# macOS / Apple Silicon (or any Docker WITHOUT buildx/containerd): step 5's
+# `docker compose up -d --build` attempts a MULTI-ARCH build (the compose declares
+# platforms: [linux/arm64, linux/amd64] for publishing) and fails with
+# "Multi-platform build is not supported for the docker driver". Instead run:
+#     ./install.sh --no-up        # writes .env only
+#     ./build-local-images.sh     # builds the 5 images for your local architecture
+#     docker compose up -d --no-build
+# Or enable the containerd image store in Docker Desktop (Settings -> General). See
+# docs/RUNBOOK.md section 4.
+#
 # Usage:
 #   ./install.sh                             # interactive: prompts for the OpenRouter key
 #   OPENROUTER_API_KEY=sk-... ./install.sh   # non-interactive (takes the key from the env)

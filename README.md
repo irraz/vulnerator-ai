@@ -135,6 +135,20 @@ tokens, writes the `.env` from the template, and brings the default stack up.
 ./install.sh
 ```
 
+> **macOS / Apple Silicon (and any Docker without buildx/containerd).** `install.sh` runs
+> `docker compose up -d --build`, which tries a **multi-arch** build (the compose declares
+> `platforms: [linux/arm64, linux/amd64]` for publishing). A default Docker Desktop build fails
+> with *"Multi-platform build is not supported for the docker driver"*. Build the images for your
+> own architecture first, then bring the stack up without rebuilding:
+>
+> ```sh
+> ./build-local-images.sh                       # builds the 5 images for your local arch
+> docker compose up -d --no-build               # or: ./install.sh --no-up  (writes .env only)
+> ```
+>
+> Alternatively, enable the **containerd image store** in Docker Desktop (Settings → General),
+> which supports multi-arch builds. See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §4.
+
 Then open the interactive TUI:
 
 ```sh

@@ -16,7 +16,7 @@ director** (`caido-director`) and Hermes **v0.23.0**. Written for the operator.
 | `ooda-agent` | `nousresearch/hermes-agent:v0.23.0` | 8642 (API), 9119 (dashboard), 9120 (webapp) | The OODA brain (Hermes). |
 | `playwright-mcp` | `mcr.microsoft.com/playwright/mcp` | — (internal) | The agent's browser. **Drives the `browser-view` browser over CDP.** |
 | `vulnerator-mcp` | `vulnerator-ai-mcp:dev` (build) | — (internal) | MCP front door over the runs API. |
-| `vulnerator-web` | `vulnerator-ai-web:dev` (build) | **9100** (GUI), 7000 (Caido pre-auth) | **The web console.** It also serves the Caido UI pre-authenticated as a guest. |
+| `vulnerator-web` | `vulnerator-ai-web:dev` (build) | **9100** (GUI), 7010 (Caido pre-auth) | **The web console.** It also serves the Caido UI pre-authenticated as a guest. |
 | `browser-view` | `vulnerator-ai-browser-view:dev` (build) | 6080 (noVNC) | **Visible** Chromium the agent drives; watched over noVNC in the console. |
 | `caido-director` | `vulnerator-ai-caido-director:dev` (build) | 6090 (noVNC) | Re-stages in the Caido UI what the agent does with it. |
 | `caido` + `caido-init` | `caido/caido:0.59.0` | — (internal) | Web toolkit (proxy/Replay/Automate/Intercept). |
