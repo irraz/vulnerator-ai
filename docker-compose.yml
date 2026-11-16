@@ -459,7 +459,7 @@ services:
       HERMES_DASHBOARD_INTERNAL_URL: "http://ooda-agent:9119/"
       HERMES_WEBAPP_INTERNAL_URL: "http://ooda-agent:9120/"
       # Live screen: Caido's web UI (the port the caido service publishes above).
-      CAIDO_UI_PUBLIC_PORT: "${CAIDO_HOST_PORT:-7000}"
+      CAIDO_UI_PUBLIC_PORT: "${CAIDO_HOST_PORT:-7010}"
       CAIDO_UI_INTERNAL_URL: "http://caido:8080/"
       # INTERNAL port where this process serves the pre-authenticated Caido UI (published above).
       CAIDO_PROXY_PORT: "7001"
@@ -470,7 +470,7 @@ services:
     ports:
       - "${VULNERATOR_WEB_HOST_PORT:-9100}:9100"
       # Pre-authenticated (guest) Caido UI served by vulnerator-web -> host CAIDO_HOST_PORT.
-      - "${CAIDO_HOST_PORT:-7000}:7001"
+      - "${CAIDO_HOST_PORT:-7010}:7001"
     volumes:
       # Trace store (SQLite) + recorded PoCs. NAMED so history survives recreates.
       - vulnerator-web-data:/data
@@ -499,8 +499,8 @@ services:
     # playwright-mcp over the internal network. Only noVNC (:6080) goes to the host, opt-in and documented below.
     # By default noVNC is READ-ONLY (BROWSER_VIEW_VIEWONLY=1): the audience watches, doesn't touch.
     build:
-      context: .
-      dockerfile: docker/browser-view/Dockerfile
+      context: docker/browser-view
+      dockerfile: Dockerfile
       platforms:
         - linux/arm64
         - linux/amd64
@@ -539,8 +539,8 @@ services:
     # noVNC driven by a controller (Playwright/CDP) that follows vulnerator-web's stream.
     # Observer: it only mirrors; it does not launch or direct the agent. Only noVNC (:6090) goes to the host.
     build:
-      context: .
-      dockerfile: docker/caido-director/Dockerfile
+      context: docker/caido-director
+      dockerfile: Dockerfile
       platforms:
         - linux/arm64
         - linux/amd64
