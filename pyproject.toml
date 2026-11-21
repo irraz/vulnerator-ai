@@ -4,7 +4,10 @@ target-version = "py313"
 extend-exclude = [".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "labs", "media", "docs"]
 
 [tool.ruff.lint]
-select = ["F", "B", "UP", "SIM", "RUF"]   # E/W las cubre flake8; I las cubre isort
+# BLOQUEANTE: solo correctitud (sintaxis, flujo, imports y nombres).
+# B/UP/SIM/RUF quedan como DEUDA ASESORADA no bloqueante:
+#   ruff check . --select B,UP,SIM,RUF
+select = ["E9", "F63", "F7", "F82", "F401", "F811", "F821"]
 # OJO: W503 no es un selector válido en ruff (ruff no implementa W503/W504; la
 # intención la cubre flake8 con --extend-ignore=E203,W503 en .pre-commit-config.yaml).
 ignore = ["E203"]

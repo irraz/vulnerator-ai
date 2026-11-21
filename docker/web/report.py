@@ -2,7 +2,6 @@
 with the exact command, evidence output and raw VERBATIM of each finding."""
 from __future__ import annotations
 import html as _html
-import json
 import re
 import datetime
 
