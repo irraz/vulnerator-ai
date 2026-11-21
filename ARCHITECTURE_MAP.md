@@ -443,3 +443,7 @@ bash scripts/run_tests.sh                             # runner shell de las 6 su
   de este andamiaje.
 - `detect-secrets` no escanea `.env.example` (y el hook lo excluye): si se volcara un
   secreto real ahí, pasaría.
+- La regla anti-comentarios (`scripts/check_quick_fix_comments.py`) detecta media línea
+  solo en `.py` y solo sobre tokens `COMMENT` de `tokenize`; en `.sh/.yaml/.toml` la media
+  línea queda fuera de ámbito por decisión explícita (sin parser no hay forma fiable de
+  distinguir comentario de literal, y el gate es bloqueante).
