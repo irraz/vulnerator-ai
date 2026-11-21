@@ -4,3 +4,11 @@ PyYAML>=6,<7
 ruff>=0.9,<1
 mypy>=1.13,<2
 types-PyYAML>=6,<7
+
+# Deps que las suites de docker/mcp y docker/web necesitan en el interprete de test.
+mcp>=1.28,<2
+anyio>=4.15.1
+httpx>=0.28.1,<1
+starlette>=0.52.1,<1
+uvicorn[standard]>=0.54.0,<1
+websockets>=13.0,<16
