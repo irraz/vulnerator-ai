@@ -145,7 +145,7 @@ def _record_meta(
 
 
 def _stage_stream(
-    execution_id: str, name: str, chunks: Iterable[bytes]
+    execution_id: str, name: str, chunks: Iterable[bytes | str]
 ) -> tuple[int, str]:
     """Escribe un stream de chunks al destino confinado (tmp+replace) -> (size, sha256).
 
