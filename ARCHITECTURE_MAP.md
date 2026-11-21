@@ -288,24 +288,22 @@ Seis suites, una por componente. Se corren con `bash scripts/run_tests.sh`
 | --- | --- | --- |
 | `agent-ooda/tests` | contratos declarativos de `config.yaml` + compose | `agent-ooda/tests/test_profile_kali_direct.py:1` |
 | `docker/kali/tests` | runtime kali-mcp (streaming, scope, store, tools) | `docker/kali/tests/test_tool_streaming.py:1` |
-| `docker/mcp/tests` | front door (cliente :8642 + tools, con `importorskip("mcp")`) | `docker/mcp/tests/test_server_tools.py:29` |
+| `docker/mcp/tests` | front door (cliente :8642 + tools, con `importorskip("mcp.server.fastmcp")`) | `docker/mcp/tests/test_server_tools.py:30` |
 | `docker/web/tests` | consola web (ingest, event model, PoC, watch) | `docker/web/tests/test_ingest_app.py:1` |
 | `docker/browser-view/tests` | proxy CDP y reset del browser visible | `docker/browser-view/tests/test_cdp_proxy.py:1` |
-| `scripts/tests` | andamiaje (la añade `feat/base-linters`; ausente en esta rama) | `scripts/tests/` |
+| `scripts/tests` | andamiaje (regla anti-parche y tests del humo) | `scripts/tests/` |
 
 - Los tests de agent-ooda resuelven las rutas desde la raíz con fixtures
   (`agent-ooda/tests/conftest.py:1`) y configuran pytest en
   `agent-ooda/tests/pyproject.toml:1`.
 - Los tests unitarios de lógica pura corren **sin** el SDK `mcp`
-  (`docker/mcp/tests/test_server_tools.py:29` lo omite si falta).
+  (`docker/mcp/tests/test_server_tools.py:30` lo omite si falta).
 - El gate bloqueante del andamiaje es `🧱 Base scaffolding`
   (`.github/workflows/ci.yml:1`): smoke estático + `docker compose config` +
   anti-comentarios de parche + type-check (mypy) + las 6 suites.
-- Estado en esta rama: `docker/kali/tests`, `docker/mcp/tests`, `docker/web/tests` y
-  `docker/browser-view/tests` están en verde; `agent-ooda/tests` tiene **4 tests
-  declarativos desactualizados** (esperan una whitelist de 10 tools y 3 servicios, y el
-  perfil/compose ya son 21 tools y 9 servicios). Es un desfase conocido entre el mapa y
-  esos tests, no un fallo del runtime; el smoke lo reporta por separado con `--tests`.
+- En el árbol integrado las 6 suites están en verde; el recuento exacto depende del
+  entorno de test y lo reporta `scripts/smoke.py --quick`. Los 4 tests declarativos que
+  antes fallaban quedaron actualizados al contrato v2.0.0 en `feat/base-declared-contracts`.
 - El detalle de las 6 suites y el comando del smoke está en el **Anexo C** (sección 13).
 
 ## 10. Entorno dev
@@ -318,6 +316,10 @@ Seis suites, una por componente. Se corren con `bash scripts/run_tests.sh`
   (`scripts/run_tests.sh:1`); las dependencias de producto están fijadas en
   `docker/kali/requirements.txt:1`, `docker/mcp/requirements.txt:1` y
   `docker/web/requirements.txt:1`.
+- El pin de test es `mcp>=1.28,<2`. Con `mcp` 2.x, `FastMCP` desaparece y
+  `pytest.importorskip("mcp.server.fastmcp")` omite en silencio 13 tests:
+  `docker/kali/tests/test_plugin_introspection.py` (5) y
+  `docker/mcp/tests/test_server_tools.py` (8).
 - Imágenes propias: `docker/kali/Dockerfile:1`, `docker/mcp/Dockerfile:1`,
   `docker/web/Dockerfile:1`, `docker/browser-view/Dockerfile:1`,
   `docker/caido-director/Dockerfile:1`.
@@ -401,8 +403,7 @@ Formato: `| clave | docker-compose.yml:línea |`. Fuente: `docker-compose.yml` p
 
 ## 13. Anexo C — Tests y verificación
 
-Seis suites: las 5 originales más `scripts/tests` (que añade la rama `feat/base-linters`;
-en esta rama aún no existe y el smoke la reporta con ⚠️).
+Seis suites: las 5 originales más `scripts/tests`.
 
 | # | Suite | Tipo | Referencia |
 | --- | --- | --- | --- |
@@ -411,7 +412,7 @@ en esta rama aún no existe y el smoke la reporta con ⚠️).
 | 3 | `docker/mcp/tests` | front door sobre :8642 | `docker/mcp/tests/test_server_tools.py:1` |
 | 4 | `docker/web/tests` | consola web | `docker/web/tests/test_ingest_app.py:1` |
 | 5 | `docker/browser-view/tests` | proxy CDP / reset | `docker/browser-view/tests/test_cdp_proxy.py:1` |
-| 6 | `scripts/tests` | andamiaje (feat/base-linters) | `scripts/tests/` |
+| 6 | `scripts/tests` | andamiaje (regla anti-parche y tests del humo) | `scripts/tests/` |
 
 Comando del smoke (`scripts/smoke.py:1`):
 
@@ -426,5 +427,18 @@ bash scripts/run_tests.sh                             # runner shell de las 6 su
 - El gate bloqueante es `🧱 Base scaffolding` (`.github/workflows/ci.yml:1`): corre
   `--static`, `docker compose config --quiet`, `scripts/check_quick_fix_comments.py --all`,
   type-check (mypy) y `--quick` (las 6 suites).
-- El exit code del smoke es no-cero si **cualquier** suite falla; en esta rama
-  `agent-ooda/tests` aporta 4 failed declarativos (documentado, no oculto).
+- El exit code del smoke es no-cero si **cualquier** suite falla.
+
+## 14. Deuda conocida
+
+- Reformateo pendiente: `black` (55 ficheros), `isort` (13) y `prettier` (46) para el
+  `chore(style)`; no cambian comportamiento.
+- `ruff` con `B/UP/SIM/RUF` queda como asesora no bloqueante (`pyproject.toml:10`);
+  el gate bloqueante solo selecciona correctitud (`E9/F63/F7/F82/F401/F811/F821`).
+- `hadolint` exige Docker y no corre en el gate estático.
+- `pytest` desde la raíz sin `--import-mode=importlib` rompe (9 errores de colección
+  por colisión de los paquetes `tests` de los cuatro módulos); el gate ejecuta las 6
+  suites por separado, que es la vía soportada. Es deuda pre-existente de `master`, no
+  de este andamiaje.
+- `detect-secrets` no escanea `.env.example` (y el hook lo excluye): si se volcara un
+  secreto real ahí, pasaría.

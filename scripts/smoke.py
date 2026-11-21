@@ -51,8 +51,8 @@ SDK_FREE_IMPORT = [
 ]
 
 # Las suites y las dependencias que cada una necesita en el interprete de test.
-# `scripts/tests` la anade la rama feat/base-linters; si aun no existe en esta rama
-# se reporta con ⚠️ (una suite ausente no es una suite en rojo).
+# Si una suite no existe en este worktree se reporta con ⚠️ (una suite ausente no
+# es una suite en rojo).
 SUITES: list[tuple[str, list[str]]] = [
     ("agent-ooda/tests", ["pytest", "pyyaml"]),
     ("docker/kali/tests", ["pytest"]),
@@ -74,6 +74,13 @@ SUITES: list[tuple[str, list[str]]] = [
 
 EXPECTED_MCP_SERVERS = ["kali", "playwright"]
 EXPECTED_TOOLSETS = ["kali", "playwright", "todo", "kanban"]
+
+# Las 14 secciones numeradas del mapa: el gate exige que existan, una sola vez y
+# en orden (renombrar una seccion no puede pasar desapercibido).
+REQUIRED_SECTIONS = [f"## {n}." for n in range(1, 15)]
+
+# Cadenas de deriva que el mapa ya no debe contener (ramas y recuentos superados).
+FORBIDDEN_DRIFT = ("ausente en esta rama", "5 suites", "4 tests desactualizados")
 EXPECTED_COMPOSE_SERVICES = [
     "kali",
     "ooda-agent",
@@ -381,39 +388,51 @@ def check_tools(rep: Report) -> None:
 
 ANNEX_A_ROW = re.compile(r"^\|\s*`([a-z_]+)`\s*\|\s*`([^`:]+):(\d+)`\s*\|\s*$")
 ANNEX_B_ROW = re.compile(r"^\|\s*`([A-Za-z0-9._-]+)`\s*\|\s*`([^`:]+):(\d+)`\s*\|\s*$")
+ANNEX_C_ROW = re.compile(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|")
+
+
+def _section_lines(lines: list[str], start_marker: str, end_marker: str) -> list[str]:
+    """Lineas de una seccion: desde start_marker (incluida) hasta end_marker (no)."""
+    try:
+        i = next(n for n, line in enumerate(lines) if line.startswith(start_marker))
+    except StopIteration:
+        return []
+    j = len(lines)
+    for n in range(i + 1, len(lines)):
+        if lines[n].startswith(end_marker):
+            j = n
+            break
+    return lines[i:j]
 
 
 def _annex_tables(
     text: str,
-) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
-    """Devuelve (filas Anexo A, filas Anexo B) como (clave, ruta, linea)."""
+) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]], list[str]]:
+    """Devuelve (filas Anexo A, filas Anexo B, suites del Anexo C).
+
+    Anexo A/B: (clave, ruta, linea). Anexo C: nombre de cada suite en orden.
+    """
     lines = text.splitlines()
 
-    def section(start_marker: str, end_marker: str) -> list[str]:
-        try:
-            i = next(n for n, l in enumerate(lines) if l.startswith(start_marker))
-        except StopIteration:
-            return []
-        j = len(lines)
-        for n in range(i + 1, len(lines)):
-            if lines[n].startswith(end_marker):
-                j = n
-                break
-        return lines[i:j]
-
     a_rows: list[tuple[str, str, int]] = []
-    for line in section("## 11.", "## 12."):
+    for line in _section_lines(lines, "## 11.", "## 12."):
         m = ANNEX_A_ROW.match(line.strip())
         if m:
             a_rows.append((m.group(1), m.group(2), int(m.group(3))))
 
     b_rows: list[tuple[str, str, int]] = []
-    for line in section("## 12.", "## "):
+    for line in _section_lines(lines, "## 12.", "## "):
         m = ANNEX_B_ROW.match(line.strip())
         if m:
             b_rows.append((m.group(1), m.group(2), int(m.group(3))))
 
-    return a_rows, b_rows
+    c_rows: list[str] = []
+    for line in _section_lines(lines, "## 13.", "## 14."):
+        m = ANNEX_C_ROW.match(line.strip())
+        if m:
+            c_rows.append(m.group(1))
+
+    return a_rows, b_rows, c_rows
 
 
 def check_mapa(rep: Report) -> None:
@@ -426,7 +445,7 @@ def check_mapa(rep: Report) -> None:
         return
 
     text = MAP.read_text(encoding="utf-8")
-    a_rows, b_rows = _annex_tables(text)
+    a_rows, b_rows, c_rows = _annex_tables(text)
 
     kali_ast = dict(ast_tool_decorations(KALI_SERVER))
     vuln_ast = dict(ast_tool_decorations(VULN_SERVER))
@@ -520,6 +539,50 @@ def check_mapa(rep: Report) -> None:
         rep.ok(section, "Anexo A/B: todas las rutas citadas existen (test -e)")
     else:
         rep.bad(section, f"Anexo A/B: rutas rotas {sorted(set(broken))}")
+
+    # --- secciones numeradas: 14, una sola vez y en orden --------------------
+    found_sections = [int(m.group(1)) for m in re.finditer(r"^## (\d+)\.", text, re.M)]
+    expected_sections = list(range(1, len(REQUIRED_SECTIONS) + 1))
+    if found_sections == expected_sections:
+        rep.ok(
+            section,
+            f"mapa: {len(expected_sections)} secciones numeradas, una sola vez y en orden",
+        )
+    else:
+        rep.bad(
+            section,
+            f"mapa: secciones encontradas {found_sections} (esperadas {expected_sections})",
+        )
+
+    # --- Anexo C: filas == suites reales ------------------------------------
+    suite_names = [name for name, _deps in SUITES]
+    if len(c_rows) == len(SUITES) and set(c_rows) == set(suite_names):
+        rep.ok(section, f"Anexo C: {len(c_rows)} filas == {len(SUITES)} suites de SUITES")
+    else:
+        rep.bad(
+            section,
+            f"Anexo C: {len(c_rows)} filas ({c_rows}) vs SUITES {suite_names}",
+        )
+
+    # --- deriva prohibida ----------------------------------------------------
+    drift = [marker for marker in FORBIDDEN_DRIFT if marker in text]
+    if not drift:
+        rep.ok(section, "mapa: sin cadenas de deriva prohibidas")
+    else:
+        rep.bad(section, f"mapa: cadenas de deriva prohibidas {drift}")
+
+    # --- seccion 14: deuda conocida declarada --------------------------------
+    deuda = "\n".join(_section_lines(text.splitlines(), "## 14.", "## 15."))
+    if "## 14. Deuda conocida" in text and (
+        any(tok in deuda for tok in ("black", "isort", "prettier"))
+        or "no hay deuda" in deuda
+    ):
+        rep.ok(section, "mapa: '## 14. Deuda conocida' presente y con deuda declarada")
+    else:
+        rep.bad(
+            section,
+            "mapa: falta '## 14. Deuda conocida' o no declara el reformateo pendiente",
+        )
 
     if "scripts/smoke.py" in text:
         rep.ok(section, "el mapa enlaza scripts/smoke.py")
@@ -631,9 +694,7 @@ def check_tests(rep: Report) -> None:
     for suite, deps in SUITES:
         if not (ROOT / suite).is_dir():
             absent += 1
-            rep.warn(
-                section, f"{suite}: no existe en esta rama (la anade feat/base-linters)"
-            )
+            rep.warn(section, f"{suite}: no existe en este worktree")
             continue
         ran += 1
         rc, counts, output = run_suite(suite, deps, uv)
@@ -664,10 +725,7 @@ def check_tests(rep: Report) -> None:
                 print(f"[{section}]     {line}")
 
     if any_failed:
-        rep.warn(
-            section,
-            "hay suites en rojo (en esta rama agent-ooda/tests tiene 4 tests declarativos desactualizados)",
-        )
+        rep.warn(section, "hay suites en rojo; volcar el resumen de cada suite")
     elif absent:
         rep.ok(section, f"{ran} suites pasan; {absent} suite(s) ausentes en esta rama")
     else:
