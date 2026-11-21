@@ -4,8 +4,6 @@
 # Uso:
 #   - Automático: Se ejecuta en cada git commit
 #   - Manual: pre-commit run --all-files
-#
-# Para saltar hooks (emergencias): git commit --no-verify
 
 repos:
   # ============================================================================
@@ -31,6 +29,7 @@ repos:
       # Verificar sintaxis YAML
       - id: check-yaml
         args: ['--unsafe']  # Permite tags de Docker Compose
+        additional_dependencies: [ruamel.yaml]
         
       # Verificar sintaxis JSON
       - id: check-json
@@ -47,6 +46,7 @@ repos:
       # Verificar formato de archivos Docker Compose
       - id: check-yaml
         files: docker-compose.*\.yml$
+        additional_dependencies: [ruamel.yaml]
 
   # ============================================================================
   # SEGURIDAD - DETECCIÓN DE SECRETOS
@@ -55,15 +55,17 @@ repos:
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: 
+        args:
           - '--baseline'
           - '.secrets.baseline'
+        additional_dependencies: [requests]
         exclude: |
           (?x)^(
             \.env\.example|
             \.pre-commit-config\.yaml|
             package-lock\.json|
-            .*\.lock
+            .*\.lock|
+            docs/example-findings\.jsonl
           )$
 
   # ============================================================================

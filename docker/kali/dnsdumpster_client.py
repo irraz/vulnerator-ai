@@ -39,8 +39,8 @@ from typing import Any
 API_BASE = os.environ.get("DNSDUMPSTER_API_BASE", "https://api.dnsdumpster.com").rstrip(
     "/"
 )
-API_KEY_HEADER = "X-API-Key"
-API_KEY_ENV = "DNSDUMPSTER_API_KEY"
+API_KEY_HEADER = "X-API-Key"  # pragma: allowlist secret
+API_KEY_ENV = "DNSDUMPSTER_API_KEY"  # pragma: allowlist secret
 
 # Rate limit oficial: 1 request / 2s. Se respeta con margen para no comernos un 429 en
 # ráfagas (abanico de páginas o de CIDRs). Overridable por si la cuenta cambia de plan.

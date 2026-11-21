@@ -374,7 +374,7 @@ def test_send_request_flujo_completo_correlaciona_respuesta(monkeypatch):
             "request(id": {
                 "status": "ok",
                 "data": {
-                    "request": {"response": {"raw": "SFRUUC8xLjEgMjAwIE9LDQoNCmhvbGE="}}
+                    "request": {"response": {"raw": "SFRUUC8xLjEgMjAwIE9LDQoNCmhvbGE="}}  # pragma: allowlist secret
                 },
             },
         }
