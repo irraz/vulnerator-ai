@@ -238,7 +238,7 @@ Smoke test del worktree (contratos YAML, tools por AST, anexos del mapa e import
 env -u PYTHONPATH python3 scripts/smoke.py --check
 ```
 
-Las 5 suites de tests, aparte: `env -u PYTHONPATH python3 scripts/smoke.py --tests` (o
+Las 6 suites de tests, aparte: `env -u PYTHONPATH python3 scripts/smoke.py --tests` (o
 `bash scripts/run_tests.sh`).
 
 ## Models

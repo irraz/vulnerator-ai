@@ -40,7 +40,8 @@ main
   ```
 
   > `🧱 Base scaffolding` (`.github/workflows/ci.yml`) es el gate bloqueante: smoke
-  > estático + `docker compose config` + pre-commit. El resto del pipeline legacy es
+  > estático + `docker compose config` + regla anti-comentarios + ruff + mypy + las 6
+  > suites. El resto del pipeline legacy es
   > informativo (no bloquea el merge).
 
 **Require conversation resolution before merging**

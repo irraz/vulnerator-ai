@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runner de las 5 suites de tests del repo (una por componente).
+# Runner de las 6 suites de tests del repo (una por componente).
 #
 #   bash scripts/run_tests.sh
 #
@@ -91,9 +91,9 @@ echo "suites en rojo  : $failed_suites"
 echo "exit code agregado: $total_rc"
 
 if [ "$failed_suites" -ne 0 ]; then
-  echo "⚠️  hay suites en rojo (en esta rama agent-ooda/tests tiene 4 tests declarativos desactualizados)"
+  echo "⚠️  hay suites en rojo; volcar el resumen de cada suite"
   exit 1
 fi
 
-echo "✅ las 5 suites pasan"
+echo "✅ las 6 suites pasan"
 exit 0
