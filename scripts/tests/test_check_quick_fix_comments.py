@@ -102,6 +102,18 @@ def test_scan_file_ignores_clean_file(tmp_path):
     assert cfc.scan_file(target) == []
 
 
+def test_trailing_comment_is_flagged(tmp_path):
+    target = tmp_path / "trailing.py"
+    target.write_text("x = 1  # " + "TODO" + ": arreglar\n", encoding="utf-8")
+    assert cfc.scan_file(target) == [(1, "x = 1  # " + "TODO" + ": arreglar")]
+
+
+def test_trailing_comment_lowercase_is_not_flagged(tmp_path):
+    target = tmp_path / "trailing_clean.py"
+    target.write_text("x = 1  # todo el store\n", encoding="utf-8")
+    assert cfc.scan_file(target) == []
+
+
 def test_repo_is_clean():
     """El repo no debe contener ningun comentario de parche/atajo/deuda."""
     proc = subprocess.run(

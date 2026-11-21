@@ -42,6 +42,8 @@ _MARKER_ALT = "|".join(re.escape(m) for m in sorted(MARKERS, key=len, reverse=Tr
 COMMENT_RE = re.compile(r"^\s*(?:#|//|/\*|\*|<!--)\s*(?:" + _MARKER_ALT + r")\s*[:!]")
 # El marcador es el primer token de un docstring y lleva ':' o '!' despues.
 DOCSTRING_RE = re.compile(r"^\s*(?:\"\"\"|''')\s*(?:" + _MARKER_ALT + r")\s*[:!]")
+# Comentario de media linea: codigo antes del '#' y marcador con ':' o '!'.
+TRAILING_RE = re.compile(r"\S\s+#\s*(?:" + _MARKER_ALT + r")\s*[:!]")
 
 CODE_SUFFIXES = {
     ".py",
@@ -115,7 +117,11 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
         print(f"aviso: no se pudo leer {path}: {exc}", file=sys.stderr)
         return found
     for lineno, line in enumerate(lines, start=1):
-        if COMMENT_RE.match(line) or DOCSTRING_RE.match(line):
+        if (
+            COMMENT_RE.match(line)
+            or DOCSTRING_RE.match(line)
+            or TRAILING_RE.search(line)
+        ):
             found.append((lineno, line.strip()))
     return found
 
