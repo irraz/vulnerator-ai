@@ -116,7 +116,7 @@ def load_scope(path: Optional[str] = None) -> Optional[ScopeConfig]:
       - Si existe -> lo parsea con ``json.loads`` y delega en ``parse_scope``.
       - Si existe pero es ilegible/JSON inválido -> ``ScopeError`` (fail-closed de config).
     """
-    scope_path = path or os.environ.get("SCOPE_FILE", DEFAULT_SCOPE_FILE)
+    scope_path: str = path or os.environ.get("SCOPE_FILE") or DEFAULT_SCOPE_FILE
     if not os.path.isfile(scope_path):
         return None
     try:

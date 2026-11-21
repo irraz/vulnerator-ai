@@ -4,8 +4,6 @@
 # Uso:
 #   - Automático: Se ejecuta en cada git commit
 #   - Manual: pre-commit run --all-files
-#
-# Para saltar hooks (emergencias): git commit --no-verify
 
 repos:
   # ============================================================================
@@ -31,6 +29,7 @@ repos:
       # Verificar sintaxis YAML
       - id: check-yaml
         args: ['--unsafe']  # Permite tags de Docker Compose
+        additional_dependencies: [ruamel.yaml]
         
       # Verificar sintaxis JSON
       - id: check-json
@@ -47,6 +46,7 @@ repos:
       # Verificar formato de archivos Docker Compose
       - id: check-yaml
         files: docker-compose.*\.yml$
+        additional_dependencies: [ruamel.yaml]
 
   # ============================================================================
   # SEGURIDAD - DETECCIÓN DE SECRETOS
@@ -55,15 +55,17 @@ repos:
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: 
+        args:
           - '--baseline'
           - '.secrets.baseline'
+        additional_dependencies: [requests]
         exclude: |
           (?x)^(
             \.env\.example|
             \.pre-commit-config\.yaml|
             package-lock\.json|
-            .*\.lock
+            .*\.lock|
+            docs/example-findings\.jsonl
           )$
 
   # ============================================================================
@@ -118,6 +120,29 @@ repos:
     hooks:
       - id: isort
         args: ['--profile', 'black']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
+    hooks:
+      - id: ruff
+        args: ['--config=pyproject.toml']
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args: ['--config-file=pyproject.toml']
+        files: \.py$
+        exclude: (^|/)tests/
+
+  - repo: local
+    hooks:
+      - id: quick-fix-comments
+        name: Bloquea comentarios de parche/atajo/deuda
+        entry: python3 scripts/check_quick_fix_comments.py
+        language: system
+        files: \.(py|sh|bash|js|ts|yml|yaml|toml|ini|cfg|conf|dockerfile|mk|make)$
+        pass_filenames: true
 
   # ============================================================================
   # MARKDOWN Y DOCUMENTACIÓN

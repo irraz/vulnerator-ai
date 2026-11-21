@@ -162,7 +162,8 @@ def parse_tool_calls(raw: Any) -> list[dict[str, Any]]:
     for i, tc in enumerate(raw):
         if not isinstance(tc, dict):
             continue
-        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        raw_fn = tc.get("function")
+        fn: dict[str, Any] = raw_fn if isinstance(raw_fn, dict) else {}
         name = fn.get("name") or tc.get("name") or ""
         args_raw = fn.get("arguments", tc.get("arguments", tc.get("args", tc.get("input"))))
         call_id = tc.get("id") or tc.get("call_id") or tc.get("tool_call_id") or ""
@@ -192,6 +193,8 @@ def summarize_args(args: Any) -> str:
 
 def _ts(message: dict[str, Any]) -> float:
     ts = message.get("timestamp")
+    if not isinstance(ts, (int, float, str)):
+        return 0.0
     try:
         return float(ts)
     except (TypeError, ValueError):
@@ -304,7 +307,11 @@ def tool_output_text(text: str) -> str:
     if isinstance(doc, dict):
         if isinstance(doc.get("output"), str):
             return doc["output"]
-        parts = [doc.get(k) for k in ("stdout", "stderr") if isinstance(doc.get(k), str) and doc.get(k)]
+        parts: list[str] = []
+        for key in ("stdout", "stderr"):
+            value = doc.get(key)
+            if isinstance(value, str) and value:
+                parts.append(value)
         if parts:
             return "\n".join(parts)
     return text or ""

@@ -20,7 +20,6 @@ No importan `mcp`/`anyio`: sólo librería estándar + pytest (patrón de
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
