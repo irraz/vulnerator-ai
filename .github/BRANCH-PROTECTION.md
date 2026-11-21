@@ -29,7 +29,7 @@ main
 - ☑️ Require branches to be up to date before merging
 - **Status checks que deben pasar** (búscalos y selecciónalos):
   ```
-  ☑️ 🧱 Base scaffolding   <-- GATE BLOQUEANTE del andamiaje (ci.yml)
+  ☑️ 🧱 Base scaffolding   <-- BLOCKING gate for the scaffolding (ci.yml)
   ☑️ TruffleHog - Detección de Secretos
   ☑️ CodeQL - Análisis de Código  
   ☑️ Python Linting
@@ -39,10 +39,10 @@ main
   ☑️ Dockerfile Linting
   ```
 
-  > `🧱 Base scaffolding` (`.github/workflows/ci.yml`) es el gate bloqueante: smoke
-  > estático + `docker compose config` + regla anti-comentarios + ruff + mypy + las 6
-  > suites. El resto del pipeline legacy es
-  > informativo (no bloquea el merge).
+  > `🧱 Base scaffolding` (`.github/workflows/ci.yml`) is the blocking gate: static
+  > smoke + `docker compose config` + quick-fix comment rule + ruff + mypy + the 6
+  > suites. The rest of the legacy pipeline is
+  > informative (it does not block the merge).
 
 **Require conversation resolution before merging**
 - ☑️ Todos los comentarios deben resolverse antes del merge

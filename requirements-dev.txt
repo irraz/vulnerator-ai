@@ -1,11 +1,11 @@
-# Fuente de verdad del venv de dev; los pins de imagen siguen en docker/*/requirements.txt.
+# Source of truth for the dev venv; the image pins stay in docker/*/requirements.txt.
 pytest>=8,<10
 PyYAML>=6,<7
 ruff>=0.9,<1
 mypy>=1.13,<2
 types-PyYAML>=6,<7
 
-# Deps que las suites de docker/mcp y docker/web necesitan en el interprete de test.
+# Deps that the docker/mcp and docker/web suites need in the test interpreter.
 mcp>=1.28,<2
 anyio>=4.15.1
 httpx>=0.28.1,<1

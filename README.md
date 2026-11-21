@@ -232,13 +232,13 @@ The README is intentionally short. The detail lives under [`docs/`](docs/):
 | **Verifiable architecture map** (components, 21+6 MCP tools, compose, tests — every claim with `file:line`) | [`ARCHITECTURE_MAP.md`](ARCHITECTURE_MAP.md) |
 | Sample redacted deliverable | [`docs/example-report.md`](docs/example-report.md) |
 
-Smoke test del worktree (contratos YAML, tools por AST, anexos del mapa e imports SDK-free):
+Worktree smoke test (YAML contracts, tools by AST, map annexes and SDK-free imports):
 
 ```sh
 env -u PYTHONPATH python3 scripts/smoke.py --check
 ```
 
-Las 6 suites de tests, aparte: `env -u PYTHONPATH python3 scripts/smoke.py --tests` (o
+The 6 test suites, separately: `env -u PYTHONPATH python3 scripts/smoke.py --tests` (or
 `bash scripts/run_tests.sh`).
 
 ## Models

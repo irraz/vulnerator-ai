@@ -1,7 +1,7 @@
-"""Tests de la regla anti-comentarios de parche rapido.
+"""Tests for the anti-quick-fix-comment rule.
 
-Corpus de falsos positivos (espanol y marcadores sin separador) y corpus de
-marcadores inyectados, mas un barrido real del repo que debe salir limpio.
+Corpus of false positives (Spanish and markers without a separator) and a corpus
+of injected markers, plus a real sweep of the repo that must come out clean.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ def _load_checker():
 
 cfc = _load_checker()
 
-# Los marcadores se construyen por concatenacion para que este propio fichero no
-# contenga jamas un marcador con separador y el barrido del repo salga limpio.
+# The markers are built by concatenation so that this very file never contains a
+# marker with a separator and the repo sweep comes out clean.
 _MARKERS = [
     "TODO",
     "FIXME",
@@ -43,7 +43,7 @@ _MARKERS = [
     "TRAMP",
 ]
 
-# Comentarios que NO son deuda: el marcador no abre la nota o no lleva separador.
+# Comments that are NOT debt: the marker does not open the note or has no separator.
 FALSE_POSITIVES = [
     "# todo el store",
     "# todo simulado",
@@ -56,14 +56,14 @@ FALSE_POSITIVES = [
     "# temporal mientras tanto",
     '"""Lee TODO el store"""',
     "// trabajo en torno al problema",
-    # Un '#' dentro de un literal NO es un comentario: no se marca.
+    # A '#' inside a literal is NOT a comment: it is not flagged.
     's = "error # TODO: fix"',
     'x = f"{y} # FIXME: z"',
     'key: "value # TODO: x"',
     'echo "a # FIXME: b"',
 ]
 
-# Comentarios que SI son deuda: el marcador abre la nota y lleva ':' o '!'.
+# Comments that ARE debt: the marker opens the note and is followed by ':' or '!'.
 TRUE_POSITIVES = [
     "# " + "TODO" + ":",
     "# " + "FIXME" + ":",
@@ -120,7 +120,7 @@ def test_trailing_comment_lowercase_is_not_flagged(tmp_path):
 
 
 def test_trailing_marker_inside_string_is_not_flagged(tmp_path):
-    """Un '#' en un literal no es comentario: tokenize no lo emite como COMMENT."""
+    """A '#' in a literal is not a comment: tokenize does not emit it as COMMENT."""
     target = tmp_path / "string_fp.py"
     target.write_text(
         's = "error # ' + "TODO" + ': fix"\n'
@@ -132,7 +132,7 @@ def test_trailing_marker_inside_string_is_not_flagged(tmp_path):
 
 
 def test_trailing_marker_out_of_scope_in_non_python(tmp_path):
-    """En .sh/.yaml/.toml la media linea queda fuera de ambito (sin parser)."""
+    """In .sh/.yaml/.toml the mid-line case is out of scope (no parser)."""
     for suffix, content in (
         ("yaml", 'key: "value # ' + "TODO" + ': x"\n'),
         ("sh", 'echo "a # ' + "FIXME" + ': b"\n'),
@@ -149,7 +149,7 @@ def test_double_hash_marker_is_flagged(tmp_path):
 
 
 def test_repo_is_clean():
-    """El repo no debe contener ningun comentario de parche/atajo/deuda."""
+    """The repo must not contain any quick-fix/shortcut/debt comment."""
     proc = subprocess.run(
         [sys.executable, str(CHECKER), "--all"],
         cwd=str(ROOT),

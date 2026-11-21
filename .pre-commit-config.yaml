@@ -138,7 +138,7 @@ repos:
   - repo: local
     hooks:
       - id: quick-fix-comments
-        name: Bloquea comentarios de parche/atajo/deuda
+        name: Blocks quick-fix/shortcut/debt comments
         entry: python3 scripts/check_quick_fix_comments.py
         language: system
         files: \.(py|sh|bash|js|ts|yml|yaml|toml|ini|cfg|conf|dockerfile|mk|make)$

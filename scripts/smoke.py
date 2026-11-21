@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Smoke test del worktree de vulnerator-ai (contratos, tools, mapa, imports y tests).
+"""Smoke test for the vulnerator-ai worktree (contracts, tools, map, imports and tests).
 
-Es un comprobador de andar por casa, no un test de producto: valida que el cableado
-declarativo (config.yaml + docker-compose.yml), la superficie real de tools (por AST,
-SIN importar los servidores), los anexos de ARCHITECTURE_MAP.md y la pureza SDK-free de
-los modulos de logica sigan siendo lo que el mapa dice.
+It is a homegrown checker, not a product test: it validates that the declarative
+wiring (config.yaml + docker-compose.yml), the real tool surface (by AST, WITHOUT
+importing the servers), the annexes of ARCHITECTURE_MAP.md and the SDK-free purity
+of the logic modules still match what the map says.
 
-Uso:
-    python3 scripts/smoke.py            # --quick (estatico + tests)
-    python3 scripts/smoke.py --check    # solo contratos/tools/mapa/imports (alias de --static)
-    python3 scripts/smoke.py --static   # solo contratos/tools/mapa/imports
-    python3 scripts/smoke.py --tests    # solo las suites en subproceso
-    python3 scripts/smoke.py --quick    # estatico + tests (gate rapido)
+Usage:
+    python3 scripts/smoke.py            # --quick (static + tests)
+    python3 scripts/smoke.py --check    # only contracts/tools/map/imports (alias of --static)
+    python3 scripts/smoke.py --static   # only contracts/tools/map/imports
+    python3 scripts/smoke.py --tests    # only the suites in a subprocess
+    python3 scripts/smoke.py --quick    # static + tests (fast gate)
 
-Disciplina:
-  - NUNCA importa docker/kali/kali_mcp_server.py ni docker/mcp/vulnerator_mcp_server.py:
-    las tools se leen con `ast` (decoradores @mcp.tool y constantes *_TOOL_NAME).
-  - NUNCA usa --import-mode=importlib.
-  - Los subprocesos de test corren con `env -u PYTHONPATH` y cwd=raiz.
+Discipline:
+  - NEVER imports docker/kali/kali_mcp_server.py or docker/mcp/vulnerator_mcp_server.py:
+    the tools are read with `ast` (@mcp.tool decorators and *_TOOL_NAME constants).
+  - NEVER uses --import-mode=importlib.
+  - The test subprocesses run with `env -u PYTHONPATH` and cwd=root.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ RUN_TESTS = ROOT / "scripts" / "run_tests.sh"
 
 GREEN, RED, WARN = "✅", "❌", "⚠️"
 
-# Modulos de LOGICA PURA que no deben depender del SDK `mcp` (se importan de verdad).
+# PURE LOGIC modules that must not depend on the `mcp` SDK (they are really imported).
 SDK_FREE_IMPORT = [
     ROOT / "docker" / "mcp" / "mcp_tool_logic.py",
     ROOT / "docker" / "kali" / "scope_guard.py",
@@ -50,9 +50,9 @@ SDK_FREE_IMPORT = [
     ROOT / "docker" / "kali" / "finding_store.py",
 ]
 
-# Las suites y las dependencias que cada una necesita en el interprete de test.
-# Si una suite no existe en este worktree se reporta con ⚠️ (una suite ausente no
-# es una suite en rojo).
+# The suites and the dependencies each one needs in the test interpreter.
+# If a suite does not exist in this worktree it is reported with ⚠️ (a missing suite
+# is not a red suite).
 SUITES: list[tuple[str, list[str]]] = [
     ("agent-ooda/tests", ["pytest", "pyyaml"]),
     ("docker/kali/tests", ["pytest"]),
@@ -75,11 +75,11 @@ SUITES: list[tuple[str, list[str]]] = [
 EXPECTED_MCP_SERVERS = ["kali", "playwright"]
 EXPECTED_TOOLSETS = ["kali", "playwright", "todo", "kanban"]
 
-# Las 14 secciones numeradas del mapa: el gate exige que existan, una sola vez y
-# en orden (renombrar una seccion no puede pasar desapercibido).
+# The 14 numbered sections of the map: the gate requires them to exist, exactly once
+# and in order (renaming a section cannot go unnoticed).
 REQUIRED_SECTIONS = [f"## {n}." for n in range(1, 15)]
 
-# Cadenas de deriva que el mapa ya no debe contener (ramas y recuentos superados).
+# Drift strings the map must no longer contain (branches and outdated counts).
 FORBIDDEN_DRIFT = ("ausente en esta rama", "5 suites", "4 tests desactualizados")
 EXPECTED_COMPOSE_SERVICES = [
     "kali",
@@ -102,7 +102,7 @@ EXPECTED_WEB_PROFILE = ["vulnerator-web", "browser-view", "caido-director"]
 
 
 class Report:
-    """Acumulador de secciones con conteo de fallos y avisos."""
+    """Section accumulator with failure and warning counters."""
 
     def __init__(self) -> None:
         self.failures = 0
@@ -124,10 +124,10 @@ class Report:
 
 
 def ast_tool_decorations(path: Path) -> list[tuple[str, int]]:
-    """Devuelve [(nombre, linea)] de las funciones decoradas con @mcp.tool(...).
+    """Returns [(name, line)] of the functions decorated with @mcp.tool(...).
 
-    Solo AST: el fichero NO se importa. La linea es la del `def` (la del decorador es
-    la inmediatamente anterior en este repo).
+    AST only: the file is NOT imported. The line is the `def` line (the decorator
+    line is the immediately preceding one in this repo).
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     found: list[tuple[str, int]] = []
@@ -147,7 +147,7 @@ def ast_tool_decorations(path: Path) -> list[tuple[str, int]]:
 
 
 def tool_name_constants(path: Path) -> list[tuple[str, str]]:
-    """Constante *_TOOL_NAME = "nombre" (mismo source of truth que los decoradores)."""
+    """*_TOOL_NAME = "name" constant (same source of truth as the decorators)."""
     src = path.read_text(encoding="utf-8")
     return re.findall(
         r'^([A-Z][A-Z0-9_]*_TOOL_NAME)\s*=\s*["\']([^"\']+)["\']', src, re.M
@@ -155,7 +155,7 @@ def tool_name_constants(path: Path) -> list[tuple[str, str]]:
 
 
 def module_imports_mcp(path: Path) -> bool:
-    """True si el modulo importa el SDK `mcp` (por AST, sin importarlo)."""
+    """True if the module imports the `mcp` SDK (by AST, without importing it)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -171,7 +171,7 @@ def module_imports_mcp(path: Path) -> bool:
 
 
 def find_uv() -> str | None:
-    """Localiza el binario de uv (env UV_BIN > PATH > ruta fijada del entorno)."""
+    """Locates the uv binary (env UV_BIN > PATH > fixed environment path)."""
     env_uv = os.environ.get("UV_BIN")
     if env_uv and Path(env_uv).exists():
         return env_uv
@@ -185,36 +185,36 @@ def find_uv() -> str | None:
 
 
 def clean_env() -> dict[str, str]:
-    """Entorno del subproceso SIN PYTHONPATH (contamina con mcp 2.3.0)."""
+    """Subprocess environment WITHOUT PYTHONPATH (it contaminates with mcp 2.3.0)."""
     return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
 
 
-# --------------------------------------------------------------------------- contratos
+# --------------------------------------------------------------------------- contracts
 
 
 def check_contratos(rep: Report) -> None:
     import yaml
 
-    section = "contratos"
+    section = "contracts"
 
     if not CONFIG.exists() or not COMPOSE.exists():
         rep.bad(
             section,
-            f"faltan ficheros: config={CONFIG.exists()} compose={COMPOSE.exists()}",
+            f"missing files: config={CONFIG.exists()} compose={COMPOSE.exists()}",
         )
         return
 
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
 
-    # --- config.yaml: los dos unicos MCP y sus URLs -------------------------
+    # --- config.yaml: the only two MCPs and their URLs -------------------------
     servers = list((cfg.get("mcp_servers") or {}).keys())
     if servers == EXPECTED_MCP_SERVERS:
         rep.ok(section, f"config.yaml mcp_servers = {servers}")
     else:
         rep.bad(
             section,
-            f"config.yaml mcp_servers = {servers} (esperado {EXPECTED_MCP_SERVERS})",
+            f"config.yaml mcp_servers = {servers} (expected {EXPECTED_MCP_SERVERS})",
         )
 
     kali_cfg = (cfg.get("mcp_servers") or {}).get("kali") or {}
@@ -229,15 +229,15 @@ def check_contratos(rep: Report) -> None:
     else:
         rep.bad(section, f"config.yaml playwright.url = {pw_cfg.get('url')!r}")
 
-    # Sin tools.include: el servidor es la source of truth.
+    # No tools.include: the server is the source of truth.
     kali_tools_cfg = kali_cfg.get("tools") or {}
     if "include" not in kali_tools_cfg:
         rep.ok(
             section,
-            "config.yaml kali.tools sin 'include' (sin whitelist: el servidor manda)",
+            "config.yaml kali.tools has no 'include' (no whitelist: the server wins)",
         )
     else:
-        rep.bad(section, "config.yaml kali.tools.include presente (debe estar ausente)")
+        rep.bad(section, "config.yaml kali.tools.include present (it must be absent)")
 
     if cfg.get("toolsets") == EXPECTED_TOOLSETS:
         rep.ok(section, f"config.yaml toolsets = {EXPECTED_TOOLSETS}")
@@ -260,11 +260,11 @@ def check_contratos(rep: Report) -> None:
 
     config_raw = CONFIG.read_text(encoding="utf-8")
     if "--yolo" not in config_raw:
-        rep.ok(section, "config.yaml sin '--yolo'")
+        rep.ok(section, "config.yaml without '--yolo'")
     else:
-        rep.bad(section, "config.yaml contiene '--yolo' (prohibido)")
+        rep.bad(section, "config.yaml contains '--yolo' (forbidden)")
 
-    # --- docker-compose.yml: 9 servicios, 4 volumenes, profiles, depends ---
+    # --- docker-compose.yml: 9 services, 4 volumes, profiles, depends ---
     services = compose.get("services") or {}
     volumes = list((compose.get("volumes") or {}).keys())
 
@@ -302,21 +302,21 @@ def check_contratos(rep: Report) -> None:
 
     pw_svc = services.get("playwright-mcp") or {}
     if "ports" not in pw_svc:
-        rep.ok(section, "compose playwright-mcp sin ports (red interna)")
+        rep.ok(section, "compose playwright-mcp has no ports (internal network)")
     else:
-        rep.bad(section, "compose playwright-mcp publica ports")
+        rep.bad(section, "compose playwright-mcp publishes ports")
 
     ooda_ports = [str(p) for p in (ooda.get("ports") or [])]
     if any("8642" in p for p in ooda_ports):
-        rep.ok(section, f"compose ooda-agent publica 8642 ({ooda_ports})")
+        rep.ok(section, f"compose ooda-agent publishes 8642 ({ooda_ports})")
     else:
-        rep.bad(section, f"compose ooda-agent no publica 8642 ({ooda_ports})")
+        rep.bad(section, f"compose ooda-agent does not publish 8642 ({ooda_ports})")
 
     compose_raw = COMPOSE.read_text(encoding="utf-8")
     if "--yolo" not in compose_raw:
-        rep.ok(section, "compose sin '--yolo'")
+        rep.ok(section, "compose without '--yolo'")
     else:
-        rep.bad(section, "compose contiene '--yolo' (prohibido)")
+        rep.bad(section, "compose contains '--yolo' (forbidden)")
 
 
 # --------------------------------------------------------------------------- tools
@@ -326,7 +326,7 @@ def check_tools(rep: Report) -> None:
     section = "tools"
 
     if not KALI_SERVER.exists() or not VULN_SERVER.exists():
-        rep.bad(section, "faltan los servidores MCP")
+        rep.bad(section, "the MCP servers are missing")
         return
 
     kali_tools = ast_tool_decorations(KALI_SERVER)
@@ -336,54 +336,54 @@ def check_tools(rep: Report) -> None:
     if len(kali_tools) == 21:
         rep.ok(
             section,
-            f"kali_mcp_server.py: 21 @mcp.tool por AST (lineas {[l for _, l in kali_tools]})",
+            f"kali_mcp_server.py: 21 @mcp.tool by AST (lines {[l for _, l in kali_tools]})",
         )
     else:
         rep.bad(
             section,
-            f"kali_mcp_server.py: {len(kali_tools)} @mcp.tool por AST (esperadas 21)",
+            f"kali_mcp_server.py: {len(kali_tools)} @mcp.tool by AST (expected 21)",
         )
 
-    # 20 constantes *_TOOL_NAME: cubren todas las tools menos `server_info`, que usa
-    # el decorador plano @mcp.tool() (sin name=) y toma el nombre de la funcion.
+    # 20 *_TOOL_NAME constants: they cover all the tools except `server_info`, which
+    # uses the plain @mcp.tool() decorator (without name=) and takes the function name.
     tool_names = {n for n, _ in kali_tools}
     const_names = {n for _, n in kali_consts}
     if const_names == tool_names - {"server_info"}:
         rep.ok(
             section,
-            "kali_mcp_server.py: 20 constantes *_TOOL_NAME cubren las 20 tools con name=",
+            "kali_mcp_server.py: 20 *_TOOL_NAME constants cover the 20 tools with name=",
         )
     else:
         rep.bad(
             section,
-            f"kali_mcp_server.py: *_TOOL_NAME no cubren las tools (falta={sorted(tool_names - {'server_info'} - const_names)} "
-            f"sobra={sorted(const_names - tool_names)})",
+            f"kali_mcp_server.py: *_TOOL_NAME do not cover the tools (missing={sorted(tool_names - {'server_info'} - const_names)} "
+            f"extra={sorted(const_names - tool_names)})",
         )
 
     if len(vuln_tools) == 6:
         rep.ok(
             section,
-            f"vulnerator_mcp_server.py: 6 @mcp.tool por AST ({[n for n, _ in vuln_tools]})",
+            f"vulnerator_mcp_server.py: 6 @mcp.tool by AST ({[n for n, _ in vuln_tools]})",
         )
     else:
         rep.bad(
             section,
-            f"vulnerator_mcp_server.py: {len(vuln_tools)} @mcp.tool por AST (esperadas 6)",
+            f"vulnerator_mcp_server.py: {len(vuln_tools)} @mcp.tool by AST (expected 6)",
         )
 
-    # Garantia: los servidores NO se importaron para leer las tools.
+    # Guarantee: the servers were NOT imported to read the tools.
     leaked = [
         m for m in ("kali_mcp_server", "vulnerator_mcp_server") if m in sys.modules
     ]
     if not leaked:
         rep.ok(
-            section, "servidores leidos solo por AST (no importados en este proceso)"
+            section, "servers read only by AST (not imported in this process)"
         )
     else:
-        rep.bad(section, f"los servidores se importaron: {leaked}")
+        rep.bad(section, f"the servers were imported: {leaked}")
 
 
-# --------------------------------------------------------------------------- mapa
+# --------------------------------------------------------------------------- map
 
 
 ANNEX_A_ROW = re.compile(r"^\|\s*`([a-z_]+)`\s*\|\s*`([^`:]+):(\d+)`\s*\|\s*$")
@@ -392,7 +392,7 @@ ANNEX_C_ROW = re.compile(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|")
 
 
 def _section_lines(lines: list[str], start_marker: str, end_marker: str) -> list[str]:
-    """Lineas de una seccion: desde start_marker (incluida) hasta end_marker (no)."""
+    """Lines of a section: from start_marker (included) to end_marker (excluded)."""
     try:
         i = next(n for n, line in enumerate(lines) if line.startswith(start_marker))
     except StopIteration:
@@ -408,9 +408,9 @@ def _section_lines(lines: list[str], start_marker: str, end_marker: str) -> list
 def _annex_tables(
     text: str,
 ) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]], list[str]]:
-    """Devuelve (filas Anexo A, filas Anexo B, suites del Anexo C).
+    """Returns (Annex A rows, Annex B rows, Annex C suites).
 
-    Anexo A/B: (clave, ruta, linea). Anexo C: nombre de cada suite en orden.
+    Annex A/B: (key, path, line). Annex C: name of each suite in order.
     """
     lines = text.splitlines()
 
@@ -438,10 +438,10 @@ def _annex_tables(
 def check_mapa(rep: Report) -> None:
     import yaml
 
-    section = "mapa"
+    section = "map"
 
     if not MAP.exists():
-        rep.bad(section, f"falta {MAP.relative_to(ROOT)}")
+        rep.bad(section, f"missing {MAP.relative_to(ROOT)}")
         return
 
     text = MAP.read_text(encoding="utf-8")
@@ -466,30 +466,30 @@ def check_mapa(rep: Report) -> None:
         if not bad_lines:
             rep.ok(
                 section,
-                f"Anexo A: {len(annex_kali)} tools kali coinciden con AST (nombre+linea)",
+                f"Annex A: {len(annex_kali)} kali tools match the AST (name+line)",
             )
         else:
-            rep.bad(section, f"Anexo A: linea erronea en {bad_lines}")
+            rep.bad(section, f"Annex A: wrong line in {bad_lines}")
     else:
         missing = sorted(set(kali_ast) - set(annex_kali))
         extra = sorted(set(annex_kali) - set(kali_ast))
-        rep.bad(section, f"Anexo A kali: falta={missing} sobra={extra}")
+        rep.bad(section, f"Annex A kali: missing={missing} extra={extra}")
 
     if set(annex_vuln) == set(vuln_ast):
         bad_lines = [n for n, (p, l) in annex_vuln.items() if vuln_ast[n] != l]
         if not bad_lines:
             rep.ok(
                 section,
-                f"Anexo A: {len(annex_vuln)} tools vulnerator-mcp coinciden con AST (nombre+linea)",
+                f"Annex A: {len(annex_vuln)} vulnerator-mcp tools match the AST (name+line)",
             )
         else:
-            rep.bad(section, f"Anexo A: linea erronea en {bad_lines}")
+            rep.bad(section, f"Annex A: wrong line in {bad_lines}")
     else:
         missing = sorted(set(vuln_ast) - set(annex_vuln))
         extra = sorted(set(annex_vuln) - set(vuln_ast))
-        rep.bad(section, f"Anexo A vulnerator-mcp: falta={missing} sobra={extra}")
+        rep.bad(section, f"Annex A vulnerator-mcp: missing={missing} extra={extra}")
 
-    # Anexo B: servicios y volumenes contra el compose real.
+    # Annex B: services and volumes against the real compose.
     compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
     services = compose.get("services") or {}
     volumes = list((compose.get("volumes") or {}).keys())
@@ -505,14 +505,14 @@ def check_mapa(rep: Report) -> None:
         if not bad:
             rep.ok(
                 section,
-                f"Anexo B: {len(annex_services)} servicios coinciden con compose (nombre+linea)",
+                f"Annex B: {len(annex_services)} services match the compose (name+line)",
             )
         else:
-            rep.bad(section, f"Anexo B: linea no contiene el servicio {bad}")
+            rep.bad(section, f"Annex B: line does not contain the service {bad}")
     else:
         falta = sorted(set(services) - set(annex_services))
         sobra = sorted(set(annex_services) - set(services))
-        rep.bad(section, f"Anexo B servicios: falta={falta} sobra={sobra}")
+        rep.bad(section, f"Annex B services: missing={falta} extra={sobra}")
 
     if set(annex_volumes) == set(volumes):
         bad = [
@@ -521,73 +521,73 @@ def check_mapa(rep: Report) -> None:
         if not bad:
             rep.ok(
                 section,
-                f"Anexo B: {len(annex_volumes)} volumenes coinciden con compose (nombre+linea)",
+                f"Annex B: {len(annex_volumes)} volumes match the compose (name+line)",
             )
         else:
-            rep.bad(section, f"Anexo B: linea no contiene el volumen {bad}")
+            rep.bad(section, f"Annex B: line does not contain the volume {bad}")
     else:
         falta = sorted(set(volumes) - set(annex_volumes))
         sobra = sorted(set(annex_volumes) - set(volumes))
-        rep.bad(section, f"Anexo B volumenes: falta={falta} sobra={sobra}")
+        rep.bad(section, f"Annex B volumes: missing={falta} extra={sobra}")
 
-    # Todas las rutas citadas en los anexos deben existir.
+    # All the paths cited in the annexes must exist.
     broken = []
     for _key, path, _line in a_rows + b_rows:
         if not (ROOT / path).exists():
             broken.append(path)
     if not broken:
-        rep.ok(section, "Anexo A/B: todas las rutas citadas existen (test -e)")
+        rep.ok(section, "Annex A/B: all cited paths exist (test -e)")
     else:
-        rep.bad(section, f"Anexo A/B: rutas rotas {sorted(set(broken))}")
+        rep.bad(section, f"Annex A/B: broken paths {sorted(set(broken))}")
 
-    # --- secciones numeradas: 14, una sola vez y en orden --------------------
+    # --- numbered sections: 14, exactly once and in order --------------------
     found_sections = [int(m.group(1)) for m in re.finditer(r"^## (\d+)\.", text, re.M)]
     expected_sections = list(range(1, len(REQUIRED_SECTIONS) + 1))
     if found_sections == expected_sections:
         rep.ok(
             section,
-            f"mapa: {len(expected_sections)} secciones numeradas, una sola vez y en orden",
+            f"map: {len(expected_sections)} numbered sections, exactly once and in order",
         )
     else:
         rep.bad(
             section,
-            f"mapa: secciones encontradas {found_sections} (esperadas {expected_sections})",
+            f"map: sections found {found_sections} (expected {expected_sections})",
         )
 
-    # --- Anexo C: filas == suites reales ------------------------------------
+    # --- Annex C: rows == real suites ----------------------------------------
     suite_names = [name for name, _deps in SUITES]
     if len(c_rows) == len(SUITES) and set(c_rows) == set(suite_names):
-        rep.ok(section, f"Anexo C: {len(c_rows)} filas == {len(SUITES)} suites de SUITES")
+        rep.ok(section, f"Annex C: {len(c_rows)} rows == {len(SUITES)} SUITES suites")
     else:
         rep.bad(
             section,
-            f"Anexo C: {len(c_rows)} filas ({c_rows}) vs SUITES {suite_names}",
+            f"Annex C: {len(c_rows)} rows ({c_rows}) vs SUITES {suite_names}",
         )
 
-    # --- deriva prohibida ----------------------------------------------------
+    # --- forbidden drift -----------------------------------------------------
     drift = [marker for marker in FORBIDDEN_DRIFT if marker in text]
     if not drift:
-        rep.ok(section, "mapa: sin cadenas de deriva prohibidas")
+        rep.ok(section, "map: no forbidden drift strings")
     else:
-        rep.bad(section, f"mapa: cadenas de deriva prohibidas {drift}")
+        rep.bad(section, f"map: forbidden drift strings {drift}")
 
-    # --- seccion 14: deuda conocida declarada --------------------------------
+    # --- section 14: declared known debt -------------------------------------
     deuda = "\n".join(_section_lines(text.splitlines(), "## 14.", "## 15."))
-    if "## 14. Deuda conocida" in text and (
+    if "## 14. Known debt" in text and (
         any(tok in deuda for tok in ("black", "isort", "prettier"))
-        or "no hay deuda" in deuda
+        or "no debt" in deuda
     ):
-        rep.ok(section, "mapa: '## 14. Deuda conocida' presente y con deuda declarada")
+        rep.ok(section, "map: '## 14. Known debt' present with declared debt")
     else:
         rep.bad(
             section,
-            "mapa: falta '## 14. Deuda conocida' o no declara el reformateo pendiente",
+            "map: '## 14. Known debt' missing or does not declare the pending reformat",
         )
 
     if "scripts/smoke.py" in text:
-        rep.ok(section, "el mapa enlaza scripts/smoke.py")
+        rep.ok(section, "the map links scripts/smoke.py")
     else:
-        rep.bad(section, "el mapa no enlaza scripts/smoke.py")
+        rep.bad(section, "the map does not link scripts/smoke.py")
 
 
 # --------------------------------------------------------------------------- imports
@@ -596,7 +596,7 @@ def check_mapa(rep: Report) -> None:
 def check_imports(rep: Report) -> None:
     section = "imports"
 
-    # 1) Unico punto que puede importar el SDK: los dos planes de control.
+    # 1) Only place that may import the SDK: the two control planes.
     offenders = []
     for path in sorted((ROOT / "docker").rglob("*.py")):
         if path in (KALI_SERVER, VULN_SERVER):
@@ -606,17 +606,17 @@ def check_imports(rep: Report) -> None:
     if not offenders:
         rep.ok(
             section,
-            "solo kali_mcp_server.py y vulnerator_mcp_server.py importan el SDK 'mcp'",
+            "only kali_mcp_server.py and vulnerator_mcp_server.py import the 'mcp' SDK",
         )
     else:
         rep.bad(
-            section, f"modulos que importan 'mcp' fuera de los servidores: {offenders}"
+            section, f"modules importing 'mcp' outside the servers: {offenders}"
         )
 
-    # 2) Los modulos de logica pura se importan de verdad, sin el SDK y sin PYTHONPATH.
+    # 2) The pure logic modules are really imported, without the SDK and without PYTHONPATH.
     missing = [str(p.relative_to(ROOT)) for p in SDK_FREE_IMPORT if not p.exists()]
     if missing:
-        rep.bad(section, f"faltan modulos SDK-free: {missing}")
+        rep.bad(section, f"missing SDK-free modules: {missing}")
         return
 
     script = (
@@ -637,10 +637,10 @@ def check_imports(rep: Report) -> None:
     if proc.returncode == 0 and "IMPORT_OK" in proc.stdout:
         rep.ok(
             section,
-            "mcp_tool_logic/scope_guard/tool_streaming/finding_store importan sin el SDK 'mcp'",
+            "mcp_tool_logic/scope_guard/tool_streaming/finding_store import without the 'mcp' SDK",
         )
     else:
-        rep.bad(section, f"import SDK-free fallo: {proc.stderr.strip()[:300]}")
+        rep.bad(section, f"SDK-free import failed: {proc.stderr.strip()[:300]}")
 
 
 # --------------------------------------------------------------------------- tests
@@ -669,7 +669,7 @@ def run_suite(
             cmd += ["--with", dep]
         cmd += ["python3", "-m", "pytest", suite, "-p", "no:cacheprovider", "-q"]
     else:
-        # Sin uv (p. ej. un CI con requirements-dev.txt ya instalado): pytest directo.
+        # Without uv (e.g. a CI with requirements-dev.txt already installed): direct pytest.
         cmd = [sys.executable, "-m", "pytest", suite, "-p", "no:cacheprovider", "-q"]
     proc = subprocess.run(
         cmd, cwd=str(ROOT), env=clean_env(), capture_output=True, text=True
@@ -684,7 +684,7 @@ def check_tests(rep: Report) -> None:
     if uv is None:
         rep.warn(
             section,
-            "uv no encontrado: se usa pytest directo (requiere requirements-dev.txt)",
+            "uv not found: using direct pytest (requires requirements-dev.txt)",
         )
     else:
         print(f"[{section}] uv = {uv}")
@@ -694,7 +694,7 @@ def check_tests(rep: Report) -> None:
     for suite, deps in SUITES:
         if not (ROOT / suite).is_dir():
             absent += 1
-            rep.warn(section, f"{suite}: no existe en este worktree")
+            rep.warn(section, f"{suite}: does not exist in this worktree")
             continue
         ran += 1
         rc, counts, output = run_suite(suite, deps, uv)
@@ -703,7 +703,7 @@ def check_tests(rep: Report) -> None:
             for k in ("passed", "failed", "skipped", "errors")
             if counts[k]
         ]
-        summary = ", ".join(parts) if parts else "sin recuento"
+        summary = ", ".join(parts) if parts else "no count"
         if rc == 0:
             rep.ok(section, f"{suite}: {summary} (exit 0)")
         elif rc == 1:
@@ -711,25 +711,25 @@ def check_tests(rep: Report) -> None:
             rep.bad(section, f"{suite}: {summary} (exit 1)")
         elif rc == 2:
             any_failed = True
-            rep.bad(section, f"{suite}: error de coleccion ({summary}, exit 2)")
+            rep.bad(section, f"{suite}: collection error ({summary}, exit 2)")
         elif rc == 5:
-            rep.warn(section, f"{suite}: no se recolectaron tests (exit 5)")
+            rep.warn(section, f"{suite}: no tests collected (exit 5)")
         else:
             any_failed = True
             rep.bad(section, f"{suite}: exit {rc} ({summary})")
 
-        # En fallo, volcar el short test summary para no ocultar nada.
+        # On failure, dump the short test summary so nothing is hidden.
         if rc not in (0, 5):
             tail = [line for line in output.splitlines() if line.strip()][-12:]
             for line in tail:
                 print(f"[{section}]     {line}")
 
     if any_failed:
-        rep.warn(section, "hay suites en rojo; volcar el resumen de cada suite")
+        rep.warn(section, "there are red suites; dump each suite's summary")
     elif absent:
-        rep.ok(section, f"{ran} suites pasan; {absent} suite(s) ausentes en esta rama")
+        rep.ok(section, f"{ran} suites pass; {absent} suite(s) absent in this branch")
     else:
-        rep.ok(section, f"las {ran} suites pasan")
+        rep.ok(section, f"all {ran} suites pass")
 
 
 # --------------------------------------------------------------------------- main
@@ -737,24 +737,24 @@ def check_tests(rep: Report) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Smoke test del worktree de vulnerator-ai"
+        description="Smoke test for the vulnerator-ai worktree"
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--check",
         action="store_true",
-        help="alias de --static (contratos/tools/mapa/imports)",
+        help="alias of --static (contracts/tools/map/imports)",
     )
     group.add_argument(
-        "--static", action="store_true", help="contratos + tools + mapa + imports"
+        "--static", action="store_true", help="contracts + tools + map + imports"
     )
-    group.add_argument("--tests", action="store_true", help="las suites en subproceso")
+    group.add_argument("--tests", action="store_true", help="the suites in a subprocess")
     group.add_argument(
-        "--quick", action="store_true", help="estatico + tests (gate rapido)"
+        "--quick", action="store_true", help="static + tests (fast gate)"
     )
     args = parser.parse_args()
 
-    # Sin flags = gate rapido (estatico + tests).
+    # No flags = fast gate (static + tests).
     do_static = (
         args.check
         or args.static
@@ -768,7 +768,7 @@ def main() -> int:
     )
 
     rep = Report()
-    print(f"vulnerator-ai smoke — raiz: {ROOT}")
+    print(f"vulnerator-ai smoke — root: {ROOT}")
 
     if do_static:
         check_contratos(rep)
@@ -776,16 +776,16 @@ def main() -> int:
         check_mapa(rep)
         check_imports(rep)
         print(
-            f"[check] resultado: {GREEN if rep.failures == 0 else RED} "
-            f"fallos={rep.failures} avisos={rep.warnings}"
+            f"[check] result: {GREEN if rep.failures == 0 else RED} "
+            f"failures={rep.failures} warnings={rep.warnings}"
         )
 
     if do_tests:
         before = rep.failures
         check_tests(rep)
         print(
-            f"[tests] resultado: {GREEN if rep.failures == before else RED} "
-            f"fallos acumulados={rep.failures} avisos={rep.warnings}"
+            f"[tests] result: {GREEN if rep.failures == before else RED} "
+            f"accumulated failures={rep.failures} warnings={rep.warnings}"
         )
 
     return 1 if rep.failures else 0
