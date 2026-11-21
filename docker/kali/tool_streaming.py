@@ -406,7 +406,7 @@ def run_tool_streaming(
     timeout: int,
     env: dict[str, str] | None = None,
     cwd: str | None = None,
-) -> tuple[int, bool]:
+) -> tuple[int, bool, bool]:
     """Ejecuta `cmd` volcando su salida en vivo al ring de `execution_id`.
 
     stdout y stderr se leen por separado (cada uno en su hilo) y se etiquetan como
