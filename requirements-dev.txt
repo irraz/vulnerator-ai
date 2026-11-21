@@ -1,0 +1,6 @@
+# Fuente de verdad del venv de dev; los pins de imagen siguen en docker/*/requirements.txt.
+pytest>=8,<10
+PyYAML>=6,<7
+ruff>=0.9,<1
+mypy>=1.13,<2
+types-PyYAML>=6,<7
