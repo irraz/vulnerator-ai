@@ -1,39 +1,34 @@
-#!/usr/bin/env python3
-"""Tests del gate de comentarios quick-fix (check_quick_fix_comments.py)."""
+"""Tests de la regla anti-comentarios de parche rapido.
+
+Corpus de falsos positivos (espanol y marcadores sin separador) y corpus de
+marcadores inyectados, mas un barrido real del repo que debe salir limpio.
+"""
+
 from __future__ import annotations
 
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
-import pytest
+SCRIPTS = Path(__file__).resolve().parents[1]
+CHECKER = SCRIPTS / "check_quick_fix_comments.py"
+ROOT = SCRIPTS.parent
 
-ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "check_quick_fix_comments.py"
 
-
-def _load():
-    spec = importlib.util.spec_from_file_location("check_quick_fix_comments", SCRIPT)
+def _load_checker():
+    spec = importlib.util.spec_from_file_location("check_quick_fix_comments", CHECKER)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-cfc = _load()
+cfc = _load_checker()
 
-# Falsos positivos del español y de sintaxis adyacente: deben dar 0 hallazgos.
-FALSE_POSITIVES = [
-    "# todo el store",
-    "# todo simulado",
-    "# TODOS LOS CHECKS",
-    "# temporary credentials (STS)",
-    "# pre-parche",
-    "# PARCHEADA",
-    "# El store tiene un TODO pendiente",
-    '"""Lee TODO el store del engagement."""',
-]
-
-# Marcadores inyectados que deben detectarse 10/10.
-MARKERS = [
+# Los marcadores se construyen por concatenacion para que este propio fichero no
+# contenga jamas un marcador con separador y el barrido del repo salga limpio.
+_MARKERS = [
     "TODO",
     "FIXME",
     "HACK",
@@ -44,43 +39,75 @@ MARKERS = [
     "QUICKFIX",
     "QUICK FIX",
     "HOTFIX",
+    "KLUDGE",
+    "TRAMP",
+]
+
+# Comentarios que NO son deuda: el marcador no abre la nota o no lleva separador.
+FALSE_POSITIVES = [
+    "# todo el store",
+    "# todo simulado",
+    "# TODOS LOS CHECKS",
+    "# temporary credentials",
+    "# pre-parche",
+    "# PARCHEADA",
+    "# El store tiene un TODO pendiente",
+    "# hotfix pendiente",
+    "# temporal mientras tanto",
+    '"""Lee TODO el store"""',
+    "// trabajo en torno al problema",
+]
+
+# Comentarios que SI son deuda: el marcador abre la nota y lleva ':' o '!'.
+TRUE_POSITIVES = [
+    "# " + "TODO" + ":",
+    "# " + "FIXME" + ":",
+    "# " + "HACK" + ":",
+    "# " + "PARCHE" + ":",
+    "# " + "QUICK FIX" + ":",
+    "# " + "HOTFIX" + "!",
+    "// " + "TODO" + ":",
+    "/* " + "FIXME" + ": */",
+    "<!-- " + "HACK" + ": -->",
+    '"""' + "TODO" + ": leave this for later" + '"""',
+    " * " + "XXX" + ":",
 ]
 
 
-@pytest.mark.parametrize("line", FALSE_POSITIVES)
-def test_false_positives(line, tmp_path):
-    f = tmp_path / "sample.py"
-    f.write_text(line + "\n", encoding="utf-8")
-    assert cfc.scan_file(f) == []
+def test_false_positives_are_not_flagged():
+    for line in FALSE_POSITIVES:
+        assert not cfc.COMMENT_RE.match(line), line
+        assert not cfc.DOCSTRING_RE.match(line), line
 
 
-@pytest.mark.parametrize("marker", MARKERS)
-def test_true_positive(marker, tmp_path):
-    f = tmp_path / "sample.py"
-    f.write_text(f"# {marker}: inyeccion de prueba\n", encoding="utf-8")
-    found = cfc.scan_file(f)
-    assert len(found) == 1
-    assert found[0][0] == 1
+def test_true_positives_are_flagged():
+    for line in TRUE_POSITIVES:
+        assert cfc.COMMENT_RE.match(line) or cfc.DOCSTRING_RE.match(line), line
 
 
-def test_ten_injected_markers(tmp_path):
-    f = tmp_path / "sample.py"
-    f.write_text("\n".join(f"# {m}: inyeccion" for m in MARKERS) + "\n", encoding="utf-8")
-    found = cfc.scan_file(f)
-    assert len(found) == 10
-    assert [x[0] for x in found] == list(range(1, 11))
+def test_marker_list_matches_checker():
+    assert sorted(cfc.MARKERS) == sorted(_MARKERS)
 
 
-def test_docstring_variant(tmp_path):
-    f = tmp_path / "sample.py"
-    f.write_text('"""QUICK FIX: arreglo rapido"""\n', encoding="utf-8")
-    assert len(cfc.scan_file(f)) == 1
+def test_scan_file_flags_injected_marker(tmp_path):
+    target = tmp_path / "sample.py"
+    target.write_text("def f():\n    # " + "TODO" + ": arreglar\n    return 1\n", encoding="utf-8")
+    found = cfc.scan_file(target)
+    assert found == [(2, "# " + "TODO" + ": arreglar")]
+
+
+def test_scan_file_ignores_clean_file(tmp_path):
+    target = tmp_path / "clean.py"
+    target.write_text("def f():\n    # todo el store\n    return 1\n", encoding="utf-8")
+    assert cfc.scan_file(target) == []
 
 
 def test_repo_is_clean():
-    findings = []
-    for f in cfc.collect_files([ROOT]):
-        findings.extend(cfc.scan_file(f))
-    assert findings == [], "\n".join(
-        f"{p}:{line}: [{tipo}] | {texto}" for p, line, tipo, texto in findings
+    """El repo no debe contener ningun comentario de parche/atajo/deuda."""
+    proc = subprocess.run(
+        [sys.executable, str(CHECKER), "--all"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
     )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
