@@ -135,11 +135,11 @@ repos:
 
   - repo: local
     hooks:
-      - id: debt-markers
+      - id: quick-fix-comments
         name: Bloquea comentarios de parche/atajo/deuda
-        entry: python3 scripts/check_debt_markers.py
+        entry: python3 scripts/check_quick_fix_comments.py
         language: system
-        types: [python]
+        files: \.(py|sh|bash|js|ts|yml|yaml|toml|ini|cfg|conf|dockerfile|mk|make)$
         pass_filenames: true
 
   # ============================================================================
