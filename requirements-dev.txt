@@ -1,0 +1,14 @@
+# Source of truth for the dev venv; the image pins stay in docker/*/requirements.txt.
+pytest>=8,<10
+PyYAML>=6,<7
+ruff>=0.9,<1
+mypy>=1.13,<2
+types-PyYAML>=6,<7
+
+# Deps that the docker/mcp and docker/web suites need in the test interpreter.
+mcp>=1.28,<2
+anyio>=4.15.1
+httpx>=0.28.1,<1
+starlette>=0.52.1,<1
+uvicorn[standard]>=0.54.0,<1
+websockets>=13.0,<16

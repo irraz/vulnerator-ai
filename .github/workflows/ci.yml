@@ -1,0 +1,66 @@
+# ============================================================================
+# 🧱 Base scaffolding — BLOCKING gate for the scaffolding.
+#
+# This job is the gate that blocks a PR merge: it has no `continue-on-error`
+# and must appear as a required check (`🧱 Base scaffolding`) in branch
+# protection (`.github/BRANCH-PROTECTION.md`).
+#
+# It blocks five things:
+#   1. contracts + tools by AST + map annexes + SDK-free imports
+#      -> `python scripts/smoke.py --static`
+#   2. quick-fix comment rule
+#      -> `python scripts/check_quick_fix_comments.py --all`
+#   3. correctness ruff (E9,F63,F7,F82,F401,F811,F821)
+#      -> `python -m ruff check .`
+#   4. correctness type-check (mypy)
+#      -> the dedicated step (pure logic files)
+#   5. the 6 suites
+#      -> `python scripts/smoke.py --quick`
+#
+# The legacy pipeline (`security.yml`, `pr-checks.yml`) and `pre-commit run --all-files`
+# remain INFORMATIVE until the `chore(style)` that reformats the files black/isort/
+# prettier want to reformat (55/13/46): they do not block the scaffolding.
+#
+# Depends on branch feat/base-linters: `requirements-dev.txt`, `pyproject.toml`
+# (mypy config), `scripts/check_quick_fix_comments.py` and `scripts/tests/`.
+# ============================================================================
+name: 🧱 Base scaffolding
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  base-scaffolding:
+    name: 🧱 Base scaffolding
+    runs-on: ubuntu-latest
+    # BLOCKING: no `continue-on-error` — a failure here cannot be ignored.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install dev requirements
+        run: pip install -r requirements-dev.txt
+
+      - name: Static smoke (contracts, tools by AST, map annexes, SDK-free imports)
+        run: python scripts/smoke.py --static
+
+      - name: Validate docker-compose
+        run: docker compose config --quiet
+
+      - name: Quick-fix comment rule
+        run: python scripts/check_quick_fix_comments.py --all
+
+      - name: Ruff (correctness)
+        run: python -m ruff check .
+
+      - name: Type-check (correctness)
+        run: python -m mypy --config-file pyproject.toml docker/kali/scope_guard.py docker/kali/finding_store.py docker/kali/session_log.py docker/kali/tool_streaming.py docker/kali/shell_exec.py docker/mcp/mcp_tool_logic.py docker/web/ooda_parse.py docker/web/event_model.py
+
+      - name: Test suites
+        run: python scripts/smoke.py --quick

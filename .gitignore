@@ -47,6 +47,8 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+# uv lockfile: local environment noise; the dev pins live in requirements-dev.txt.
+uv.lock
 
 # --- Notas de trabajo locales (no versionar) ---
 # Backlog interno de features y planificación; vive en el repo pero fuera de git.
