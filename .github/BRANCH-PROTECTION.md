@@ -29,6 +29,7 @@ main
 - ☑️ Require branches to be up to date before merging
 - **Status checks que deben pasar** (búscalos y selecciónalos):
   ```
+  ☑️ 🧱 Base scaffolding   <-- GATE BLOQUEANTE del andamiaje (ci.yml)
   ☑️ TruffleHog - Detección de Secretos
   ☑️ CodeQL - Análisis de Código  
   ☑️ Python Linting
@@ -37,6 +38,10 @@ main
   ☑️ Validación de PR
   ☑️ Dockerfile Linting
   ```
+
+  > `🧱 Base scaffolding` (`.github/workflows/ci.yml`) es el gate bloqueante: smoke
+  > estático + `docker compose config` + pre-commit. El resto del pipeline legacy es
+  > informativo (no bloquea el merge).
 
 **Require conversation resolution before merging**
 - ☑️ Todos los comentarios deben resolverse antes del merge
@@ -79,6 +84,7 @@ Si prefieres usar la API de GitHub o Terraform, aquí está la configuración en
   "required_status_checks": {
     "strict": true,
     "contexts": [
+      "🧱 Base scaffolding",
       "secrets-scan",
       "codeql-analysis",
       "python-lint",

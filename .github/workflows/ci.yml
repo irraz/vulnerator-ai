@@ -1,0 +1,61 @@
+# ============================================================================
+# 🧱 Base scaffolding — GATE BLOQUEANTE del andamiaje.
+#
+# Este job es el gate que bloquea el merge de una PR: no lleva `continue-on-error`
+# y debe aparecer como check obligatorio (`🧱 Base scaffolding`) en la protección
+# de ramas (`.github/BRANCH-PROTECTION.md`).
+#
+# Bloquea cuatro cosas:
+#   1. contratos + tools por AST + anexos del mapa + imports SDK-free
+#      -> `python scripts/smoke.py --static`
+#   2. regla anti-comentarios de parche
+#      -> `python scripts/check_quick_fix_comments.py --all`
+#   3. type-check de correctitud (mypy)
+#      -> el step dedicado (ficheros puros de logica)
+#   4. las 6 suites
+#      -> `python scripts/smoke.py --quick`
+#
+# El pipeline legacy (`security.yml`, `pr-checks.yml`) y `pre-commit run --all-files`
+# quedan INFORMATIVOS hasta el `chore(style)` que reateca los ficheros que
+# black/isort/prettier quieren reformatear (55/13/46): no bloquean el andamiaje.
+#
+# Depende de la rama feat/base-linters: `requirements-dev.txt`, `pyproject.toml`
+# (config de mypy), `scripts/check_quick_fix_comments.py` y `scripts/tests/`.
+# ============================================================================
+name: 🧱 Base scaffolding
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  base-scaffolding:
+    name: 🧱 Base scaffolding
+    runs-on: ubuntu-latest
+    # BLOQUEANTE: sin `continue-on-error` — un fallo aquí no se puede ignorar.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install dev requirements
+        run: pip install -r requirements-dev.txt
+
+      - name: Smoke estático (contratos, tools por AST, anexos del mapa, imports SDK-free)
+        run: python scripts/smoke.py --static
+
+      - name: Validar docker-compose
+        run: docker compose config --quiet
+
+      - name: Regla anti-comentarios de parche
+        run: python scripts/check_quick_fix_comments.py --all
+
+      - name: Type-check (correctitud)
+        run: python -m mypy --config-file pyproject.toml docker/kali/scope_guard.py docker/kali/finding_store.py docker/kali/session_log.py docker/kali/tool_streaming.py docker/kali/shell_exec.py docker/mcp/mcp_tool_logic.py docker/web/ooda_parse.py docker/web/event_model.py
+
+      - name: Suites de tests
+        run: python scripts/smoke.py --quick

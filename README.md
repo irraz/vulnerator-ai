@@ -229,7 +229,17 @@ The README is intentionally short. The detail lives under [`docs/`](docs/):
 | **Automatic LLM fallback** (Mistral Large 4 ↔ GLM-5.3 Flash) | [`docs/llm-fallback.md`](docs/llm-fallback.md) |
 | Raw HTTP API reference (`:8642`) | [`docs/http-api.md`](docs/http-api.md) |
 | Architecture, OODA design, findings-store schema | [`docs/design.md`](docs/design.md) |
+| **Verifiable architecture map** (components, 21+6 MCP tools, compose, tests — every claim with `file:line`) | [`ARCHITECTURE_MAP.md`](ARCHITECTURE_MAP.md) |
 | Sample redacted deliverable | [`docs/example-report.md`](docs/example-report.md) |
+
+Smoke test del worktree (contratos YAML, tools por AST, anexos del mapa e imports SDK-free):
+
+```sh
+env -u PYTHONPATH python3 scripts/smoke.py --check
+```
+
+Las 5 suites de tests, aparte: `env -u PYTHONPATH python3 scripts/smoke.py --tests` (o
+`bash scripts/run_tests.sh`).
 
 ## Models
 
