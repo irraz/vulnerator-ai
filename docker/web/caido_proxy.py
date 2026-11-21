@@ -27,7 +27,7 @@ import json
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import httpx  # noqa: E402

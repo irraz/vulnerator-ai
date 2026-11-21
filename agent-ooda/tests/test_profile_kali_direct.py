@@ -1,29 +1,17 @@
 """Tests declarativos del perfil Hermes (OODA directo a Kali) y su cableado en el compose.
 
 El perfil es config declarativa (YAML/Markdown), no codigo ejecutable del repo. Estos tests
-afirman el CONTRATO declarativo: el config apunta SOLO al MCP de la Kali, con la whitelist de
-tools reales, y el servicio ooda-agent del compose arranca Hermes contra esa Kali.
+assert the v2.0.0 declarative CONTRACT: the config points ONLY to the Kali MCP, WITHOUT a
+whitelist (the server is the source of truth), and the compose ooda-agent service starts
+Hermes against that Kali.
 """
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import yaml
-
-# WHITELIST EXACTA (en orden) de las tools reales del servidor kali-mcp.
-EXPECTED_TOOLS = [
-    "kali_run",
-    "kali_exec",
-    "iam_enum",
-    "iam_simulate",
-    "get_scan_status",
-    "read_tool_logs",
-    "prowler_scan",
-    "record_finding",
-    "read_findings",
-    "server_info",
-]
 
 # Servidores MCP que el perfil debe declarar (Kali + navegador por MCP).
 EXPECTED_MCP_SERVERS = ["kali", "playwright"]
@@ -77,18 +65,65 @@ def test_kali_server_has_no_auth_headers(profile_config_path: Path) -> None:
     assert "Authorization" not in raw, "no debe haber header Authorization"
 
 
-def test_whitelist_is_exact_kali_tools(profile_config_path: Path) -> None:
-    cfg = _load_config(profile_config_path)
-    include = cfg["mcp_servers"]["kali"]["tools"]["include"]
-    assert include == EXPECTED_TOOLS, "la whitelist debe ser EXACTAMENTE las tools de la Kali, en orden"
-    assert "kali_run" in include
+def _server_tool_names(server_path: Path) -> list[str]:
+    """Derives by AST the tool names the server publishes (not by grep).
+
+    Resolves the module-level constants (``KALI_RUN_TOOL_NAME = "kali_run"``) used in
+    ``@mcp.tool(name=...)``; if they have no ``name=``, the name is the function's.
+    """
+    tree = ast.parse(server_path.read_text(encoding="utf-8"))
+    consts: dict[str, str] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            consts[node.targets[0].id] = node.value.value
+
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            if ".tool" not in ast.unparse(dec):
+                continue
+            name = node.name
+            for kw in getattr(dec, "keywords", []):
+                if kw.arg == "name":
+                    if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                        name = kw.value.value
+                    elif isinstance(kw.value, ast.Name):
+                        name = consts.get(kw.value.id, node.name)
+            names.append(name)
+    return sorted(names)
 
 
-def test_forbidden_tools_absent(profile_config_path: Path) -> None:
+def test_tools_include_removed_server_is_source_of_truth(
+    profile_config_path: Path, repo_root: Path
+) -> None:
+    """v2.0.0 contract: there is no `tools.include`; the server publishes what Hermes sees."""
     cfg = _load_config(profile_config_path)
-    include = cfg["mcp_servers"]["kali"]["tools"]["include"]
+    tools = cfg["mcp_servers"]["kali"]["tools"]
+    assert "include" not in tools, (
+        "`tools.include` was removed on purpose: the server is the source of truth"
+    )
+    assert tools["prompts"] is False
+    assert tools["resources"] is False
+
+    server_path = repo_root / "docker" / "kali" / "kali_mcp_server.py"
+    real_tools = _server_tool_names(server_path)
+    assert len(real_tools) == 21, f"the server publishes 21 tools (by AST): {real_tools}"
+    assert "read_scan_findings" in real_tools, "the extra tool read_scan_findings must exist"
+
+    raw_config = profile_config_path.read_text(encoding="utf-8")
+    server_ast = ast.dump(ast.parse(server_path.read_text(encoding="utf-8")))
     for tool in FORBIDDEN_TOOLS:
-        assert tool not in include, f"{tool} (contrato externo) no debe estar en la whitelist"
+        assert tool not in real_tools, f"{tool} (external contract) must not be in the real tools"
+        assert tool not in raw_config, f"{tool} must not appear in config.yaml"
+        assert tool not in server_ast, f"{tool} must not appear in the server AST"
 
 
 def test_utility_wrappers_disabled(profile_config_path: Path) -> None:
@@ -102,13 +137,23 @@ def test_native_toolsets_trimmed(profile_config_path: Path) -> None:
     cfg = _load_config(profile_config_path)
     toolsets = cfg.get("toolsets")
     assert isinstance(toolsets, list), "toolsets debe ser una LISTA de bundles (no un dict)"
-    assert toolsets == ["kali", "playwright"], (
-        "la superficie deben ser los dos MCP (kali + playwright), sin toolsets nativos"
+    assert toolsets == ["kali", "playwright", "todo", "kanban"], (
+        "the bundles are the two MCPs (kali + playwright) + todo/kanban, without native toolsets"
     )
     disabled = cfg.get("agent", {}).get("disabled_toolsets", [])
     # El navegador llega por MCP (`playwright`), NO por el toolset `browser` nativo: este sigue
     # desactivado, igual que el resto de bundles nativos.
-    for bundle in ("code_execution", "terminal", "file", "browser", "web"):
+    for bundle in (
+        "code_execution",
+        "terminal",
+        "file",
+        "browser",
+        "web",
+        "search",
+        "computer_use",
+        "memory",
+        "skills",
+    ):
         assert bundle in disabled, f"{bundle} debe estar en agent.disabled_toolsets"
 
 
@@ -146,11 +191,33 @@ def _load_ooda_agent(compose_path: Path) -> dict:
     return _load_services(compose_path)["ooda-agent"]
 
 
-def test_compose_services_are_kali_playwright_and_ooda_agent(compose_path: Path) -> None:
+# Compose services for v2.0.0 (base, no overlays): the two MCPs + ooda-agent + the
+# vulnerator-mcp/web stack and Caido. `web`-profiled: they only start with `--profile web`.
+EXPECTED_COMPOSE_SERVICES = [
+    "kali",
+    "ooda-agent",
+    "playwright-mcp",
+    "vulnerator-mcp",
+    "vulnerator-web",
+    "browser-view",
+    "caido-director",
+    "caido-init",
+    "caido",
+]
+
+WEB_PROFILE_SERVICES = ["vulnerator-web", "browser-view", "caido-director"]
+
+
+def test_compose_services_contract(compose_path: Path) -> None:
     services = _load_services(compose_path)
-    assert set(services) == {"kali", "playwright-mcp", "ooda-agent"}, (
-        "los servicios deben ser kali, playwright-mcp y ooda-agent (sin api/ui)"
+    assert set(services) == set(EXPECTED_COMPOSE_SERVICES), (
+        "the v2.0.0 compose has 9 services: the two MCPs, ooda-agent, vulnerator-mcp/web and Caido"
     )
+    for svc in WEB_PROFILE_SERVICES:
+        assert services[svc].get("profiles") == ["web"], f"{svc} must have profiles ['web']"
+    depends = services["ooda-agent"]["depends_on"]
+    assert depends["kali"]["condition"] == "service_healthy"
+    assert depends["playwright-mcp"]["condition"] == "service_healthy"
 
 
 def test_ooda_agent_depends_on_both_mcp_healthy(compose_path: Path) -> None:
