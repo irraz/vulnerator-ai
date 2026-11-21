@@ -219,7 +219,7 @@ dashboard:
   basic_auth:
     username: "admin"
     # Hash for "vulnerator" — regenerate if you change the password.
-    password_hash: "scrypt$16384$8$1$2ZcMvpA3ilGi8e2A3wmOBQ==$IdIdI0Mxd71T2lh7aKc++9/VPPnuGYjgwXIlwNBrVko="
+    password_hash: "scrypt$16384$8$1$2ZcMvpA3ilGi8e2A3wmOBQ==$IdIdI0Mxd71T2lh7aKc++9/VPPnuGYjgwXIlwNBrVko="  # pragma: allowlist secret
   # ember = crimson/bronze built-in theme — closest to Vulnerator-AI red palette.
   # Other built-in options: cyberpunk (green matrix), midnight, mono, nous-blue, rose.
   theme: "ember"
