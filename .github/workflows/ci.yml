@@ -5,14 +5,16 @@
 # y debe aparecer como check obligatorio (`🧱 Base scaffolding`) en la protección
 # de ramas (`.github/BRANCH-PROTECTION.md`).
 #
-# Bloquea cuatro cosas:
+# Bloquea cinco cosas:
 #   1. contratos + tools por AST + anexos del mapa + imports SDK-free
 #      -> `python scripts/smoke.py --static`
 #   2. regla anti-comentarios de parche
 #      -> `python scripts/check_quick_fix_comments.py --all`
-#   3. type-check de correctitud (mypy)
+#   3. ruff de correctitud (E9,F63,F7,F82,F401,F811,F821)
+#      -> `python -m ruff check .`
+#   4. type-check de correctitud (mypy)
 #      -> el step dedicado (ficheros puros de logica)
-#   4. las 6 suites
+#   5. las 6 suites
 #      -> `python scripts/smoke.py --quick`
 #
 # El pipeline legacy (`security.yml`, `pr-checks.yml`) y `pre-commit run --all-files`
@@ -53,6 +55,9 @@ jobs:
 
       - name: Regla anti-comentarios de parche
         run: python scripts/check_quick_fix_comments.py --all
+
+      - name: Ruff (correctitud)
+        run: python -m ruff check .
 
       - name: Type-check (correctitud)
         run: python -m mypy --config-file pyproject.toml docker/kali/scope_guard.py docker/kali/finding_store.py docker/kali/session_log.py docker/kali/tool_streaming.py docker/kali/shell_exec.py docker/mcp/mcp_tool_logic.py docker/web/ooda_parse.py docker/web/event_model.py
