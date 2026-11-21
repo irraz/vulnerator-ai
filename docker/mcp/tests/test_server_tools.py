@@ -1,10 +1,10 @@
 """Tests de las TOOLS del servidor (`docker/mcp/vulnerator_mcp_server.py`).
 
 A diferencia de `test_hermes_api_client`/`test_scope_fold` (SDK-free), este módulo SÍ importa
-el servidor, que importa `mcp` (FastMCP). Por eso se marca con
-``pytest.importorskip("mcp.server.fastmcp")``: en el host de dev sin el SDK (o con `mcp` 2.x,
-que elimina `mcp.server.fastmcp`) estos tests se OMITEN; en la imagen / venv con `mcp` 1.x
-instalado corren. Mirror del patrón "testear el shape de la respuesta de la tool" que piden los reviews.
+the server, which imports `mcp` (FastMCP). That is why it is marked with
+``pytest.importorskip("mcp.server.fastmcp")``: on the dev host without the SDK (or with `mcp` 2.x,
+which removes `mcp.server.fastmcp`) these tests are SKIPPED; in the image / venv with `mcp` 1.x
+installed they run. Mirror of the "test the shape of the tool response" pattern the reviews ask for.
 
 Cubren el shape a NIVEL DE TOOL (lo que el cliente MCP recibe), no solo la decisión pura:
   - Fail-closed / fallo pre-evento de ``stream_run_events``: sobre DESNUDO ``{"error": {...}}``
@@ -27,7 +27,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp")  # sin el SDK 1.x (o con mcp 2.x) se omite el módulo
+pytest.importorskip("mcp.server.fastmcp")  # without the 1.x SDK (or with mcp 2.x) the module is skipped
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.argv = ["vulnerator_mcp_server"]  # FastMCP no debe ver los args de pytest
