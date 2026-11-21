@@ -38,7 +38,7 @@ def test_build_iam_enum_cmd_shape_no_shell():
 
 @pytest.mark.parametrize(
     "bad",
-    ["", "123", "12345678901", "1234567890123", "12345678901a", "../etc", "1; rm -rf /"],
+    ["", "123", "12345678901", "1234567890123", "12345678901a", "../etc", "1; rm -rf /"],  # pragma: allowlist secret
 )
 def test_build_iam_enum_cmd_rejects_malformed_account(bad):
     with pytest.raises(aws_exec.AwsExecError):

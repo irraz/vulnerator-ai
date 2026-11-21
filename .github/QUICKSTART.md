@@ -120,7 +120,7 @@ gh pr create --title "Test: Security Pipeline" --body "Verificar que todos los c
 ```bash
 # EN UNA RAMA DE PRUEBA SOLAMENTE
 git checkout -b test/secret-detection
-echo "AWS_SECRET_KEY=AKIAIOSFODNN7EXAMPLE" > fake-secret.txt
+echo "AWS_SECRET_KEY=AKIAIOSFODNN7EXAMPLE" > fake-secret.txt  # pragma: allowlist secret
 git add fake-secret.txt
 git commit -m "test: Trigger secret detection"
 git push origin test/secret-detection
