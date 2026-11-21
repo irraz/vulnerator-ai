@@ -10,6 +10,14 @@ positivos en este repo; con el, 0.
 Ambito: ficheros de codigo y configuracion (``.py``, ``.sh``, ``.yaml``...).
 No excluye tests: un marcador inyectado en un test es tambien un hallazgo.
 
+Alcance de la deteccion a media linea: solo en ``.py``, y solo sobre tokens
+``COMMENT`` reales (``tokenize``), que es la unica forma determinista de no marcar
+un ``#`` dentro de un literal (``s = "error # TODO: fix"``). En el resto de
+ficheros (``.sh``, ``.yaml``, ``.toml``) un marcador a media linea queda FUERA de
+ambito por decision explicita: sin un parser no hay forma fiable de distinguir
+comentario de literal, y el gate es bloqueante. Los marcadores que abren la nota
+(``# TODO:``, ``## FIXME:``, docstrings) se detectan en todos los ficheros.
+
 Salida: ``ruta:línea: | comentario`` por hallazgo y un resumen final.
 Exit: ``0`` limpio, ``1`` hallazgos, ``2`` error de uso.
 """
@@ -17,8 +25,10 @@ Exit: ``0`` limpio, ``1`` hallazgos, ``2`` error de uso.
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 MARKERS = (
@@ -38,12 +48,12 @@ MARKERS = (
 
 _MARKER_ALT = "|".join(re.escape(m) for m in sorted(MARKERS, key=len, reverse=True))
 
-# El marcador abre el comentario (#, //, /*, *, <!--) y lleva ':' o '!' despues.
-COMMENT_RE = re.compile(r"^\s*(?:#|//|/\*|\*|<!--)\s*(?:" + _MARKER_ALT + r")\s*[:!]")
+# El marcador abre el comentario (#, ##, //, /*, *, <!--) y lleva ':' o '!' despues.
+COMMENT_RE = re.compile(r"^\s*(?:#+|//|/\*|\*|<!--)\s*(?:" + _MARKER_ALT + r")\s*[:!]")
 # El marcador es el primer token de un docstring y lleva ':' o '!' despues.
 DOCSTRING_RE = re.compile(r"^\s*(?:\"\"\"|''')\s*(?:" + _MARKER_ALT + r")\s*[:!]")
-# Comentario de media linea: codigo antes del '#' y marcador con ':' o '!'.
-TRAILING_RE = re.compile(r"\S\s+#\s*(?:" + _MARKER_ALT + r")\s*[:!]")
+# Media linea en .py: se aplica SOLO al texto de tokens COMMENT de tokenize.
+TRAILING_MARKER_RE = re.compile(r"^\s*#+\s*(?:" + _MARKER_ALT + r")\s*[:!]")
 
 CODE_SUFFIXES = {
     ".py",
@@ -108,21 +118,47 @@ def collect_files(targets: list[str], root: Path) -> list[Path]:
     return files
 
 
+def _py_comment_tokens(text: str) -> list[tuple[int, str]]:
+    """Comentarios reales de un .py: [(linea, texto)] solo tokens COMMENT.
+
+    ``tokenize`` es la unica fuente determinista: un ``#`` dentro de un literal no
+    produce un token COMMENT, asi que no se marca. Si el fichero no tokeniza
+    (sintaxis a medias, fichero truncado), no se detecta media linea: el gate
+    sigue cubriendo los marcadores que abren la nota.
+    """
+    tokens: list[tuple[int, str]] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                tokens.append((tok.start[0], tok.string))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return []
+    return tokens
+
+
 def scan_file(path: Path) -> list[tuple[int, str]]:
     """Devuelve [(linea, comentario)] con marcadores de deuda."""
     found: list[tuple[int, str]] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         print(f"aviso: no se pudo leer {path}: {exc}", file=sys.stderr)
         return found
-    for lineno, line in enumerate(lines, start=1):
-        if (
-            COMMENT_RE.match(line)
-            or DOCSTRING_RE.match(line)
-            or TRAILING_RE.search(line)
-        ):
+
+    flagged_lines: set[int] = set()
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if COMMENT_RE.match(line) or DOCSTRING_RE.match(line):
             found.append((lineno, line.strip()))
+            flagged_lines.add(lineno)
+
+    if path.suffix.lower() == ".py":
+        lines = text.splitlines()
+        for lineno, comment in _py_comment_tokens(text):
+            if lineno in flagged_lines:
+                continue
+            if TRAILING_MARKER_RE.match(comment):
+                found.append((lineno, lines[lineno - 1].strip()))
+
     return found
 
 

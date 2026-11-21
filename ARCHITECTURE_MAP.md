@@ -311,7 +311,8 @@ Seis suites, una por componente. Se corren con `bash scripts/run_tests.sh`
 - Anfitrión: Python 3.14; contenedores propios: Python 3.13
   (`docker/kali/Dockerfile:29`, `docker/mcp/Dockerfile:17`, `docker/web/Dockerfile:16`).
 - Los tests y el smoke corren con `env -u PYTHONPATH` (un PYTHONPATH global contamina con
-  `mcp` 2.3.0) y nunca con `--import-mode=importlib`.
+  `mcp` 2.3.0). El runner por suite no usa `--import-mode=importlib`; un `pytest` raíz sí
+  lo requiere por la colisión de paquetes `tests` (deuda en `## 14`).
 - `uv` resuelve las dependencias de cada suite en un entorno efímero
   (`scripts/run_tests.sh:1`); las dependencias de producto están fijadas en
   `docker/kali/requirements.txt:1`, `docker/mcp/requirements.txt:1` y
