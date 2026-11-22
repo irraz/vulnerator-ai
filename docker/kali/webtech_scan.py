@@ -1,31 +1,31 @@
 """Fingerprinting web por CRUCE de whatweb + webanalyze + wpscan (STDLIB PURA).
 
-Es la LÓGICA testeable del runner ``webtech_scan`` que ``kali_mcp_server`` expone como
+It is the testable LOGIC of the ``webtech_scan`` runner that ``kali_mcp_server`` exposes as
 ``@mcp.tool``. Igual que ``shell_exec`` / ``dnsdumpster_client`` / ``scope_guard``, vive en
-un módulo aparte con SOLO la librería estándar (sin ``mcp``) para cubrirse con tests
+a separate module with ONLY the standard library (no ``mcp``) to be covered by tests
 unitarios en el venv de dev.
 
-Qué resuelve: tres herramientas ven la pila tecnológica de un sitio con sesgos distintos.
-Ninguna sola es de fiar para la VERSIÓN de un componente; cruzarlas sube la confianza y
-destapa discrepancias. Este módulo ejecuta las tres (cada una OPCIONAL: si el binario no
-está se omite y se reporta, nunca se finge) y FUSIONA sus salidas en una tabla única
-``tecnología -> {versiones por fuente, fuentes que la vieron, acuerdo/conflicto}``:
+What it solves: three tools see a site's technology stack with different biases.
+No single one is trustworthy for a component's VERSION; cross-checking raises confidence and
+exposes discrepancies. This module runs all three (each OPTIONAL: if the binary is
+absent it is skipped and reported, never faked) and MERGES their outputs into a single table
+``technology -> {versions by source, sources that saw it, agreement/conflict}``:
 
-  - whatweb     : fingerprint amplio y rápido; versiones en ``plugins.<x>.version``.
+  - whatweb     : broad, fast fingerprinting; versions in ``plugins.<x>.version``.
   - webanalyze  : motor de fingerprints de Wappalyzer (port en Go; el CLI oficial de
-                  Wappalyzer está descontinuado). Categorías + versión por app.
+                  Wappalyzer is discontinued). Categories + version per app.
   - wpscan      : especialista WordPress. Si el objetivo NO es WordPress lo dice
                   (``scan_aborted``) y se reporta como tal (NO es un error); si lo es,
-                  aporta versión del core, plugins/temas con versión y hallazgos.
+                  provides core version, versioned plugins/themes and findings.
 
-Cruce de versiones: por cada tecnología se recogen TODAS las versiones observadas por
+Version cross-check: for each technology, ALL versions observed by
 fuente. Si dos fuentes dan versiones distintas para el mismo componente se marca
-``version_conflict`` (señal para el bucle OODA de que la versión no es concluyente). La
-versión "mejor" es la más específica concordante.
+``version_conflict`` (a signal to the OODA loop that the version is inconclusive). The
+"best" version is the most specific agreeing one.
 
-Dato NO confiable: la salida de las tres herramientas se transporta verbatim; aquí sólo se
+UNTRUSTED data: the three tools' output is transported verbatim; here only the
 PARSEA su forma conocida, nunca se interpreta su contenido. Las funciones ``parse_*`` y
-``cross_reference`` son PURAS (string JSON -> dict) y son el núcleo cubierto por tests; el
+``cross_reference`` are PURE (JSON string -> dict) and are the core covered by tests; the
 orquestador ``run_webtech`` ejecuta los binarios y delega en ellas.
 """
 
@@ -38,28 +38,28 @@ import subprocess
 import tempfile
 from typing import Any
 
-# Timeout por herramienta (segundos). whatweb/webanalyze son rápidos; wpscan puede tardar.
+# Timeout per tool (seconds). whatweb/webanalyze are fast; wpscan can be slow.
 DEFAULT_TOOL_TIMEOUT_S = int(os.environ.get("WEBTECH_TOOL_TIMEOUT", "300"))
 
-# Nombres de binario (overridable por entorno para contenedores con rutas no estándar).
+# Binary names (overridable via environment for containers with non-standard paths).
 WHATWEB_BIN = os.environ.get("WHATWEB_BIN", "whatweb")
 WEBANALYZE_BIN = os.environ.get("WEBANALYZE_BIN", "webanalyze")
 WPSCAN_BIN = os.environ.get("WPSCAN_BIN", "wpscan")
 
 # webanalyze lee sus fingerprints de ``technologies.json`` en el CWD por defecto. En el
-# contenedor el fichero se baja a una ruta fija (ver Dockerfile) y se expone aquí para
-# pasarlo con ``-apps``; si está vacío, webanalyze usa su búsqueda por defecto.
+# container the file is downloaded to a fixed path (see Dockerfile) and exposed here to
+# pass with ``-apps``; if empty, webanalyze uses its default search.
 WEBANALYZE_APPS = os.environ.get("WEBANALYZE_APPS", "")
 
 
 class WebTechError(ValueError):
-    """Entrada inválida para el runner (fail-closed; no se ejecuta nada)."""
+    """Invalid input for the runner (fail-closed; nothing is executed)."""
 
 
 def _validate_url(url: Any) -> str:
-    """Valida que ``url`` sea http(s) no vacía, o lanza ``WebTechError``."""
+    """Validates that ``url`` is a non-empty http(s) URL, or raises ``WebTechError``."""
     if not isinstance(url, str) or not url.strip():
-        raise WebTechError("url inválida: se espera una URL http(s) no vacía.")
+        raise WebTechError("invalid url: expected a non-empty http(s) URL.")
     u = url.strip()
     if not u.startswith(("http://", "https://")):
         u = "https://" + u
@@ -73,8 +73,8 @@ def parse_whatweb(raw: str) -> list[dict[str, Any]]:
     """Parsea el ``--log-json`` de whatweb en ``[{name, version, source='whatweb'}]``.
 
     whatweb emite un ARRAY (una entrada por salto de URL); cada una lleva ``plugins`` como
-    dict ``nombre -> {version:[...], string:[...]}``. Se extrae nombre+versión de cada
-    plugin. Robusto a JSON vacío/erróneo (devuelve lista vacía): dato NO confiable.
+    dict ``name -> {version:[...], string:[...]}``. Name+version is extracted from each
+    plugin. Robust to empty/bad JSON (returns an empty list): untrusted data.
     """
     out: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -156,9 +156,9 @@ def parse_wpscan(raw: str) -> dict[str, Any]:
 
     Devuelve ``{is_wordpress, aborted_reason, wp_version, theme, plugins:[...],
     interesting_count, techs:[...]}`` donde ``techs`` normaliza core + plugins + tema a
-    ``[{name, version, source='wpscan'}]`` para el cruce. Si wpscan abortó porque el sitio
+    ``[{name, version, source='wpscan'}]`` for cross-checking. If wpscan aborted because the site
     no es WordPress, ``is_wordpress=False`` y ``aborted_reason`` lleva el motivo (NO es un
-    error). Robusto a JSON vacío/erróneo.
+    error). Robust to empty/bad JSON.
     """
     result: dict[str, Any] = {
         "is_wordpress": False,
@@ -224,7 +224,7 @@ def parse_wpscan(raw: str) -> dict[str, Any]:
     if isinstance(interesting, list):
         result["interesting_count"] = len(interesting)
         # Un target vivo con findings pero sin version/plugins detectados sigue siendo WP
-        # si wpscan no abortó: lo marcamos para no reportar un falso "no es WordPress".
+        # if wpscan did not abort: we mark it so as not to report a false "not WordPress".
         if interesting and not result["is_wordpress"] and not result["aborted_reason"]:
             result["is_wordpress"] = True
 
@@ -233,7 +233,7 @@ def parse_wpscan(raw: str) -> dict[str, Any]:
 
 
 def _norm(name: str) -> str:
-    """Clave de fusión case-insensitive y sin espacios de borde para un nombre de tech."""
+    """Case-insensitive merge key without leading/trailing spaces for a tech name."""
     return name.strip().lower()
 
 
@@ -245,10 +245,10 @@ def cross_reference(*tech_lists: list[dict[str, Any]]) -> dict[str, Any]:
 
         {name, sources:[...], versions:{source: [v,...]}, best_version, version_conflict}
 
-    ``version_conflict`` es True si dos fuentes reportan versiones NO vacías distintas para
-    el mismo componente (señal de versión no concluyente). ``best_version`` es la versión
-    concordante más específica (la más larga entre las observadas; vacío si ninguna fuente
-    dio versión). El cruce es por nombre normalizado (case-insensitive).
+    ``version_conflict`` is True if two sources report different NON-empty versions for
+    the same component (inconclusive-version signal). ``best_version`` is the version
+    most specific agreeing one (the longest among those observed; empty if no source
+    gave a version). Cross-checking is by normalized name (case-insensitive).
     """
     merged: dict[str, dict[str, Any]] = {}
     all_sources: list[str] = []
@@ -305,7 +305,7 @@ def cross_reference(*tech_lists: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             )
 
-    # Orden estable: primero las vistas por más fuentes, luego alfabético.
+    # Stable order: first those seen by more sources, then alphabetical.
     technologies.sort(key=lambda t: (-len(t["sources"]), t["name"].lower()))
     return {
         "technologies": technologies,
@@ -324,11 +324,11 @@ def _which(bin_name: str) -> str | None:
 def _run(cmd: list[str], timeout: int) -> tuple[int, str, str]:
     """Ejecuta ``cmd`` sin shell con timeout; devuelve ``(rc, stdout, stderr)``.
 
-    No lanza por returncode ni por timeout: un fallo de la herramienta es información, no
-    una excepción. Dato NO confiable: stdout/stderr verbatim.
+    It does not raise on returncode or timeout: a tool failure is information, not
+    an exception. UNTRUSTED data: stdout/stderr verbatim.
     """
     try:
-        proc = subprocess.run(  # noqa: S603 - binarios fijos, args construidos aquí
+        proc = subprocess.run(  # noqa: S603 - fixed binaries, args built here
             cmd, capture_output=True, text=True, timeout=timeout
         )
         return proc.returncode, proc.stdout or "", proc.stderr or ""
@@ -346,15 +346,15 @@ def run_webtech(
 ) -> dict[str, Any]:
     """Ejecuta whatweb + webanalyze + (opcional) wpscan y CRUZA sus versiones.
 
-    Cada herramienta es opcional: si su binario no está, se omite y se anota en ``skipped``
+    Each tool is optional: if its binary is absent, it is skipped and noted in ``skipped``
     (disciplina "no se finge"). Flujo por herramienta: ejecutar -> capturar JSON (fichero o
-    stdout) -> parsear con la función pura correspondiente. Finalmente ``cross_reference``
+    stdout) -> parse with the corresponding pure function. Finally ``cross_reference``
     fusiona las tres fuentes.
 
     Returns ``{'status':'done', url, cross_reference:{...}, wpscan:{...}, ran:[...],
     skipped:[...], errors:[...]}``. ``status`` es ``'done'`` aunque alguna herramienta
-    falle (lo recolectado por las demás sigue siendo útil); sólo es ``'failed'`` si la URL
-    es inválida o NINGUNA herramienta pudo ejecutarse.
+    fails (what the others collected is still useful); it is ``'failed'`` only if the URL
+    is invalid or NO tool could run.
     """
     try:
         u = _validate_url(url)
@@ -453,7 +453,7 @@ def run_webtech(
             "cross_reference": crossref,
         }
         if wpscan_summary:
-            # resumen WP sin la lista ``techs`` (ya está fusionada en cross_reference)
+            # WP summary without the ``techs`` list (already merged in cross_reference)
             out["wpscan"] = {k: v for k, v in wpscan_summary.items() if k != "techs"}
         if skipped:
             out["skipped"] = skipped

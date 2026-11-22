@@ -1,10 +1,10 @@
-"""Tests stdlib-only del runner multi-herramienta genérico (`collector_runner.py`).
+"""Stdlib-only tests of the generic multi-tool runner (`collector_runner.py`).
 
-Ejercitan la LÓGICA del runner SIN los binarios reales (prowler/scout/cloudsplaining):
+They exercise the runner's LOGIC without the real binaries (prowler/scout/cloudsplaining):
   - los command builders producen el argv esperado por fuente;
   - los localizadores eligen el crudo correcto (JSON de ScoutSuite/Cloudsplaining, NUNCA
     el HTML);
-  - la finalización stagea el crudo como artefacto y construye el `done` con la REFERENCIA
+  - finalization stages the raw as an artifact and builds `done` with the REFERENCE
     (sha256/size correctos); las fuentes no-Prowler NO populan el puente SSE;
   - Prowler sigue produciendo el mismo `done` que hoy (delegando en prowler_artifact);
   - ``run_collection`` orquesta end-to-end con un runner de subproceso simulado.
@@ -83,8 +83,8 @@ def test_scoutsuite_locate_picks_results_js(tmp_path):
 
 def test_cloudsplaining_locate_prefers_iam_results_over_findings_and_html(tmp_path):
     # Layout REAL del binario 0.9.1: escribe el HTML + ``iam-findings-*.json`` +
-    # ``iam-results-*.json`` en ``outdir``. Se le da a ``iam-findings-*.json`` el mtime MÁS
-    # reciente para que un localizador ingenuo de "``*.json`` más reciente" eligiera el
+    # ``iam-results-*.json`` in ``outdir``. ``iam-findings-*.json`` is given the NEWEST mtime
+    # so a naive "newest ``*.json``" locator would pick the
     # equivocado; el localizador debe fijar el prefijo y devolver el ``iam-results-*.json``.
     import os
     import time
@@ -97,7 +97,7 @@ def test_cloudsplaining_locate_prefers_iam_results_over_findings_and_html(tmp_pa
     findings = outdir / "iam-findings-default.json"
     findings.write_text("{}", encoding="utf-8")
     newer = time.time() + 10
-    os.utime(findings, (newer, newer))  # findings es el MÁS reciente
+    os.utime(findings, (newer, newer))  # findings is the newest
 
     found = collector_runner._cloudsplaining_locate(outdir)
     assert found == results  # pinned por prefijo, no por mtime
@@ -105,7 +105,7 @@ def test_cloudsplaining_locate_prefers_iam_results_over_findings_and_html(tmp_pa
 
 def test_cloudsplaining_locate_falls_back_to_findings_never_html(tmp_path):
     # Sin ``iam-results-*.json`` (solo findings + HTML), cae al ``iam-findings-*.json`` y
-    # NUNCA al HTML de presentación.
+    # NEVER the presentation HTML.
     outdir = tmp_path / "out"
     outdir.mkdir()
     (outdir / "iam-report-default.html").write_text("<html></html>", encoding="utf-8")
@@ -142,7 +142,7 @@ def test_finalize_scoutsuite_stages_artifact_and_done_ref_no_bridge(staging):
     assert artifact["name"] == collector_runner.SCOUTSUITE_ARTIFACT_NAME
     assert artifact["size"] == len(raw)
     assert artifact["sha256"] == hashlib.sha256(raw).hexdigest()
-    # El crudo (``.js`` verbatim) quedó staged con el nombre canónico.
+    # The raw (``.js`` verbatim) was staged under the canonical name.
     staged = artifact_store.resolve("exec-ss", collector_runner.SCOUTSUITE_ARTIFACT_NAME)
     assert staged.read_bytes() == raw
     # D6: una fuente no-Prowler NO popula el puente SSE.
@@ -186,7 +186,7 @@ def test_finalize_prowler_matches_today_with_bridge(staging):
     assert done["findings_count"] == 3
     assert done["artifact"]["name"] == collector_runner.PROWLER_ARTIFACT_NAME
     assert "findings" not in done  # findings por referencia, no inline
-    # Prowler SÍ mantiene el puente SSE de compat.
+    # Prowler DOES keep the compat SSE bridge.
     page = tool_streaming.read_findings("exec-pw", 0)
     assert [f["check_id"] for f in page["findings"]] == ["c0", "c1", "c2"]
 
@@ -204,7 +204,7 @@ def test_available_collectors_reports_bool_per_source():
 
 
 def _fake_runner(write_output):
-    """Fake de ``run_tool_streaming``: escribe la salida de fixture y devuelve éxito."""
+    """Fake of ``run_tool_streaming``: writes fixture output and returns success."""
 
     def _run(cmd, execution_id, timeout=0, env=None, cwd=None):
         write_output(cmd)
@@ -249,7 +249,7 @@ def test_run_collection_cloudsplaining_e2e(staging, monkeypatch):
             assert Path(cmd[cmd.index("--input-file") + 1]).is_file()
             outdir = Path(cmd[cmd.index("--output") + 1])
             outdir.mkdir(parents=True, exist_ok=True)
-            # Layout real del binario (0.9.1): HTML de presentación + los dos JSON de scan.
+            # Real binary layout (0.9.1): presentation HTML + the two scan JSONs.
             (outdir / "iam-report-default.html").write_text("<html></html>", encoding="utf-8")
             (outdir / "iam-findings-default.json").write_bytes(raw)
             (outdir / "iam-results-default.json").write_bytes(raw)
@@ -268,7 +268,7 @@ def test_run_collection_missing_binary_fails_honestly(monkeypatch):
     monkeypatch.setattr(collector_runner.shutil, "which", lambda b: None)
     with pytest.raises(RuntimeError) as exc:
         collector_runner.run_collection("scoutsuite", "1", "exec-nobinary")
-    assert "no está disponible" in str(exc.value)
+    assert "is not available" in str(exc.value)
 
 
 def test_run_collection_unknown_source_raises():

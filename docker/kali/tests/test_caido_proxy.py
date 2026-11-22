@@ -2,12 +2,12 @@
 
 No importan `mcp`/`anyio` ni salen a la red: cubren las funciones PURAS (endpoint del proxy,
 `proxy_env`, `build_proxy_cli_args`), la rama de I/O de fichero + subprocess de `install_ca`
-(apuntada a un tmpdir y a comandos reales inocuos como `true` / uno inexistente), y la ÚNICA
-función con red (`fetch_ca`) con `urllib.request.urlopen` monkeypatcheado. El patrón calca
+(pointed at a tmpdir and harmless real commands like `true` / a nonexistent one), and the ONLY
+network function (`fetch_ca`) with `urllib.request.urlopen` monkeypatched. The pattern mirrors
 `tests/test_caido_client.py`.
 
-El `enable_capture` de verdad (que confía la CA real y toca el trust store del sistema) se
-valida aparte, EN VIVO, contra un Caido levantado en local; aquí se cubre su orquestación con
+The real `enable_capture` (which trusts the real CA and touches the system trust store) is
+validated separately, LIVE, against a locally running Caido; here its orchestration is covered with
 todo simulado (fetch/install/env), sin red ni escritura en el trust store del sistema.
 """
 
@@ -18,8 +18,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# El módulo bajo prueba vive en docker/kali/ (el servidor MCP NO se importa: arrastra
-# `mcp`/`anyio`). Se añade el padre al path explícitamente.
+# The module under test lives in docker/kali/ (the MCP server is NOT imported: it pulls in
+# `mcp`/`anyio`). The parent is added to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import caido_client  # noqa: E402
@@ -40,7 +40,7 @@ def test_proxy_endpoint_mismo_host_port_que_la_api():
 
 
 def test_proxy_endpoint_anade_esquema_y_puerto_por_defecto():
-    # `resolve_url` añade http:// y, sin puerto, http => 80.
+    # `resolve_url` adds http:// and, without a port, http => 80.
     assert caido_proxy.proxy_endpoint("caido") == "http://caido:80"
 
 
@@ -101,7 +101,7 @@ def test_build_proxy_cli_args_sin_url_devuelve_lista_vacia(monkeypatch):
 
 
 class _FakeResp:
-    """Context manager mínimo que imita la respuesta de ``urlopen`` (sólo ``.read()``)."""
+    """Minimal context manager imitating an ``urlopen`` response (only ``.read()``)."""
 
     def __init__(self, body: bytes):
         self._body = body
@@ -143,7 +143,7 @@ def test_fetch_ca_cuerpo_no_pem_falla(monkeypatch):
 
 def test_fetch_ca_url_error_es_unreachable(monkeypatch):
     def boom(req, timeout=None):
-        raise urllib.error.URLError("conexión rechazada")
+        raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     out = caido_proxy.fetch_ca("http://caido:8080")
@@ -169,7 +169,7 @@ def test_install_ca_escribe_y_actualiza_ok(tmp_path):
     dest = tmp_path / "caido.crt"
     out = caido_proxy.install_ca(_FAKE_PEM, dest=str(dest), update_cmd=("true",))
     assert out == {"status": "done", "path": str(dest)}
-    assert dest.read_text() == _FAKE_PEM  # el PEM quedó escrito tal cual
+    assert dest.read_text() == _FAKE_PEM  # the PEM was written as-is
 
 
 def test_install_ca_crea_directorios_intermedios(tmp_path):
@@ -185,7 +185,7 @@ def test_install_ca_actualizador_ausente_es_absent_sin_lanzar(tmp_path):
         _FAKE_PEM, dest=str(dest), update_cmd=("nonexistent-bin-xyz",)
     )
     assert out["status"] == "absent"  # no se finge: binario ausente reportado
-    assert dest.read_text() == _FAKE_PEM  # la CA igualmente se escribió
+    assert dest.read_text() == _FAKE_PEM  # the CA was likewise written
 
 
 def test_install_ca_actualizador_falla_returncode_es_failed(tmp_path):
@@ -211,7 +211,7 @@ def test_install_ca_dest_no_escribible_es_failed(tmp_path):
     assert out["status"] == "failed"
 
 
-# --- enable_capture (orquestación con todo simulado) ------------------------------------
+# --- enable_capture (orchestration with everything mocked) ------------------------------------
 
 
 def test_enable_capture_happy_path(monkeypatch, tmp_path):
@@ -235,17 +235,17 @@ def test_enable_capture_se_detiene_si_fetch_ca_falla(monkeypatch, tmp_path):
     monkeypatch.setattr(
         caido_proxy,
         "fetch_ca",
-        lambda url=None, timeout=15: {"status": "unreachable", "error": "caído"},
+        lambda url=None, timeout=15: {"status": "unreachable", "error": "down"},
     )
 
     def boom(*a, **k):
-        raise AssertionError("no debe instalar si fetch_ca falló")
+        raise AssertionError("must not install if fetch_ca failed")
 
     monkeypatch.setattr(caido_proxy, "install_ca", boom)
     out = caido_proxy.enable_capture(
         "http://caido:8080", dest=str(dest), update_cmd=("true",)
     )
-    assert out["status"] == "unreachable"  # devuelve el dict de la etapa que falló
+    assert out["status"] == "unreachable"  # returns the failed stage's dict
     assert not dest.exists()
 
 

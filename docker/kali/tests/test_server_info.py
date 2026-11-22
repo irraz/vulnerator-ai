@@ -53,7 +53,7 @@ def test_lista_estatica_de_15_nombres_eliminada():
         "DNS_RECON_TOOL_NAME",
         "WEBTECH_SCAN_TOOL_NAME",
     ):
-        assert f"{const}," not in stripped_lines, f"la lista estática aún referencia {const!r}"
+        assert f"{const}," not in stripped_lines, f"static list still references {const!r}"
     # The textual marker of the old inline list (`"server_info",` as an element) neither.
     assert '"server_info",' not in source
 
@@ -72,8 +72,8 @@ def test_load_plugins_bajo_guard_main_y_no_a_nivel_modulo():
     # The invocation must exist and be AFTER the guard (inside the __main__ block).
     call = "plugin_loader.load_plugins("
     assert call in source
-    assert source.index(call) > guard_idx, "load_plugins no está bajo el guard __main__"
+    assert source.index(call) > guard_idx, "load_plugins is not under the __main__ guard"
     # And there must be no invocation at module level (before the guard).
     assert (
         source[:guard_idx].find(call) == -1
-    ), "load_plugins se invoca a nivel de módulo"
+    ), "load_plugins is invoked at module level"

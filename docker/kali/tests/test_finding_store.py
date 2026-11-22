@@ -1,11 +1,11 @@
 """Tests stdlib-only del store de hallazgos por engagement (`docker/kali/finding_store.py`).
 
-No importan `mcp`/`anyio`: sólo librería estándar + pytest. Verifican:
+They do not import `mcp`/`anyio`: only standard library + pytest. They verify:
   - ``append`` normaliza y persiste un hallazgo (id/recorded_at autoritativos del servidor);
-  - validación fail-closed (title vacío, state inválido, phase inválida -> no se escribe);
-  - append atómico de varias líneas y lectura paginada por cursor;
-  - confinamiento de rutas (engagement_id con traversal -> no escapa / lectura vacía);
-  - tolerancia a líneas corruptas (se saltan) y a engagements inexistentes.
+  - fail-closed validation (empty title, invalid state, invalid phase -> nothing is written);
+  - atomic multi-line append and cursor-paginated reading;
+  - path confinement (engagement_id with traversal -> no escape / empty read);
+  - tolerance of corrupt lines (skipped) and nonexistent engagements.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-# El módulo bajo prueba vive en docker/kali/ (junto al servidor MCP, que NO se importa
-# aquí porque arrastra `mcp`/`anyio`). Lo añadimos al path explícitamente.
+# The module under test lives in docker/kali/ (alongside the MCP server, which is NOT imported
+# here because it pulls in `mcp`/`anyio`). We add it to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import finding_store  # noqa: E402
@@ -25,7 +25,7 @@ import finding_store  # noqa: E402
 
 @pytest.fixture()
 def staging(tmp_path, monkeypatch):
-    """Apunta la raíz del staging a un tmp dir por test (env leído en caliente)."""
+    """Points the staging root to a tmp dir per test (env read at call time)."""
     monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
     return tmp_path
 
@@ -50,7 +50,7 @@ def test_append_persists_and_fills_server_fields(staging):
     assert rec["phase"] == "observe"
     assert rec["technique_id"] == "T1046"
 
-    # Quedó una línea JSON en el fichero del engagement.
+    # One JSON line was left in the engagement file.
     path = staging / "eng-1" / finding_store.FINDINGS_NAME
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
@@ -73,17 +73,17 @@ def test_append_server_timestamp_overrides_agent_supplied(staging):
     "bad",
     [
         {"state": "hypothesis"},                       # falta title
-        {"title": "   ", "state": "hypothesis"},       # title vacío
+        {"title": "   ", "state": "hypothesis"},       # empty title
         {"title": "x"},                                # falta state
         {"title": "x", "state": "exploited"},          # state fuera del enum
-        {"title": "x", "state": "confirmed", "phase": "pwn"},  # phase inválida
+        {"title": "x", "state": "confirmed", "phase": "pwn"},  # invalid phase
         "not-a-dict",                                  # no es objeto
     ],
 )
 def test_append_rejects_invalid_without_writing(staging, bad):
     with pytest.raises(finding_store.FindingStoreError):
         finding_store.append("eng-bad", bad)
-    # Fail-closed: no se creó el fichero.
+    # Fail-closed: no file was created.
     assert not (staging / "eng-bad" / finding_store.FINDINGS_NAME).exists()
 
 
@@ -94,14 +94,14 @@ def test_append_accepts_canonical_severity(staging, sev):
 
 
 def test_append_without_severity_is_valid_and_omits_field(staging):
-    # Opcional y retrocompatible: ausente sigue siendo válido y no se inventa el campo.
+    # Optional and backward-compatible: absence remains valid and the field is not invented.
     rec = finding_store.append("eng-sev", _minimal())
     assert "severity" not in rec
 
 
 @pytest.mark.parametrize("bad_sev", ["informational", "warning", "HIGH", "7.5", "none", ""])
 def test_append_rejects_non_canonical_severity(staging, bad_sev):
-    # Fuera de los cinco buckets canónicos -> fail-closed, no se escribe nada.
+    # Outside the five canonical buckets -> fail-closed, nothing is written.
     with pytest.raises(finding_store.FindingStoreError):
         finding_store.append("eng-sev-bad", _minimal(severity=bad_sev))
     assert not (staging / "eng-sev-bad" / finding_store.FINDINGS_NAME).exists()
@@ -144,7 +144,7 @@ def test_confirmed_rejects_empty_command(staging):
 
 
 def test_confirmed_rejects_trivial_output(staging):
-    # Salida demasiado corta (marcador vacío) no sirve como evidencia verbatim.
+    # Output too short (empty marker) is not valid verbatim evidence.
     with pytest.raises(finding_store.FindingStoreError):
         finding_store.append("eng-c", _minimal(
             state="confirmed",
@@ -206,14 +206,14 @@ def test_read_paginates_by_cursor(staging):
 def test_read_skips_corrupt_lines(staging):
     finding_store.append("eng-corrupt", _minimal(title="good"))
     path = staging / "eng-corrupt" / finding_store.FINDINGS_NAME
-    # Inyecta una línea corrupta (no JSON) y otra válida.
+    # Injects one corrupt line (not JSON) and one valid line.
     with path.open("a", encoding="utf-8") as handle:
         handle.write("}{ not json\n")
         handle.write(json.dumps({"id": "x", "title": "also good", "state": "partial"}) + "\n")
 
     page = finding_store.read("eng-corrupt")
     titles = [f["title"] for f in page["findings"]]
-    assert titles == ["good", "also good"]  # la línea corrupta se saltó
+    assert titles == ["good", "also good"]  # the corrupt line was skipped
     assert page["total"] == 2
 
 
@@ -227,7 +227,7 @@ def test_append_rejects_unsafe_engagement_id(staging, evil):
 
 
 def test_read_unsafe_engagement_id_returns_empty(staging):
-    # En lectura el confinamiento NO revienta: devuelve página vacía (fail-closed).
+    # On reads, confinement does NOT crash: it returns an empty page (fail-closed).
     page = finding_store.read("../escape")
     assert page["total"] == 0
     assert page["done"] is True

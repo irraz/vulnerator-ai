@@ -1,35 +1,35 @@
-"""Automate de Caido (fuzzing tipo Intruder/ffuf) en STDLIB PURA — la lógica de la tool.
+"""Caido Automate (Intruder/ffuf-style fuzzing) in PURE STDLIB — the tool's logic.
 
 Es la pieza testeable de la tool ``caido_automate`` que ``kali_mcp_server`` expone como
-``@mcp.tool``. Igual que ``caido_client`` (Replay/historial), vive en un módulo aparte con SOLO
-la librería estándar (sin ``mcp`` ni ``requests``) y REUTILIZA el transporte de ``caido_client``
-(``graphql``), así que aquí NO se hace HTTP propio: todo el I/O de red pasa por ese passthrough
-ya verificado. No se reimplementa nada de token/proyecto/sesión: ``ensure_session`` resuelve la
+``@mcp.tool``. Like ``caido_client`` (Replay/history), it lives in a separate module with ONLY
+the standard library (no ``mcp`` or ``requests``) and REUSES ``caido_client``'s transport
+(``graphql``), so no HTTP is done here: all network I/O goes through that passthrough,
+already verified. Nothing about token/project/session is reimplemented: ``ensure_session`` resolves the
 auth (token de entorno o invitado headless) y un proyecto seleccionado.
 
-Qué resuelve: darle al bucle OODA el fuzzing de Caido — marcar UN punto de inyección en una
-petición cruda y recorrer una lista de payloads, recogiendo status/longitud/tiempo por payload.
+What it solves: give the OODA loop Caido fuzzing — mark ONE injection point in a
+raw request and run through a list of payloads, collecting status/length/time per payload.
 El flujo REAL del esquema (verificado en vivo contra Caido 0.59.0 + OWASP Juice Shop) es:
-``createAutomateSession`` (siembra la petición base) -> ``updateAutomateSession`` (fija la
-petición + los ajustes de fuzz: payloads, placeholder, concurrencia) -> ``startAutomateTask``
-(lanza; de aquí sale el ``entry id`` AUTORITATIVO) -> se SONDEA ``automateEntry`` hasta que la
-cuenta de resultados deja de crecer o alcanza el número de combinaciones esperado.
+``createAutomateSession`` (seeds the base request) -> ``updateAutomateSession`` (sets the
+request + fuzz settings: payloads, placeholder, concurrency) -> ``startAutomateTask``
+(launches; the AUTORITATIVE ``entry id`` comes from here) -> ``automateEntry`` is POLLED until the
+result count stops growing or reaches the expected number of combinations.
 
 Dato NO confiable: todo lo que devuelve Caido (payloads inyectados, status, longitudes, errores)
-se transporta verbatim; ``parse_entry_requests`` sólo decodifica Blobs base64 y aplana la forma,
+is transported verbatim; ``parse_entry_requests`` only decodes base64 Blobs and flattens the shape,
 nunca interpreta el contenido. "No se finge": si cualquier etapa GraphQL falla, se devuelve su
 dict de error tal cual (``graphql_error``/``unauthenticated``/``unreachable``/``failed``) y nunca
-se simula éxito. Las funciones ``build_*``/``parse_*`` son PURAS (sin red) y son el núcleo
+success is not faked. The ``build_*``/``parse_*`` functions are PURE (no network) and are the core
 cubierto por tests; ``run_automate`` es el orquestador con I/O.
 
-GATING DE SCOPE: este módulo SÓLO envía. El wrapper del servidor MCP (``kali_mcp_server``) es
+SCOPE GATING: this module ONLY sends. The MCP server wrapper (``kali_mcp_server``) is
 quien valida el destino contra el scope-guard ANTES de invocar ``run_automate`` (igual que con
-``caido_request``); aquí no se re-valida el objetivo.
+``caido_request``); the target is not re-validated here.
 
 NOTA de esquema: Caido avisa de que su API GraphQL CAMBIA en cada release. Los documentos de
-abajo están verificados en vivo contra Caido 0.59.0 (ver el flujo real arriba); son
-DEPENDIENTES DE VERSIÓN. Si otra versión los rompe, ``graphql`` devuelve el error del servidor
-verbatim (no se finge) y la tool genérica ``caido_graphql`` sigue alcanzando el esquema nuevo.
+below are verified live against Caido 0.59.0 (see the real flow above); they are
+VERSION-DEPENDENT. If another version breaks them, ``graphql`` returns the server's error
+verbatim (no faking) and the generic ``caido_graphql`` tool still reaches the new schema.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from typing import Any
 
 import caido_client
 
-# Reutilizados de caido_client. Se enlazan como globales del módulo (no se llama a
+# Reused from caido_client. Linked as module globals (not called at
 # ``caido_client.graphql`` por ruta cualificada) para que ``run_automate`` use SIEMPRE estos
 # nombres y los tests puedan monkeypatchear ``caido_automate.graphql`` /
 # ``caido_automate.ensure_session`` sin tocar el cliente base.
@@ -54,29 +54,29 @@ from caido_client import (  # noqa: E402
     _utf8,
 )
 
-# --- Configuración por entorno (espeja REPLAY_POLL_* de caido_client) --------------------
+# --- Environment configuration (mirrors caido_client's REPLAY_POLL_*) --------------------
 #
-# El resultado del fuzzing es ASÍNCRONO: startAutomateTask lanza y las filas aparecen poco a
+# The fuzzing result is ASYNCHRONOUS: startAutomateTask launches and rows appear little by
 # poco en automateEntry. Tope y cadencia del sondeo, con los mismos helpers tolerantes.
 AUTOMATE_POLL_TRIES = caido_client._env_int("CAIDO_AUTOMATE_POLL_TRIES", 60)
 AUTOMATE_POLL_INTERVAL_S = caido_client._env_float("CAIDO_AUTOMATE_POLL_INTERVAL", 1.0)
 
-# Marcador por defecto del punto de inyección (igual que el § de Caido/Burp).
+# Default marker for the injection point (same as Caido/Burp's §).
 DEFAULT_MARKER = "§"  # §
 
-# Estrategias de combinación de payloads (enum AutomatePayloadStrategy del esquema).
+# Payload combination strategies (schema enum AutomatePayloadStrategy).
 VALID_STRATEGIES = ("ALL", "SEQUENTIAL", "PARALLEL", "MATRIX")
 
 
-# --- Documentos GraphQL del flujo Automate (verificados en vivo; dependientes de versión) --
+# --- GraphQL documents of the Automate flow (live-verified; version-dependent) --
 #
 # VERIFICADOS contra Caido 0.59.0 (fuzz real sobre OWASP Juice Shop: apple->200, banana->200,
-# payload malo->400). La doc de introspección tenía 3 imprecisiones corregidas aquí en vivo:
-#   - CreateAutomateSessionPayload NO tiene campo ``error`` (sólo ``session``); ``entries``
-#     necesita subcampos ``{ id }`` y vuelve vacío [] en el create (el entry se crea al start).
+# bad payload->400). The introspection doc had 3 inaccuracies corrected here live:
+#   - CreateAutomateSessionPayload has NO ``error`` field (only ``session``); ``entries``
+#     needs ``{ id }`` subfields and returns empty [] on create (the entry is created at start).
 #   - StartAutomateTaskPayload NO tiene campo ``error``; el ``entry id`` AUTORITATIVO sale de
 #     ``automateTask.entry.id`` (NO de session.entries).
-#   - UpdateAutomateSessionPayload SÍ tiene ``error``.
+#   - UpdateAutomateSessionPayload DOES have ``error``.
 #   - ``AutomateEntryRequest.payloads`` es ``[AutomateEntryRequestPayload]`` con
 #     ``{ raw: Blob, position: Int }`` (raw = base64 del payload inyectado), no ``[String!]``.
 CREATE_AUTOMATE_SESSION = (
@@ -91,8 +91,8 @@ START_AUTOMATE_TASK = (
     "mutation($id:ID!){ startAutomateTask(automateSessionId:$id){ "
     "automateTask{ id entry{ id } } } }"
 )
-# ``$n`` se DECLARA explícitamente (el límite de requestsByOffset). ``request{ id }`` se añade
-# sobre la query mínima verificada para poblar ``request_id`` (Request.id es campo verificado).
+# ``$n`` is DECLARED explicitly (the requestsByOffset limit). ``request{ id }`` is added
+# to the minimal verified query to populate ``request_id`` (Request.id is a verified field).
 AUTOMATE_ENTRY_QUERY = (
     "query($id:ID!,$n:Int!){ automateEntry(id:$id){ "
     "requestsByOffset(limit:$n, offset:0){ count{ value } edges{ node{ "
@@ -112,39 +112,39 @@ def build_placeholder_request(
     body: str = "",
     marker: str = DEFAULT_MARKER,
 ) -> dict[str, Any]:
-    """Construye la petición cruda y localiza el punto de inyección del fuzz. PURA.
+    """Builds the raw request and locates the fuzz injection point. PURE.
 
     El llamador pone EXACTAMENTE UN ``marker`` (en el path, el valor de una cabecera o el
-    cuerpo) donde quiere inyectar el payload. Se arma la petición cruda con
+    body) where it wants to inject the payload. The raw request is assembled with
     ``caido_client.build_raw_request``, se calcula el OFFSET EN BYTES del marcador sobre el raw
     codificado en UTF-8, se ELIMINA el marcador y se devuelve un placeholder de ancho cero
-    (``start == end == offset``), es decir, el punto donde Caido insertará cada payload.
+    (``start == end == offset``), i.e., the point where Caido will insert each payload.
 
     Fail-closed (el llamador maneja el ``CaidoError``):
-      - marcador vacío o AUSENTE (0 apariciones) -> ``CaidoError``.
-      - si aparece más de una vez, se usa la PRIMERA (no se lanza por eso; sólo por cero).
+      - empty or MISSING marker (0 occurrences) -> ``CaidoError``.
+      - if it appears more than once, the FIRST one is used (no error for that; only for zero).
 
     Offsets en BYTES, no en caracteres: un cuerpo multibyte (p. ej. UTF-8 con acentos) hace
-    que el offset en bytes difiera del índice en caracteres, y Caido trabaja en bytes.
+    the byte offset differs from the character index, and Caido works in bytes.
 
     Returns ``{"raw": <raw limpio sin el marcador>, "start": <int>, "end": <int>}``.
     """
     marker_bytes = _utf8(marker or "")
     if not marker_bytes:
         raise caido_client.CaidoError(
-            "marcador de inyección vacío: pon un marcador (p. ej. §)."
+            "empty injection marker: set a marker (e.g. §)."
         )
     raw = build_raw_request(method, path, host, headers=headers or {}, body=body or "")
     raw_bytes = _utf8(raw)
     offset = raw_bytes.find(marker_bytes)
     if offset < 0:
         raise caido_client.CaidoError(
-            "marcador de inyección no encontrado en la petición: coloca exactamente uno "
+            "injection marker not found in the request: place exactly one "
             "(%r) en el path, una cabecera o el cuerpo." % marker
         )
-    # Se elimina SÓLO la primera aparición (contrato: un único marcador); su offset en bytes
+    # Only the FIRST occurrence is removed (contract: a single marker); its byte offset
     # no cambia al quitarla (todo lo anterior queda intacto). Quitar una secuencia UTF-8
-    # completa de un texto UTF-8 válido deja UTF-8 válido, así que el decode es seguro.
+    # completion of valid UTF-8 text leaves valid UTF-8, so decoding is safe.
     clean_bytes = raw_bytes[:offset] + raw_bytes[offset + len(marker_bytes) :]
     clean_raw = clean_bytes.decode("utf-8")
     return {"raw": clean_raw, "start": offset, "end": offset}
@@ -160,21 +160,21 @@ def build_automate_settings(
 ) -> dict[str, Any]:
     """Arma el ``AutomateSettingsInput`` del fuzz (lista simple de payloads). PURA.
 
-    Un único origen de payloads (``simpleList``) inyectado en UN placeholder. Redirecciones
+    A single payload source (``simpleList``) injected into ONE placeholder. Redirects
     desactivadas (``NEVER``) y sin reintentos, para que cada fila sea el resultado DIRECTO de
-    su payload (no se finge). Valida fail-closed: ``payloads`` no vacío, ``workers >= 1`` y
+    its payload (no faking). Fail-closed validation: ``payloads`` non-empty, ``workers >= 1`` and
     ``strategy`` dentro del enum; si no, ``CaidoError`` (la tool no llega a llamar a Caido).
 
     Returns el dict listo para ``UpdateAutomateSessionInput.settings``.
     """
     if not isinstance(payloads, (list, tuple)) or len(payloads) == 0:
         raise caido_client.CaidoError(
-            "lista de payloads vacía: el fuzz necesita al menos uno."
+            "empty payload list: fuzzing needs at least one."
         )
     strat = (strategy or "").strip().upper()
     if strat not in VALID_STRATEGIES:
         raise caido_client.CaidoError(
-            "strategy inválida %r: usa una de %s."
+            "invalid strategy %r: use one of %s."
             % (strategy, "/".join(VALID_STRATEGIES))
         )
     try:
@@ -184,12 +184,12 @@ def build_automate_settings(
         e = int(end)
     except (TypeError, ValueError) as exc:
         raise caido_client.CaidoError(
-            f"workers/delay/start/end no numéricos: {exc}"
+            f"workers/delay/start/end not numeric: {exc}"
         ) from exc
     if w < 1:
-        raise caido_client.CaidoError(f"workers debe ser >= 1 (llegó {w}).")
+        raise caido_client.CaidoError(f"workers must be >= 1 (got {w}).")
     if d < 0:
-        raise caido_client.CaidoError(f"delay no puede ser negativo (llegó {d}).")
+        raise caido_client.CaidoError(f"delay cannot be negative (got {d}).")
     return {
         "payloads": [
             {
@@ -213,7 +213,7 @@ def parse_entry_requests(nodes: list[dict] | None) -> list[dict[str, Any]]:
 
     Cada ``payloads`` es ``[AutomateEntryRequestPayload{ raw:Blob, position:Int }]``: ``raw``
     es el base64 del payload INYECTADO, que se decodifica con ``caido_client.decode_blob`` a
-    texto. La ``response`` puede ser ``null`` (fila de error: conexión fallida, etc.): sus
+    text. The ``response`` can be ``null`` (error row: failed connection, etc.): its
     campos quedan en ``None`` y el ``error`` se transporta verbatim. No se interpreta nada; los
     valores (status, longitud, tiempo) se pasan tal cual los da Caido.
 
@@ -250,7 +250,7 @@ def parse_entry_requests(nodes: list[dict] | None) -> list[dict[str, Any]]:
     return results
 
 
-# --- Orquestador (I/O vía caido_client.graphql; devuelve estado uniforme, nunca lanza) ----
+# --- Orchestrator (I/O via caido_client.graphql; returns uniform status, never raises) ----
 
 
 def run_automate(
@@ -270,20 +270,20 @@ def run_automate(
 ) -> dict[str, Any]:
     """Ejecuta un fuzz de Automate contra ``url_target`` y DEVUELVE las filas por payload.
 
-    Flujo REAL (verificado en vivo): valida entrada -> ``ensure_session`` -> crea la sesión de
-    Automate con la petición base -> la ACTUALIZA con la petición + ajustes de fuzz -> lanza la
-    tarea (de ahí el ``entry id`` autoritativo) -> SONDEA ``automateEntry`` hasta que la cuenta
+    REAL flow (live-verified): validate input -> ``ensure_session`` -> creates the
+    Automate session with the base request -> UPDATES it with the request + fuzz settings -> launches the
+    task (hence the authoritative ``entry id``) -> POLLS ``automateEntry`` until the count
     deja de crecer en 2 lecturas o alcanza el nº de combinaciones esperado (``len(payloads)``
     para ``SEQUENTIAL``) o se agota el sondeo.
 
-    El wrapper del servidor ya validó el scope del destino ANTES de llamar aquí (este módulo
-    sólo envía). "No se finge": si una etapa GraphQL falla, se devuelve su dict de error tal cual.
+    The server wrapper already validated the target scope BEFORE calling here (this module
+    only sends). "No faking": if a GraphQL stage fails, its error dict is returned as-is.
 
-    Returns en éxito ``{"status":"done","session_id":..,"entry_id":..,"count":n,
+    Returns on success ``{"status":"done","session_id":..,"entry_id":..,"count":n,
     "results":[...]}``; o el dict de error de la etapa que falle (``failed``/``unauthenticated``/
     ``unreachable``/``graphql_error``).
     """
-    # 1-3. Builders PUROS: cualquier entrada inválida es fail-closed ANTES de tocar la red.
+    # 1-3. PURE builders: any invalid input is fail-closed BEFORE touching the network.
     try:
         target = split_target_url(url_target)
         placeholder = build_placeholder_request(
@@ -309,17 +309,17 @@ def run_automate(
     conn = {
         "host": target["host"],
         "port": target["port"],
-        "isTLS": target["is_tls"],  # nombre REAL del esquema: isTLS (mayúsculas)
+        "isTLS": target["is_tls"],  # REAL schema name: isTLS (capital letters)
     }
 
-    # 4. Sesión (token invitado/entorno + proyecto). Si no resuelve, se devuelve su error.
+    # 4. Session (guest/environment token + project). If unresolved, its error is returned.
     session = ensure_session(url=url, timeout=timeout)
     if session["status"] != "ok":
         return session
     token = session["token"]
 
-    # 5. createAutomateSession: siembra la petición base. CreateAutomateSessionPayload no tiene
-    #    campo error; basta con comprobar que vino la sesión.
+    # 5. createAutomateSession: seeds the base request. CreateAutomateSessionPayload has no
+    #    error field; it is enough to check that a session came back.
     created = graphql(
         CREATE_AUTOMATE_SESSION,
         {"i": {"requestSource": {"raw": {"connectionInfo": conn, "raw": blob}}}},
@@ -333,11 +333,11 @@ def run_automate(
     if not cs.get("session"):
         return {
             "status": "failed",
-            "error": "createAutomateSession no devolvió sesión.",
+            "error": "createAutomateSession returned no session.",
         }
     session_id = cs["session"]["id"]
 
-    # 6. updateAutomateSession: fija petición + ajustes de fuzz (payloads, placeholder, etc.).
+    # 6. updateAutomateSession: sets request + fuzz settings (payloads, placeholder, etc.).
     updated = graphql(
         UPDATE_AUTOMATE_SESSION,
         {
@@ -351,8 +351,8 @@ def run_automate(
     if updated["status"] != "ok":
         return updated
 
-    # 7. startAutomateTask: LANZA el fuzz. El entry id AUTORITATIVO para sondear sale de aquí
-    #    (automateTask.entry.id), no de session.entries (vacío en el create).
+    # 7. startAutomateTask: LAUNCHES the fuzz. The AUTHORITATIVE entry id to poll comes from here
+    #    (automateTask.entry.id), not from session.entries (empty on create).
     started = graphql(
         START_AUTOMATE_TASK, {"id": session_id}, url=url, token=token, timeout=timeout
     )
@@ -363,7 +363,7 @@ def run_automate(
     if not entry_id:
         return {
             "status": "failed",
-            "error": "startAutomateTask no devolvió el entry id de la tarea.",
+            "error": "startAutomateTask returned no task entry id.",
         }
 
     # 8. Sondea automateEntry hasta que la cuenta alcance las combinaciones esperadas
@@ -393,7 +393,7 @@ def run_automate(
         final_count = count
         reached = expected is not None and isinstance(count, int) and count >= expected
         # "Deja de crecer": dos lecturas consecutivas con la misma cuenta (>0). El >0 evita
-        # cortar en el arranque, cuando aún no ha aparecido ninguna fila.
+        # stop at startup, when no row has appeared yet.
         stalled = (
             prev_count is not None
             and isinstance(count, int)

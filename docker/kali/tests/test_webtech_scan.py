@@ -1,15 +1,15 @@
 """Tests stdlib-only del fingerprinting web por cruce (`webtech_scan.py`).
 
-Ejercitan los PARSERS puros y el CRUCE contra fixtures SINTÉTICOS (example.com) con la
+They exercise the pure PARSERS and CROSS-CHECK against SYNTHETIC fixtures (example.com) with the
 forma real de cada herramienta: whatweb (``--log-json``), webanalyze (``-output json``) y
 wpscan (``--format json``, tanto "no es WordPress" como WordPress detectado). Fijan que:
   - ``parse_whatweb`` extrae plugins+versiones del array ``--log-json``;
-  - ``parse_webanalyze`` extrae app_name/version/categorías del ``-output json``;
+  - ``parse_webanalyze`` extracts app_name/version/categories from ``-output json``;
   - ``parse_wpscan`` distingue "no es WordPress" (``scan_aborted``) de WP detectado
-    (core+plugins+tema con versión) y normaliza a ``techs``;
+    (core+plugins+theme with version) and normalizes to ``techs``;
   - ``cross_reference`` fusiona por nombre, agrega versiones por fuente, y marca
     ``version_conflict`` cuando dos fuentes discrepan y acuerdo cuando coinciden;
-  - ``run_webtech`` falla fail-closed con URL inválida y omite (no finge) una herramienta
+  - ``run_webtech`` fails closed on invalid URL and skips (does not fake) a tool
     ausente.
 """
 
@@ -37,7 +37,7 @@ def test_parse_whatweb_fixture():
     names = {t["name"] for t in techs}
     assert "HTTPServer" in names and "MetaGenerator" in names
     assert all(t["source"] == "whatweb" for t in techs)
-    # El fixture trae plugins versionados (jQuery/PHP): su versión se extrae.
+    # The fixture has versioned plugins (jQuery/PHP): their version is extracted.
     by_name = {t["name"]: t["version"] for t in techs}
     assert by_name.get("jQuery") == "3.6.0"
 
@@ -47,7 +47,7 @@ def test_parse_whatweb_versiones():
     techs = {t["name"]: t["version"] for t in wt.parse_whatweb(raw)}
     assert techs["jQuery"] == "3.4.1"
     assert techs["PHP"] == "8.1.2"
-    assert techs["HTML5"] == ""  # sin versión pero presente
+    assert techs["HTML5"] == ""  # no version but present
 
 
 def test_parse_whatweb_json_roto():
@@ -60,7 +60,7 @@ def test_parse_webanalyze_fixture():
     names = {t["name"] for t in techs}
     assert "WordPress" in names
     assert all(t["source"] == "webanalyze" for t in techs)
-    # Las categorías se conservan (WordPress -> CMS) y la versión se extrae.
+    # Categories are preserved (WordPress -> CMS) and the version is extracted.
     wp = next(t for t in techs if t["name"] == "WordPress")
     assert wp["version"] == "6.4.8"
     assert any("CMS" in c for c in wp.get("categories", []))
@@ -94,7 +94,7 @@ def test_parse_wpscan_wordpress_detectado():
 
 
 def test_cross_reference_acuerdo():
-    # Dos fuentes ven jQuery con la MISMA versión: sin conflicto, best = esa versión.
+    # Two sources see jQuery with the SAME version: no conflict, best = that version.
     a = [{"name": "jQuery", "version": "3.4.1", "source": "whatweb"}]
     b = [{"name": "jquery", "version": "3.4.1", "source": "webanalyze"}]
     out = wt.cross_reference(a, b)
@@ -106,7 +106,7 @@ def test_cross_reference_acuerdo():
 
 
 def test_cross_reference_conflicto():
-    # Dos fuentes discrepan en la versión de jQuery: se marca conflicto y se listan ambas.
+    # Two sources disagree on jQuery's version: a conflict is flagged and both are listed.
     a = [{"name": "jQuery", "version": "3.4.1", "source": "whatweb"}]
     b = [{"name": "jQuery", "version": "3.5.0", "source": "webanalyze"}]
     out = wt.cross_reference(a, b)
@@ -116,7 +116,7 @@ def test_cross_reference_conflicto():
 
 
 def test_cross_reference_orden_por_num_fuentes():
-    # La tech vista por más fuentes va primero.
+    # The tech seen by more sources comes first.
     a = [{"name": "WordPress", "version": "6.4.8", "source": "whatweb"}]
     b = [{"name": "WordPress", "version": "6.4.8", "source": "wpscan"}]
     c = [{"name": "Nginx", "version": "1.25.3", "source": "whatweb"}]
@@ -131,7 +131,7 @@ def test_cross_reference_tres_fuentes():
     out = wt.cross_reference(ww, wa, wp)
     assert "whatweb" in out["sources"] and "webanalyze" in out["sources"]
     assert len(out["technologies"]) > 0
-    # whatweb y webanalyze comparten el nombre "jQuery" con la misma versión -> se fusiona
+    # whatweb and webanalyze share the name "jQuery" with the same version -> merged
     # en una sola entrada vista por dos fuentes, sin conflicto.
     jq = next(t for t in out["technologies"] if t["name"].lower() == "jquery")
     assert set(jq["sources"]) == {"whatweb", "webanalyze"}
@@ -148,7 +148,7 @@ def test_run_webtech_url_invalida():
 
 
 def test_run_webtech_sin_binarios(monkeypatch):
-    # Si ninguna herramienta está disponible, falla claro (no finge).
+    # If no tool is available, it fails clearly (no faking).
     monkeypatch.setattr(wt, "_which", lambda b: None)
     out = wt.run_webtech("https://example.com")
     assert out["status"] == "failed"

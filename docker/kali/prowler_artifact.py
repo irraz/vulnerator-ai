@@ -1,19 +1,19 @@
-"""Finalización del escaneo Prowler: salida cruda -> artefacto + puente (STDLIB PURA).
+"""Prowler scan finalization: raw output -> artifact + bridge (PURE STDLIB).
 
 Vive aparte de ``kali_mcp_server.py`` (que importa ``mcp``/``anyio``, no instalados en
 el venv de dev) para poder cubrir con tests el camino post-escaneo SIN el SDK, igual
 que ``tool_streaming.py``/``artifact_store.py``.
 
-Qué hace al terminar un escaneo:
-  1. Localiza y lee el fichero OCSF/JSON crudo que Prowler escribió en ``outdir``.
+What it does when a scan finishes:
+  1. Locates and reads the raw OCSF/JSON file Prowler wrote in ``outdir``.
   2. **Puente de compat:** guarda los findings paginables con
-     ``tool_streaming.set_findings`` para que ``read_scan_findings`` siga sirviéndolos
-     si el plano de datos no está configurado.
+     ``tool_streaming.set_findings`` so ``read_scan_findings`` keeps serving them
+     if the data plane is not configured.
   3. **Plano de DATOS:** stagea el fichero CRUDO como artefacto
      (``artifact_store.put_file``) y construye el ``done`` del control con una
-     **referencia** (``artifact``) pequeña — NUNCA los findings inline.
+     small **reference** (``artifact``) — NEVER inline findings.
 
-El crudo es DATO NO CONFIABLE: se transporta verbatim, no se interpreta más allá de
+The raw output is UNTRUSTED DATA: transported verbatim, interpreted no further than
 contar los findings para el resumen de control.
 """
 
@@ -27,7 +27,7 @@ from typing import Any
 import artifact_store
 import tool_streaming
 
-# Nombre canónico del artefacto crudo de Prowler dentro del staging/almacén.
+# Canonical name of Prowler's raw artifact inside staging/store.
 PROWLER_ARTIFACT_NAME = "prowler.ocsf.json"
 
 
@@ -36,11 +36,11 @@ def _now_iso() -> str:
 
 
 def read_prowler_output(outdir: Path) -> tuple[Path | None, list[dict] | None]:
-    """Devuelve ``(path, findings)`` del fichero OCSF/JSON más reciente y legible.
+    """Returns ``(path, findings)`` of the most recent readable OCSF/JSON file.
 
     Un solo parse por candidato (eficiente con ficheros grandes): en cuanto uno
-    parsea, se devuelve su ruta y la lista de findings extraída. Si ninguno es
-    legible, ``(None, None)`` (el caller lo trata como escaneo sin salida válida).
+    parses, its path and the extracted findings list are returned. If none is
+    readable, ``(None, None)`` (the caller treats it as a scan with no valid output).
     """
     candidates = sorted(
         [*outdir.rglob("*.ocsf.json"), *outdir.rglob("*.json")],
@@ -106,11 +106,11 @@ def finalize_scan(
 ) -> dict[str, Any] | None:
     """Construye el estado ``done`` del escaneo: puente + artefacto por referencia.
 
-    Devuelve el dict ``done`` que ``get_scan_status`` publicará:
+    Returns the ``done`` dict that ``get_scan_status`` will publish:
       ``{status:'done', returncode, timed_out:False, findings_count, artifact?}``.
-    El canal de CONTROL lleva SÓLO ese resumen + la ref ``artifact`` (pequeña); los
+    The CONTROL channel carries ONLY that summary + the small ``artifact`` ref; the
     findings NO viajan inline. Si no hay salida legible, devuelve ``None`` (el caller
-    publica ``failed`` con diagnóstico).
+    publishes ``failed`` with a diagnostic).
     """
     path, findings = read_prowler_output(outdir)
     if findings is None or path is None:

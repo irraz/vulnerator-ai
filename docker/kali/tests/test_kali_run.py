@@ -1,14 +1,14 @@
 """Tests de la tool BLOQUEANTE ``kali_run`` (STDLIB PURA, SIN importar el servidor).
 
-Restricción dura del entorno: en el venv local hay ``mcp`` 2.x pero
-``kali_mcp_server.py`` exige ``mcp<2`` (FastMCP 1.x), así que ``import kali_mcp_server``
-FALLA. Por eso estos tests NO importan el servidor: validan (a) la LÓGICA bloqueante vía
+Hard environment constraint: the local venv has ``mcp`` 2.x but
+``kali_mcp_server.py`` requires ``mcp<2`` (FastMCP 1.x), so ``import kali_mcp_server``
+FAILS. That is why these tests do NOT import the server: they validate (a) the blocking LOGIC via
 ``shell_exec.run_shell`` (que es lo que ``kali_run`` llama SINCRONAMENTE) y (b) la forma
-del servidor leyendo su TEXTO fuente (open().read() + aserciones), nunca importándolo.
+of the server by reading its SOURCE TEXT (open().read() + assertions), never importing it.
 
-Siguen el patrón de ``tests/test_shell_exec.py``: ``sys.path.insert`` del padre, import de
+They follow the pattern of ``tests/test_shell_exec.py``: ``sys.path.insert`` of the parent, import of
 ``shell_exec``/``tool_streaming`` y monkeypatch de ``run_tool_streaming`` con un fake que
-vuelca líneas al ring.
+dumps lines to the ring.
 """
 
 from __future__ import annotations
@@ -69,11 +69,11 @@ def test_invalid_command_fails_without_running(monkeypatch, bad):
     result = shell_exec.run_shell(bad, uuid.uuid4().hex, 600)
     assert result["status"] == "failed"
     assert result["returncode"] == -1
-    assert called["ran"] is False  # fail-closed: no se ejecutó nada
+    assert called["ran"] is False  # fail-closed: nothing was executed
 
 
 def test_server_text_declares_kali_run_blocking_and_keeps_all_tools():
-    # Se valida la FORMA del servidor por su TEXTO (NO import: mcp<2 no está en el venv).
+    # The server's SHAPE is validated by its TEXT (NO import: mcp<2 is not in the venv).
     source = _SERVER_PATH.read_text(encoding="utf-8")
 
     # (1) kali_run existe y referencia el runner compartido run_shell.
@@ -84,14 +84,14 @@ def test_server_text_declares_kali_run_blocking_and_keeps_all_tools():
     assert "KALI_RUN_TOOL_NAME" in source
     assert 'KALI_RUN_TOOL_NAME = "kali_run"' in source
 
-    # (3) El cuerpo de kali_run es BLOQUEANTE: NO LLAMA a start_background (la mención
+    # (3) kali_run's body is BLOCKING: it does NOT CALL start_background (the mention
     # en el docstring explica justo que NO lo usa, por eso se busca la LLAMADA concreta).
     body_start = source.index("def kali_run")
     body = source[body_start : source.index("def _start_artifacts_http")]
     assert "tool_streaming.start_background(" not in body
     assert "shell_exec.run_shell" in body
 
-    # (4) server_info SIGUE listando las tools existentes (no se quitó ninguna).
+    # (4) server_info STILL lists the existing tools (none was removed).
     for name in (
         "PROWLER_TOOL_NAME",
         "START_COLLECTION_TOOL_NAME",
@@ -103,11 +103,11 @@ def test_server_text_declares_kali_run_blocking_and_keeps_all_tools():
 
 
 def test_server_text_wires_scope_guard_into_runners():
-    # Se valida por TEXTO (NO import: mcp<2 no está en el venv) que el scope-guard quedó
+    # Validated by TEXT (NO import: mcp<2 is not in the venv) that the scope-guard was
     # cableado en kali_run/kali_exec con los args nuevos y el gate ANTES de ejecutar.
     source = _SERVER_PATH.read_text(encoding="utf-8")
 
-    # (1) El servidor importa el módulo del guard (STDLIB puro) y lo invoca.
+    # (1) The server imports the guard module (pure STDLIB) and invokes it.
     assert "import scope_guard" in source
     assert "scope_guard.evaluate" in source
     assert "scope_guard.load_scope" in source
@@ -115,7 +115,7 @@ def test_server_text_wires_scope_guard_into_runners():
     # (2) Ambos runners aceptan los nuevos args opcionales targets/engagement_id.
     for runner in ("def kali_run", "def kali_exec"):
         body_start = source.index(runner)
-        # firma dentro del encabezado de la función (hasta el cierre del paréntesis).
+        # signature inside the function header (up to the closing parenthesis).
         header = source[body_start : source.index(")", body_start) + 1]
         assert "targets" in header
         assert "engagement_id" in header
@@ -127,31 +127,31 @@ def test_server_text_wires_scope_guard_into_runners():
     # shell_exec.run_shell en su cuerpo.
     run_start = source.index("def kali_run")
     run_body = source[run_start : source.index("def record_finding")]
-    # rindex: la LLAMADA real a run_shell (la última mención; la primera está en el docstring).
+    # rindex: the real CALL to run_shell (the last mention; the first is in the docstring).
     assert run_body.index("_scope_gate(") < run_body.rindex("shell_exec.run_shell")
 
     # (5) kali_exec devuelve el error de scope SIN arrancar el background: el gate aparece
     # antes de start_background en su cuerpo.
     exec_start = source.index("def kali_exec")
     exec_body = source[exec_start : source.index("def kali_run")]
-    # rindex: la LLAMADA real a start_background (la última; la primera está en el docstring).
+    # rindex: the real CALL to start_background (the last; the first is in the docstring).
     assert exec_body.index("_scope_gate(") < exec_body.rindex("tool_streaming.start_background")
 
-    # (6) La violación se loguea en el store de findings (evidencia auditable).
+    # (6) The violation is logged in the findings store (auditable evidence).
     assert 'title": "SCOPE_VIOLATION"' in source or '"SCOPE_VIOLATION"' in source
     assert "finding_store.append" in source
 
 
 @pytest.fixture(autouse=True)
 def _staging_kali_run(tmp_path, monkeypatch):
-    """Redirige el log de auditoría a un tmp dir (run_shell audita; no debe tocar /artifacts)."""
+    """Redirects the audit log to a tmp dir (run_shell audits; must not touch /artifacts)."""
     monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
     return tmp_path
 
 
 def test_run_shell_returns_execution_id_for_kali_run_semantics(monkeypatch):
     # kali_run devuelve TAL CUAL el dict de run_shell, que ahora SIEMPRE incluye execution_id
-    # (clave para cruzar con el transcript de Hermes y el log de auditoría por engagement).
+    # (key to cross-check with Hermes' transcript and the per-engagement audit log).
     runner = _fake_runner(returncode=0, lines=[("stdout", "x")])
     monkeypatch.setattr(shell_exec.tool_streaming, "run_tool_streaming", runner)
 
@@ -161,19 +161,19 @@ def test_run_shell_returns_execution_id_for_kali_run_semantics(monkeypatch):
 
 
 def test_server_text_wires_audit_into_runners():
-    # Se valida por TEXTO (NO import: mcp<2 no está en el venv) que ambos runners pasan
-    # engagement_id + la etiqueta de tool a run_shell (auditoría durable por engagement).
+    # Validated by TEXT (NO import: mcp<2 is not in the venv) that both runners pass
+    # engagement_id + the tool label to run_shell (durable per-engagement audit).
     source = _SERVER_PATH.read_text(encoding="utf-8")
 
     # (1) Ambos runners propagan engagement_id al runner compartido (>=2: kali_run y kali_exec).
     assert source.count("engagement_id=engagement_id") >= 2
 
-    # (2) Cada runner etiqueta su ejecución con su propio nombre de tool.
+    # (2) Each runner labels its execution with its own tool name.
     assert "tool_label=KALI_RUN_TOOL_NAME" in source
     assert "tool_label=KALI_EXEC_TOOL_NAME" in source
 
     # (3) kali_run devuelve directamente el resultado de run_shell (no lo re-envuelve ni le
-    # quita el execution_id): la llamada real a run_shell está precedida por `return`.
+    # removes the execution_id): the real call to run_shell is preceded by `return`.
     run_start = source.index("def kali_run")
     run_body = source[run_start : source.index("def record_finding")]
     assert "return shell_exec.run_shell(" in run_body

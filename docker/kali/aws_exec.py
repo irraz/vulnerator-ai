@@ -1,22 +1,22 @@
 """Runner AWS (STDLIB PURA) — construye y ejecuta el enum IAM read-only.
 
-Es la LÓGICA testeable del runner ``iam_enum`` que expone ``kali_mcp_server`` como
-``@mcp.tool`` SÍNCRONA. Igual que ``collector_runner`` / ``tool_streaming``, vive en un
-módulo aparte que usa SOLO la librería estándar (sin ``mcp``, sin ``boto3``) para poder
-cubrirse con tests unitarios en el venv de dev, donde ni el SDK ni boto3 están instalados.
+It is the testable LOGIC of the ``iam_enum`` runner that ``kali_mcp_server`` exposes as
+``@mcp.tool`` SYNCHRONOUSLY. Like ``collector_runner`` / ``tool_streaming``, it lives in a
+separate module that uses ONLY the standard library (no ``mcp``, no ``boto3``) so it can be
+covered by unit tests in the dev venv, where neither the SDK nor boto3 is installed.
 
-Qué provee:
+What it provides:
   - ``build_iam_enum_cmd(account_id, params, outfile)``: construye el argv (sin shell)
     ``[python3, aws_iam_enum.py, --account, <id>, --out, <outfile>]``. Valida ``account_id``
-    con forma de cuenta AWS (12 dígitos) y RECHAZA fail-closed lo mal formado (nunca se
+    in the shape of an AWS account (12 digits) and REJECTS malformed input fail-closed (never
     interpola entrada sin validar en un comando).
   - ``run_iam_enum(account_id, params, execution_id, timeout)``: crea un tmpdir, construye
     el cmd, lo ejecuta con ``tool_streaming.run_tool_streaming`` (kill de grupo/timeout/logs
     al ring), lee el fichero de salida y devuelve ``{'status':'done',...,'output':<json-str>}``
-    o ``{'status':'failed',...,'error':<diagnóstico>}``; limpia el tmpdir en ``finally``.
+    or ``{'status':'failed',...,'error':<diagnostic>}``; cleans up the tmpdir in ``finally``.
 
-Es SÍNCRONO de un solo tiro (a diferencia del collector async): el enum IAM acotado es
-corto y su JSON único viaja inline en ``output``; aquí NO se stagea artefacto.
+It is SYNCHRONOUS, single-shot (unlike the async collector): the scoped IAM enum is
+short and its single JSON travels inline in ``output``; no artifact is staged here.
 """
 
 from __future__ import annotations
@@ -30,19 +30,19 @@ from typing import Any
 
 import tool_streaming
 
-# Script boto3 THIN que ejecuta el enum real. Vive junto a este módulo en la imagen
-# (COPY en el Dockerfile); se invoca como subproceso, NO se importa (boto3 no está en
+# THIN boto3 script that runs the real enum. Lives alongside this module in the image
+# (COPY in the Dockerfile); invoked as a subprocess, NOT imported (boto3 is not in
 # el venv de dev).
 IAM_ENUM_SCRIPT = "aws_iam_enum.py"
 
-# Timeout por defecto del enum IAM (segundos). El enum acotado es corto; aun así se acota
+# Default timeout for the IAM enum (seconds). The scoped enum is short; still it is bounded
 # para no colgar el servidor. Overridable por entorno.
 DEFAULT_TIMEOUT = int(os.environ.get("AWS_IAM_ENUM_TIMEOUT", "300"))
 
-# Nombre del fichero de salida dentro del tmpdir efímero.
+# Name of the output file inside the ephemeral tmpdir.
 _OUTFILE_NAME = "iam-enum.json"
 
-# Forma de un ID de cuenta AWS: exactamente 12 dígitos (fail-closed, N-untrusted).
+# Shape of an AWS account ID: exactly 12 digits (fail-closed, N-untrusted).
 _ACCOUNT_RE = re.compile(r"^\d{12}$")
 
 
@@ -51,21 +51,21 @@ class AwsExecError(ValueError):
 
 
 def _validate_account_id(account_id: str) -> str:
-    """Valida ``account_id`` con forma de cuenta AWS (12 dígitos) o lanza ``AwsExecError``.
+    """Validates ``account_id`` in the shape of an AWS account (12 digits) or raises ``AwsExecError``.
 
     N-untrusted: el ``account_id`` llega del CONTROL (potencialmente no confiable); nunca se
-    interpola en un comando sin validar. Fail-closed: cualquier cosa que no sea 12 dígitos
+    interpolates into a command without validation. Fail-closed: anything that is not 12 digits
     se rechaza con un error claro, sin ejecutar el subproceso.
     """
     if not isinstance(account_id, str) or not _ACCOUNT_RE.match(account_id.strip()):
         raise AwsExecError(
-            f"account_id inválido: {account_id!r} (se esperan 12 dígitos de cuenta AWS)."
+            f"invalid account_id: {account_id!r} (expected 12 AWS account digits)."
         )
     return account_id.strip()
 
 
 def _script_path() -> str:
-    """Ruta absoluta del script de enum, resuelta junto a este módulo (robusto al cwd)."""
+    """Absolute path of the enum script, resolved next to this module (cwd-independent)."""
     return str(Path(__file__).resolve().parent / IAM_ENUM_SCRIPT)
 
 
@@ -87,7 +87,7 @@ def build_iam_enum_cmd(account_id: str, params: Any, outfile: str) -> list[str]:
 
 
 def _ring_tail(execution_id: str, max_lines: int = 20) -> str:
-    """Últimas líneas de salida de la ejecución (dato NO confiable, verbatim)."""
+    """Last lines of the run's output (UNTRUSTED data, verbatim)."""
     page = tool_streaming.read(execution_id, 0)
     lines = page.get("lines", [])
     tail = lines[-max_lines:]
@@ -100,15 +100,15 @@ def run_iam_enum(
     execution_id: str = "",
     timeout: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Ejecuta el enum IAM read-only y devuelve el JSON crudo (SÍNCRONO, un solo tiro).
+    """Runs the read-only IAM enum and returns the raw JSON (SYNCHRONOUS, single-shot).
 
-    Flujo: valida ``account_id`` (fail-closed) -> crea un tmpdir efímero -> construye el
+    Flow: validate ``account_id`` (fail-closed) -> create an ephemeral tmpdir -> build the
     cmd -> ejecuta con ``tool_streaming.run_tool_streaming`` (kill de grupo/timeout, logs al
     ring por ``execution_id``) -> lee el fichero de salida. Devuelve
     ``{'status':'done','returncode':rc,'output':<json-string>}`` si hay salida legible, o
-    ``{'status':'failed','returncode':rc,'error':<diagnóstico con cola del ring>}`` en
+    ``{'status':'failed','returncode':rc,'error':<diagnostic with ring tail>}`` in
     timeout/sin salida. Limpia el tmpdir en ``finally``. El JSON crudo viaja inline en
-    ``output``; aquí NO se stagea artefacto.
+    ``output``; no artifact is staged here.
     """
     try:
         account = _validate_account_id(account_id)
@@ -130,8 +130,8 @@ def run_iam_enum(
                 "timed_out": True,
                 "returncode": returncode,
                 "error": (
-                    f"iam_enum excedió el timeout ({timeout}s). "
-                    f"Últimas líneas: {_ring_tail(execution_id)}"
+                    f"iam_enum exceeded the timeout ({timeout}s). "
+                    f"Last lines: {_ring_tail(execution_id)}"
                 ),
             }
         output = _read_output(outfile)
@@ -154,7 +154,7 @@ def run_iam_enum(
 
 
 def _read_output(outfile: str) -> str | None:
-    """Lee el JSON de salida como texto crudo; ``None`` si no existe o está vacío.
+    """Reads the output JSON as raw text; ``None`` if missing or empty.
 
     No se interpreta el contenido (dato NO confiable): se devuelve verbatim.
     """

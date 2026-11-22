@@ -1,35 +1,35 @@
 # Manifiesto de dependencias de la imagen vulnerator-mcp. Es la fuente de verdad de lo
 # que se instala con pip en docker/mcp/Dockerfile. Componente FINO: envuelve la API de
-# runs de Hermes (:8642); no corre lógica de pentest, así que su superficie de deps es
-# mínima (stdlib pura salvo las tres entradas de abajo).
+# runs of Hermes (:8642); it runs no pentest logic, so its dependency surface is
+# minimal (pure stdlib except for the three entries below).
 
 # SDK oficial de MCP (modelcontextprotocol/python-sdk). Lo usa el SERVIDOR
 #   vulnerator-mcp (docker/mcp/vulnerator_mcp_server.py: FastMCP + transportes
 #   stdio / streamable-HTTP) que consumen los clientes externos (Claude Code, Kiro,
 #   BugTraceAI).
 #
-#   Se fija a la línea 1.x (<2) a propósito, IGUAL que docker/kali/requirements.txt: el
+#   Deliberately pinned to the 1.x line (<2), SAME as docker/kali/requirements.txt: the
 #   servidor usa la API 1.x de FastMCP, que v2 renombra/elimina. Mantener servidor y
 #   clientes en la misma era de protocolo evita un desajuste cliente/servidor. El
-#   contenedor Kali vivo corre mcp==1.30.0 (dentro de este rango): prueba de que la línea
+#   live Kali container runs mcp==1.30.0 (within this range): proof that the line
 #   soporta `FastMCP.run(transport="streamable-http")` y `streamable_http_app()`.
 mcp>=1.28,<2
 
 # httpx: cliente HTTP del hop a :8642. Justificado (no es stdlib pura por un motivo
 #   concreto): GET /v1/runs/{id}/events es un stream SSE de larga vida que
-#   httpx.AsyncClient.stream(...) consume limpiamente línea a línea bajo un deadline
-#   async; urllib de la stdlib no streamea SSE de forma cómoda. Todo lo demás del cliente
-#   es request/response plano pero se mantiene sobre el mismo cliente para una única ruta
+#   httpx.AsyncClient.stream(...) cleanly consumes line by line under a deadline
+#   async; stdlib urllib does not stream SSE comfortably. The rest of the client
+#   is plain request/response but stays on the same client for a single code path
 #   de auth/transporte.
 #
-#   Se acota con un límite inferior (disciplina de pin del repo, igual que prowler==5.44.0
+#   Bounded with a lower limit (the repo's pin discipline, like prowler==5.44.0
 #   en Kali): >=0.27 por la API async usada (AsyncClient.stream + Timeout(read=None)) y <1
-#   para no saltar a una major con cambios de API. El contenedor Kali vivo y la verificación
-#   corren httpx 0.28.1 (dentro del rango). El SDK `mcp` ya depende de httpx; aquí se declara
-#   explícito porque este módulo lo importa y lo usa directamente.
+#   to avoid jumping to a major with API changes. The live Kali container and the verification
+#   run httpx 0.28.1 (within range). The `mcp` SDK already depends on httpx; it is declared
+#   explicitly here because this module imports and uses it directly.
 httpx>=0.28.1,<1
 
-# anyio: dependencia del transporte asíncrono del SDK mcp (streamable-HTTP), igual que en
+# anyio: dependency of the mcp SDK's async transport (streamable-HTTP), same as in
 #   la imagen Kali. Se fija >=4 por el mismo motivo (API async de esa era).
 anyio>=4.15.1
 
@@ -37,9 +37,9 @@ anyio>=4.15.1
 #   envolvemos con el middleware Bearer de auth de entrada (no podemos usar
 #   `mcp.run(transport="streamable-http")` directamente porque necesitamos interponer el
 #   middleware). Es dependencia transitiva del SDK mcp (streamable-HTTP), pero se declara
-#   explícita porque este servidor la importa y la invoca directamente (fail-closed si falta).
+#   explicit because this server imports and invokes it directly (fail-closed if missing).
 #
-#   Se acota con un límite inferior (disciplina de pin del repo): >=0.30 por `uvicorn.run`
-#   sobre una app ASGI con Starlette moderno y <1 para no saltar a una major. La verificación
+#   Bounded with a lower limit (repo pin discipline): >=0.30 for `uvicorn.run`
+#   on an ASGI app with modern Starlette, and <1 to avoid a major. The verification
 #   corre uvicorn 0.54.0 (dentro del rango).
 uvicorn>=0.54.0,<1

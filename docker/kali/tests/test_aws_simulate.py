@@ -1,14 +1,14 @@
 """Tests stdlib-only del runner AWS del simulate (`aws_simulate.py`).
 
-Espejo de ``test_aws_exec``: ejercitan la LÓGICA del runner SIN boto3 ni el script real
-(``aws_iam_simulate.py`` no se importa: boto3 no está en el venv de dev; se valida con
+Mirror of ``test_aws_exec``: they exercise the runner's LOGIC without boto3 or the real script
+(``aws_iam_simulate.py`` is not imported: boto3 is not in the dev venv; validated with
 ``ast.parse``). Fijan que:
   - ``build_iam_simulate_cmd`` produce el argv esperado (sin shell) y RECHAZA fail-closed un
     ``account_id`` o un ``principal_arn`` mal formados (incluido un ARN de OTRA cuenta);
   - ``run_iam_simulate`` con un ``run_tool_streaming`` de FIXTURE (escribe un JSON de simulate)
     devuelve ``done`` con ``output`` legible;
-  - sin salida legible -> ``failed``; account/arn inválidos -> ``failed`` sin ejecutar nada;
-    timeout -> ``failed``; cancelación -> ``cancelled``; AccessDenied ESTRUCTURADO (``error`` en
+  - no readable output -> ``failed``; invalid account/arn -> ``failed`` without executing;
+    timeout -> ``failed``; cancellation -> ``cancelled``; STRUCTURED AccessDenied (``error`` in
     el JSON) -> ``failed`` claro con el error verbatim.
 """
 
@@ -58,7 +58,7 @@ def test_build_iam_simulate_cmd_rejects_malformed_account(bad):
         "",
         "not-an-arn",
         "arn:aws:s3:::bucket",
-        "arn:aws:iam::123:role/x",  # cuenta no de 12 dígitos
+        "arn:aws:iam::123:role/x",  # account with other than 12 digits
         "arn:aws:iam::123456789012:role/x;rm -rf /",  # metacaracteres de shell
     ],
 )
@@ -84,7 +84,7 @@ def test_build_iam_simulate_cmd_trims_inputs():
 
 
 def _fake_runner(write_output):
-    """Fake de ``run_tool_streaming``: escribe la salida de fixture y devuelve éxito."""
+    """Fake of ``run_tool_streaming``: writes fixture output and returns success."""
 
     def _run(cmd, execution_id, timeout=0, env=None, cwd=None):
         write_output(cmd)
@@ -112,7 +112,7 @@ def test_run_iam_simulate_done_with_readable_output(monkeypatch):
     result = aws_simulate.run_iam_simulate(ACCOUNT, PRINCIPAL, "exec-ok")
     assert result["status"] == "done"
     assert result["returncode"] == 0
-    # El 'output' es el JSON crudo verbatim (viaja inline, no se stagea aquí).
+    # The 'output' is the raw JSON verbatim (travels inline, not staged here).
     assert json.loads(result["output"]) == document
 
 
@@ -160,8 +160,8 @@ def test_run_iam_simulate_rejects_bad_account_without_running(monkeypatch):
     monkeypatch.setattr(aws_simulate.tool_streaming, "run_tool_streaming", _should_not_run)
     result = aws_simulate.run_iam_simulate("not-an-account", PRINCIPAL, "exec-bad")
     assert result["status"] == "failed"
-    assert called["ran"] is False  # fail-closed: no se ejecutó el subproceso
-    assert "account_id inválido" in result["error"]
+    assert called["ran"] is False  # fail-closed: no subprocess was run
+    assert "invalid account_id" in result["error"]
 
 
 def test_run_iam_simulate_rejects_bad_arn_without_running(monkeypatch):
@@ -174,8 +174,8 @@ def test_run_iam_simulate_rejects_bad_arn_without_running(monkeypatch):
     monkeypatch.setattr(aws_simulate.tool_streaming, "run_tool_streaming", _should_not_run)
     result = aws_simulate.run_iam_simulate(ACCOUNT, "not-an-arn", "exec-badarn")
     assert result["status"] == "failed"
-    assert called["ran"] is False  # fail-closed: no se ejecutó el subproceso
-    assert "principal_arn inválido" in result["error"]
+    assert called["ran"] is False  # fail-closed: no subprocess was run
+    assert "invalid principal_arn" in result["error"]
 
 
 def test_run_iam_simulate_timeout_reports_failed(monkeypatch):

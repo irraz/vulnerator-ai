@@ -1,32 +1,32 @@
-"""Log durable de auditoría de ejecuciones de shell cruda (`kali-mcp`, STDLIB PURA).
+"""Durable audit log of raw shell executions (`kali-mcp`, PURE STDLIB).
 
-Qué es: el registro re-ejecutable de CADA ejecución de ``kali_run``/``kali_exec``. Un
-fichero JSONL por engagement —``<engagement_id>/session.jsonl`` bajo la raíz del plano
-de artefactos (``/artifacts``)— con un registro por línea que contiene el comando EXACTO,
-su salida ÍNTEGRA verbatim (no la vista acotada de 2000 líneas que recibe el LLM), el
-returncode y timestamps. Es la fuente única para reconstruir/reproducir lo que hizo el
+What it is: the re-runnable record of EVERY ``kali_run``/``kali_exec`` execution. A
+JSONL file per engagement —`` <engagement_id>/session.jsonl`` under the root of the
+artifact plane (``/artifacts``)— with one record per line containing the EXACT command,
+its FULL output verbatim (not the capped 2000-line view the LLM receives), the
+returncode and timestamps. It is the single source for reconstructing/reproducing what the
 agente contra el target, independiente del transcript de Hermes (que trunca salidas
 grandes) y del ring en memoria (capado a ``RING_MAXLEN``).
 
-Por qué existe esta capa: ``shell_exec.run_shell`` devuelve al LLM la salida del ring
-(últimas ``RING_MAXLEN`` líneas, protección de contexto). Para auditoría/reproducción hace
-falta el stdout/stderr COMPLETO; este módulo lo persiste SIN tocar lo que ve el LLM.
+Why this layer exists: ``shell_exec.run_shell`` returns to the LLM the ring output
+(last ``RING_MAXLEN`` lines, context protection). For audit/reproduction, the
+COMPLETE stdout/stderr is needed; this module persists it WITHOUT touching what the LLM sees.
 
-Dónde vive y por qué un módulo aparte: igual que ``finding_store`` / ``artifact_store`` /
-``tool_streaming``, usa SOLO la librería estándar (sin ``mcp``) para cubrirse con tests en
+Where it lives and why a separate module: like ``finding_store`` / ``artifact_store`` /
+``tool_streaming``, it uses ONLY the standard library (no ``mcp``) to be covered by tests in
 el venv de dev. Reutiliza el confinamiento de rutas de ``artifact_store`` (sin ``..`` ni
 separadores) para que un ``engagement_id`` manipulado no escape del directorio.
 
-Ciclo de vida / retención: hereda el de ``finding_store`` — persiste en el volumen named
-``kali-artifacts``, sin purga automática; lo limpia el operador (o ``docker compose
-down -v``). No se define retención propia a propósito (un único modelo mental con los
+Lifecycle / retention: it inherits ``finding_store``'s — persists in the named volume
+``kali-artifacts``, no automatic purge; cleared by the operator (or ``docker compose
+down -v``). No own retention is deliberately defined (a single mental model with the
 findings).
 
 Disciplina de seguridad: ``command``/``output`` son DATO NO CONFIABLE (salida verbatim de
-una tool contra un target real). Aquí se PERSISTE verbatim; nunca se interpreta ni se
-obedecen instrucciones embebidas. El ``output`` se serializa dentro de una ÚNICA línea JSON
-(``json.dumps`` escapa los saltos internos), así que el JSONL sigue siendo una-línea-por-
-registro aunque la salida tenga miles de líneas.
+a tool against a real target). Here it is PERSISTED verbatim; it is never interpreted nor are
+embedded instructions obeyed. The ``output`` is serialized inside a SINGLE JSON line
+``json.dumps`` escapes internal newlines), so the JSONL remains one-line-per-
+record even if the output has thousands of lines.
 """
 
 from __future__ import annotations
@@ -37,21 +37,21 @@ from typing import Any
 
 import artifact_store
 
-# Nombre canónico del log de sesión dentro del directorio del engagement.
+# Canonical name of the session log inside the engagement directory.
 SESSION_LOG_NAME = "session.jsonl"
 
 # Bucket por defecto cuando el agente NO declara engagement_id (o es inseguro). El eje de
-# sesión real se reconstruye aguas abajo cruzando el transcript de Hermes con el
-# ``execution_id`` (Hermes NO expone su run_id al agente, así que kali no puede etiquetar
-# por sesión; ver docs del diseño auditor).
+# real session is reconstructed downstream by cross-referencing Hermes' transcript with the
+# ``execution_id`` (Hermes does NOT expose its run_id to the agent, so kali cannot label
+# by session; see the audit design docs).
 DEFAULT_ENGAGEMENT = "_unscoped"
 
 
 def safe_engagement(engagement_id: Any) -> str:
     """Devuelve un ``engagement_id`` confinable, o ``DEFAULT_ENGAGEMENT`` si no lo es.
 
-    Vacío, no-string o con traversal/separadores -> bucket por defecto (fail-open: se
-    audita igual, en un directorio seguro, en vez de reventar o escapar de la raíz).
+    Empty, non-string, or with traversal/separators -> default bucket (fail-open: it is
+    audited anyway, in a safe directory, rather than crashing or escaping the root).
     """
     if not engagement_id or not isinstance(engagement_id, str):
         return DEFAULT_ENGAGEMENT
@@ -63,10 +63,10 @@ def safe_engagement(engagement_id: Any) -> str:
 
 
 def record(engagement_id: Any, entry: dict[str, Any]) -> dict[str, Any]:
-    """Añade ``entry`` como una línea JSON al ``session.jsonl`` del engagement.
+    """Appends ``entry`` as a JSON line to the engagement's ``session.jsonl``.
 
-    Append atómico a nivel de línea (mismo patrón que ``finding_store.append``): el
-    registro se serializa a una ÚNICA línea JSON (``json.dumps`` escapa los saltos del
+    Line-level atomic append (same pattern as ``finding_store.append``): the
+    record is serialized to a SINGLE JSON line (``json.dumps`` escapes newlines in the
     ``output``) y se escribe con ``O_APPEND`` en una sola llamada ``write``, de modo que
     appends concurrentes de distintos workers (p. ej. varios ``kali_exec`` en background)
     no se entrelacen. El ``engagement_id`` se sanea a un segmento confinable.
@@ -77,7 +77,7 @@ def record(engagement_id: Any, entry: dict[str, Any]) -> dict[str, Any]:
     path = artifact_store.resolve(eng, SESSION_LOG_NAME)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(entry, ensure_ascii=False) + "\n"
-    # O_APPEND: cada write se posiciona al final de forma atómica; una línea entera en un
+    # O_APPEND: each write is positioned at the end atomically; a whole line in one
     # solo write evita el entrelazado entre escritores concurrentes.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     try:
@@ -90,15 +90,15 @@ def record(engagement_id: Any, entry: dict[str, Any]) -> dict[str, Any]:
 def read(
     engagement_id: Any, cursor: int = 0, limit: int | None = None
 ) -> dict[str, Any]:
-    """Lee los registros del engagement PAGINADOS por índice de línea (para la UI/tests).
+    """Reads the engagement records PAGINATED by line index (for the UI/tests).
 
-    Patrón cursor idéntico a ``finding_store.read``: ``cursor`` es el índice 0-based del
+    Cursor pattern identical to ``finding_store.read``: ``cursor`` is the 0-based index of the
     primer registro a devolver; se devuelven hasta ``limit`` (o todos los restantes si es
-    ``None``). Las líneas corruptas (JSON inválido) se SALTAN sin reventar.
+    ``None``). Corrupt lines (invalid JSON) are SKIPPED without crashing.
 
     Returns:
         ``{"executions": [...], "next_cursor": int, "done": bool, "total": int}``. Un
-        engagement sin fichero (o id inseguro) devuelve página vacía con ``done=True`` y
+        an engagement without a file (or unsafe id) returns an empty page with ``done=True`` and
         ``total=0`` (no revienta).
     """
     eng = safe_engagement(engagement_id)
@@ -119,7 +119,7 @@ def read(
             try:
                 doc = json.loads(raw)
             except json.JSONDecodeError:
-                continue  # línea corrupta: se salta, no se interpreta
+                continue  # corrupt line: skipped, not interpreted
             if isinstance(doc, dict):
                 records.append(doc)
 

@@ -1,16 +1,16 @@
 """Runner AWS (STDLIB PURA) — construye y ejecuta el simulate IAM read-only.
 
-Es la LÓGICA testeable del runner ``iam_simulate`` que expone ``kali_mcp_server`` como
-``@mcp.tool`` ASÍNCRONA. Espejo de ``aws_exec.py`` (el runner del ``iam_enum``): vive en
-un módulo aparte que usa SOLO la librería estándar (sin ``mcp``, sin ``boto3``) para poder
-cubrirse con tests unitarios en el venv de dev, donde ni el SDK ni boto3 están instalados.
-REUTILIZA ``tool_streaming`` (igual que ``aws_exec``); no duplica mecánica de
-ejecución/logs/kill.
+It is the testable LOGIC of the ``iam_simulate`` runner that ``kali_mcp_server`` exposes as
+``@mcp.tool`` ASYNCHRONOUSLY. Mirror of ``aws_exec.py`` (the ``iam_enum`` runner): it lives in
+a separate module that uses ONLY the standard library (no ``mcp``, no ``boto3``) so it can be
+covered by unit tests in the dev venv, where neither the SDK nor boto3 is installed.
+REUSES ``tool_streaming`` (like ``aws_exec``); it does not duplicate mechanics for
+execution/logs/kill.
 
-Qué provee:
+What it provides:
   - ``build_iam_simulate_cmd(account_id, principal_arn, outfile)``: construye el argv (sin
     shell) ``[python3, aws_iam_simulate.py, --account, <id>, --principal-arn, <arn>, --out,
-    <outfile>]``. Valida ``account_id`` (12 dígitos) Y ``principal_arn`` (forma
+    <outfile>]``. Validates ``account_id`` (12 digits) AND ``principal_arn`` (shape
     ``arn:aws:iam::<acct>:...``) y RECHAZA fail-closed lo mal formado (nunca se interpola
     entrada sin validar en un comando).
   - ``run_iam_simulate(account_id, principal_arn, execution_id, timeout)``: crea un tmpdir,
@@ -19,8 +19,8 @@ Qué provee:
     ``{'status':'done',...,'output':<json-str>}`` o ``{'status':'failed',...,'error':...}``;
     limpia el tmpdir en ``finally``.
 
-Es SÍNCRONO de un solo tiro (como ``aws_exec``): el simulate acotado es corto y su JSON
-único viaja inline en ``output``. A diferencia del enum, el simulate PUEDE fallar de forma
+It is SYNCHRONOUS, single-shot (like ``aws_exec``): the scoped simulate is short and its JSON
+single travels inline in ``output``. Unlike the enum, the simulate CAN fail in a
 ESTRUCTURADA: si la credencial read-only no puede ni llamar a ``SimulatePrincipalPolicy``,
 el script escribe un JSON con un ``error`` claro (no revienta); este runner lo detecta y
 devuelve ``failed`` (fail-closed), propagando ese ``error`` VERBATIM (dato NO confiable).
@@ -38,8 +38,8 @@ from typing import Any
 
 import tool_streaming
 
-# Script boto3 THIN que ejecuta el simulate real. Vive junto a este módulo en la imagen
-# (COPY en el Dockerfile); se invoca como subproceso, NO se importa (boto3 no está en el
+# THIN boto3 script that runs the real simulate. Lives alongside this module in the image
+# (COPY in the Dockerfile); invoked as a subprocess, NOT imported (boto3 is not in
 # venv de dev).
 IAM_SIMULATE_SCRIPT = "aws_iam_simulate.py"
 
@@ -47,13 +47,13 @@ IAM_SIMULATE_SCRIPT = "aws_iam_simulate.py"
 # principal) es CORTO; se acota igualmente para no colgar el servidor. Overridable por entorno.
 DEFAULT_TIMEOUT = int(os.environ.get("AWS_IAM_SIMULATE_TIMEOUT", "120"))
 
-# Nombre del fichero de salida dentro del tmpdir efímero.
+# Name of the output file inside the ephemeral tmpdir.
 _OUTFILE_NAME = "iam-simulate.json"
 
-# Forma de un ID de cuenta AWS: exactamente 12 dígitos (fail-closed, N-untrusted).
+# Shape of an AWS account ID: exactly 12 digits (fail-closed, N-untrusted).
 _ACCOUNT_RE = re.compile(r"^\d{12}$")
 
-# Forma de un ARN de principal IAM: ``arn:aws:iam::<12 dígitos>:<recurso>`` (role/user/group).
+# Shape of an IAM principal ARN: ``arn:aws:iam::<12 digits>:<resource>`` (role/user/group).
 # El conjunto de caracteres del recurso excluye metacaracteres de shell (defensa N-untrusted,
 # aunque el argv va sin shell). El grupo de cuenta se compara luego con ``account_id``.
 _PRINCIPAL_ARN_RE = re.compile(r"^arn:aws:iam::(\d{12}):[A-Za-z0-9+=,.@/_-]+$")
@@ -64,10 +64,10 @@ class AwsSimulateError(ValueError):
 
 
 def _validate_account_id(account_id: str) -> str:
-    """Valida ``account_id`` con forma de cuenta AWS (12 dígitos) o lanza ``AwsSimulateError``."""
+    """Validates ``account_id`` in the shape of an AWS account (12 digits) or raises ``AwsSimulateError``."""
     if not isinstance(account_id, str) or not _ACCOUNT_RE.match(account_id.strip()):
         raise AwsSimulateError(
-            f"account_id inválido: {account_id!r} (se esperan 12 dígitos de cuenta AWS)."
+            f"invalid account_id: {account_id!r} (expected 12 AWS account digits)."
         )
     return account_id.strip()
 
@@ -80,11 +80,11 @@ def _validate_principal_arn(principal_arn: str, account_id: str) -> str:
     no sea un ARN IAM de ESTA cuenta se rechaza con un error claro, sin ejecutar el subproceso.
     """
     if not isinstance(principal_arn, str):
-        raise AwsSimulateError(f"principal_arn inválido: {principal_arn!r} (se esperaba un ARN IAM).")
+        raise AwsSimulateError(f"invalid principal_arn: {principal_arn!r} (expected an IAM ARN).")
     match = _PRINCIPAL_ARN_RE.match(principal_arn.strip())
     if not match:
         raise AwsSimulateError(
-            f"principal_arn inválido: {principal_arn!r} "
+            f"invalid principal_arn: {principal_arn!r} "
             "(se esperaba 'arn:aws:iam::<cuenta>:<recurso>')."
         )
     if match.group(1) != account_id.strip():
@@ -96,7 +96,7 @@ def _validate_principal_arn(principal_arn: str, account_id: str) -> str:
 
 
 def _script_path() -> str:
-    """Ruta absoluta del script de simulate, resuelta junto a este módulo (robusto al cwd)."""
+    """Absolute path of the simulate script, resolved next to this module (cwd-independent)."""
     return str(Path(__file__).resolve().parent / IAM_SIMULATE_SCRIPT)
 
 
@@ -121,7 +121,7 @@ def build_iam_simulate_cmd(account_id: str, principal_arn: str, outfile: str) ->
 
 
 def _ring_tail(execution_id: str, max_lines: int = 20) -> str:
-    """Últimas líneas de salida de la ejecución (dato NO confiable, verbatim)."""
+    """Last lines of the run's output (UNTRUSTED data, verbatim)."""
     page = tool_streaming.read(execution_id, 0)
     lines = page.get("lines", [])
     tail = lines[-max_lines:]
@@ -134,9 +134,9 @@ def run_iam_simulate(
     execution_id: str = "",
     timeout: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Ejecuta el simulate IAM read-only y devuelve el JSON crudo (SÍNCRONO, un solo tiro).
+    """Runs the read-only IAM simulate and returns the raw JSON (SYNCHRONOUS, single-shot).
 
-    Flujo: valida ``account_id`` + ``principal_arn`` (fail-closed) -> crea un tmpdir efímero ->
+    Flow: validate ``account_id`` + ``principal_arn`` (fail-closed) -> create an ephemeral tmpdir ->
     construye el cmd -> ejecuta con ``tool_streaming.run_tool_streaming`` (kill de
     grupo/timeout, logs al ring por ``execution_id``) -> lee el fichero de salida. Devuelve
     ``{'status':'done','returncode':rc,'output':<json-string>}`` si hay salida legible SIN un
@@ -165,8 +165,8 @@ def run_iam_simulate(
                 "timed_out": True,
                 "returncode": returncode,
                 "error": (
-                    f"iam_simulate excedió el timeout ({timeout}s). "
-                    f"Últimas líneas: {_ring_tail(execution_id)}"
+                    f"iam_simulate exceeded the timeout ({timeout}s). "
+                    f"Last lines: {_ring_tail(execution_id)}"
                 ),
             }
         output = _read_output(outfile)
@@ -182,8 +182,8 @@ def run_iam_simulate(
         error = _structured_error(output)
         if error:
             # Fallo ESTRUCTURADO del simulate (p. ej. AccessDenied del propio Simulate): el
-            # script lo escribió como ``error`` en el JSON. Se propaga VERBATIM (dato NO
-            # confiable; se lee el estado, no se interpreta como instrucción).
+            # script wrote it as ``error`` in the JSON. Propagated VERBATIM (UNTRUSTED
+            # data; the status is read, not interpreted as an instruction).
             return {
                 "status": "failed",
                 "returncode": returncode,
@@ -199,7 +199,7 @@ def run_iam_simulate(
 
 
 def _read_output(outfile: str) -> str | None:
-    """Lee el JSON de salida como texto crudo; ``None`` si no existe o está vacío.
+    """Reads the output JSON as raw text; ``None`` if missing or empty.
 
     No se interpreta el contenido (dato NO confiable): se devuelve verbatim.
     """
@@ -213,9 +213,9 @@ def _read_output(outfile: str) -> str | None:
 def _structured_error(output: str) -> str | None:
     """Devuelve el ``error`` de nivel superior del JSON de salida, o ``None`` si no hay.
 
-    Lectura de ESTADO del plano de control (no interpretación de instrucciones): el script
+    STATUS reading of the control plane (no instruction interpretation): the script
     escribe ``{"error": "..."}`` cuando el propio Simulate falla fail-closed. Si el output
-    no es un JSON-objeto o no trae ``error``, se trata como éxito (``None``).
+    is not a JSON object or has no ``error``, it is treated as success (``None``).
     """
     try:
         doc = json.loads(output)

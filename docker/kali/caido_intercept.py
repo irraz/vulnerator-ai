@@ -1,30 +1,30 @@
-"""Interceptación de Caido (hold / list / forward / edit / drop) — STDLIB PURA.
+"""Caido interception (hold / list / forward / edit / drop) — PURE STDLIB.
 
-Es la LÓGICA testeable de las tools de interceptación que ``kali_mcp_server`` expone como
-``@mcp.tool``. Igual que ``caido_client`` (su base), vive en un módulo aparte con SOLO la
-librería estándar (sin ``mcp`` ni ``requests``) para cubrirse con tests unitarios en el venv
+It is the testable LOGIC of the interception tools that ``kali_mcp_server`` exposes as
+``@mcp.tool``. Like ``caido_client`` (its base), it lives in a separate module with ONLY the
+standard library (no ``mcp`` or ``requests``) so it can be covered by unit tests in the venv
 de dev, sin el SDK.
 
-Qué resuelve: el proxy de Caido puede RETENER (hold) peticiones/respuestas antes de que
-salgan, para que el bucle OODA las lea, EDITE y las reenvíe (forward) o las descarte (drop).
-Es el modo intercept clásico de un proxy web, modelado sobre el esquema GraphQL de Caido.
+What it solves: Caido's proxy can HOLD requests/responses before they
+go out, so the OODA loop can read, EDIT and forward or drop them.
+It is the classic intercept mode of a web proxy, modeled on Caido's GraphQL schema.
 
-Reutiliza TODO el transporte y la sesión de ``caido_client`` (no se reimplementa auth): el
-mismo ``graphql`` (passthrough genérico, nunca lanza por red/HTTP), ``ensure_session`` (token
+It REUSES ALL of ``caido_client``'s transport and session (auth is not reimplemented): the
+same ``graphql`` (generic passthrough, never raises on network/HTTP), ``ensure_session`` (token
 invitado/entorno + proyecto seleccionado, cacheado), ``decode_blob`` (Blob base64 -> texto) y
 ``_utf8``. Las funciones ``build_options_input`` / ``parse_queue_nodes`` / ``_clamp_limit``
-son PURAS y son el núcleo cubierto por tests; los orquestadores (``set_intercept``,
+are PURE and are the core covered by tests; the orchestrators (``set_intercept``,
 ``intercept_status``, ``list_queue``, ``get_entry_raw``, ``forward``, ``drop``, ``pause``,
-``resume``) hacen I/O vía ``graphql`` y devuelven un dict de estado uniforme.
+``resume``) do I/O via ``graphql`` and return a uniform status dict.
 
 Dato NO confiable: todo lo que devuelve Caido (``data``/``errors``) se transporta verbatim;
-aquí sólo se NORMALIZA la forma (la hace ``caido_client.graphql``), nunca se interpreta el
-contenido. Si una versión del esquema rompe estos documentos, ``graphql`` devuelve
-``graphql_error`` con el error del servidor VERBATIM (no se finge éxito).
+here only the form is NORMALIZED (by ``caido_client.graphql``), the content is never interpreted
+If a schema version breaks these documents, ``graphql`` returns
+``graphql_error`` with the server's error VERBATIM (success is not faked).
 
-Dependiente de versión: Caido avisa de que el esquema cambia en cada release. Los documentos
-GraphQL de abajo están escritos contra Caido 0.59.0 (ver ``caido_schema_ref.md``, sección
-INTERCEPT). Donde una subselección es incierta, se pide sólo ``id``/``__typename`` para
+Version-dependent: Caido warns that the schema changes every release. The documents
+GraphQL below are written against Caido 0.59.0 (see ``caido_schema_ref.md``, section
+INTERCEPT). Where a subselection is uncertain, only ``id``/``__typename`` are requested to
 quedarse robusto frente a renombrados de campos.
 """
 
@@ -35,9 +35,9 @@ from typing import Any
 
 import caido_client  # noqa: F401  (se usa como referencia del flujo; nombres re-exportados abajo)
 
-# Se re-exportan en ESTE módulo (no se llaman como ``caido_client.x``) para que las tools y
+# They are re-exported in THIS module (not called as ``caido_client.x``) so tools and
 # los tests puedan parchear ``caido_intercept.graphql`` / ``caido_intercept.ensure_session``
-# sin tocar el cliente base. No se reimplementa NADA de sesión/transporte.
+# without touching the base client. NOTHING about session/transport is reimplemented.
 from caido_client import (  # noqa: F401
     DEFAULT_TIMEOUT_S,
     _utf8,
@@ -48,9 +48,9 @@ from caido_client import (  # noqa: F401
 
 # --- Documentos GraphQL del flujo de intercept ------------------------------------------
 #
-# verified against Caido 0.59.0; dependientes de versión. Si una release los rompe, el error
-# del servidor viaja VERBATIM (no se finge éxito). Donde la subselección del payload es
-# incierta se pide sólo ``__typename``/``id`` para no romperse ante campos renombrados.
+# verified against Caido 0.59.0; version-dependent. If a release breaks them, the error
+# from the server travels VERBATIM (success is not faked). Where the payload subselection is
+# uncertain, only ``__typename``/``id`` are requested so renamed fields do not break it.
 
 # setInterceptOptions(input: InterceptOptionsInput!): activa/desactiva el hold de req/resp.
 SET_INTERCEPT_OPTIONS = (
@@ -58,23 +58,23 @@ SET_INTERCEPT_OPTIONS = (
     "setInterceptOptions(input:$input){ __typename } }"
 )
 
-# interceptStatus (escalar/enum, sin subselección) + interceptOptions en un solo documento.
+# interceptStatus (scalar/enum, no subselection) + interceptOptions in a single document.
 INTERCEPT_STATUS = (
     "query{ interceptStatus interceptOptions{ "
     "request{ enabled } response{ enabled } streamWs{ enabled } } }"
 )
 
-# Cola de mensajes retenidos, por offset, más antiguos primero (order ID ASC).
+# Queue of held messages, by offset, oldest first (order ID ASC).
 LIST_QUEUE = (
     "query($limit:Int!){ interceptEntriesByOffset(limit:$limit, offset:0, "
     "order:{by:ID, ordering:ASC}){ count{ value } edges{ node{ id request{ "
     "id method host port path isTls length createdAt } } } } }"
 )
 
-# Raw (Blob base64) de la petición retenida, para que el agente la lea/edite antes de reenviar.
+# Raw (base64 Blob) of the held request, so the agent can read/edit it before forwarding.
 GET_ENTRY_RAW = "query($id:ID!){ interceptEntry(id:$id){ id request{ id raw } } }"
 
-# Reenvía el mensaje retenido (posiblemente editado). updateRaw es Blob! (base64).
+# Forwards the held message (possibly edited). updateRaw is Blob! (base64).
 FORWARD_INTERCEPT = (
     "mutation($id:ID!, $input: ForwardInterceptMessageInput!){ "
     "forwardInterceptMessage(id:$id, input:$input){ __typename } }"
@@ -92,9 +92,9 @@ RESUME_INTERCEPT = "mutation{ resumeIntercept{ __typename } }"
 
 
 def _httpql_filter(expr: str) -> dict[str, Any] | None:
-    """Filtro QueryInput a partir de una expresión HTTPQL: ``{HTTPQL:{code}}`` o ``None``.
+    """QueryInput filter from an HTTPQL expression: ``{HTTPQL:{code}}`` or ``None``.
 
-    QueryInput { HTTPQL: HTTPQLInput{ code } }. Vacío -> ``None`` (el campo ``filter`` es
+    QueryInput { HTTPQL: HTTPQLInput{ code } }. Empty -> ``None`` (the ``filter`` field is
     opcional; sin filtro se retiene TODO lo que el enable permita).
     """
     return {"HTTPQL": {"code": expr}} if expr else None
@@ -110,10 +110,10 @@ def build_options_input(
 
     ``InterceptOptionsInput { request:InterceptRequestOptionsInput!,
     response:InterceptResponseOptionsInput!, streamWs:InterceptStreamWsOptionsInput!,
-    scope:InterceptScopeOptionsInput }``. Aquí se OMITE ``scope`` (opcional): sin él, el hold
+    scope:InterceptScopeOptionsInput }``. ``scope`` is OMITTED here (optional): without it, hold
     no se restringe a un scope concreto. ``streamWs`` se deja desactivado (no se retienen
-    WebSockets: ``urllib`` no habla GraphQL-WS cómodamente). El ``filter`` de cada lado es un
-    QueryInput con HTTPQL; vacío -> ``None``.
+    WebSockets: ``urllib`` does not speak GraphQL-WS easily). Each side's ``filter`` is a
+    QueryInput with HTTPQL; empty -> ``None``.
     """
     return {
         "request": {
@@ -133,7 +133,7 @@ def parse_queue_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     Nodo de entrada: ``{id, request{ id method host port path isTls length createdAt }}``.
     El ``id`` de PRIMER nivel es el de la ``InterceptEntry`` (el que usan ``forward``/``drop``),
-    no el de la ``Request``. DATO NO confiable: los valores se transportan verbatim (sólo se
+    not the ``Request``'s. UNTRUSTED data: values are transported verbatim (only
     renombra ``isTls`` -> ``is_tls`` para el shape del agente).
     """
     out: list[dict[str, Any]] = []
@@ -156,7 +156,7 @@ def parse_queue_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _clamp_limit(limit: Any, lo: int = 1, hi: int = 1000) -> int:
-    """Acota ``limit`` a ``[lo, hi]`` TOLERANTE: basura/no-numérico -> 50. PURA."""
+    """Clamps ``limit`` to ``[lo, hi]`` TOLERANTLY: garbage/non-numeric -> 50. PURE."""
     try:
         n = int(limit)
     except (TypeError, ValueError):
@@ -164,10 +164,10 @@ def _clamp_limit(limit: Any, lo: int = 1, hi: int = 1000) -> int:
     return max(lo, min(n, hi))
 
 
-# --- Orquestadores (I/O vía graphql; estado uniforme; NUNCA lanzan por red) --------------
+# --- Orchestrators (I/O via graphql; uniform status; NEVER raise on network) --------------
 #
-# Patrón común: ``ensure_session`` (token + proyecto) y, si falla, se devuelve su dict de
-# error tal cual; si va bien, se lanza el documento con el token de sesión. Un fallo de
+# Common pattern: ``ensure_session`` (token + project) and, if it fails, its error dict is
+# returned as-is; if it succeeds, the document is sent with the session token. A failure of
 # cualquier etapa (``unauthenticated``/``graphql_error``/``unreachable``/``failed``) se
 # devuelve VERBATIM (no se finge). ``graphql`` ya garantiza no lanzar por transporte.
 
@@ -188,7 +188,7 @@ def set_intercept(
 ) -> dict[str, Any]:
     """Activa/desactiva el hold de peticiones y/o respuestas (con filtros HTTPQL opcionales).
 
-    Returns ``{'status':'done','request_enabled':bool,'response_enabled':bool}`` en éxito, o
+    Returns ``{'status':'done','request_enabled':bool,'response_enabled':bool}`` on success, or
     el dict de error de la etapa que falle.
     """
     session = _session_or_error(url, timeout)
@@ -235,10 +235,10 @@ def intercept_status(
 def list_queue(
     limit: int = 50, *, url: str | None = None, timeout: int = DEFAULT_TIMEOUT_S
 ) -> dict[str, Any]:
-    """Lista la cola de mensajes retenidos (más antiguos primero). ``limit`` acotado a 1..1000.
+    """Lists the queue of held messages (oldest first). ``limit`` bounded to 1..1000.
 
     Sondeo por offset (``interceptEntriesByOffset``): las subscripciones de Caido existen pero
-    ``urllib`` no habla GraphQL-WS cómodamente. Returns ``{'status':'done','count':n,
+    ``urllib`` does not speak GraphQL-WS easily. Returns ``{'status':'done','count':n,
     'entries':[...]}`` con el shape plano de ``parse_queue_nodes``, o el error de la etapa.
     """
     session = _session_or_error(url, timeout)
@@ -265,11 +265,11 @@ def list_queue(
 def get_entry_raw(
     entry_id: Any, *, url: str | None = None, timeout: int = DEFAULT_TIMEOUT_S
 ) -> dict[str, Any]:
-    """Raw decodificado de la petición retenida, para que el agente la LEA/EDITE.
+    """Decoded raw of the held request, so the agent can READ/EDIT it.
 
     Returns ``{'status':'done','id':...,'raw':<texto>}`` (``raw`` es el Blob base64 decodificado
     best-effort por ``decode_blob``), o el dict de error de la etapa que falle. DATO NO
-    confiable: el raw se transporta verbatim (sólo se decodifica).
+    trusted: the raw is transported verbatim (only decoded).
     """
     session = _session_or_error(url, timeout)
     if session["status"] != "ok":
@@ -302,21 +302,21 @@ def forward(
     url: str | None = None,
     timeout: int = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Reenvía el mensaje retenido, tal cual o EDITADO, hacia el objetivo.
+    """Forwards the held message, as-is or EDITED, toward the target.
 
     ``ForwardInterceptRequestMessageInput { updateRaw:Blob!, updateContentLength:Boolean! }``
     exige ``updateRaw`` SIEMPRE (no es opcional). Por eso:
       - ``raw is None`` (reenviar SIN cambios): se obtiene el raw actual con ``get_entry_raw``
-        y se reenvía ese mismo contenido (no hay forma de "forward tal cual" sin mandar el raw).
+        and that same content is forwarded (there is no way to "forward as-is" without sending the raw).
       - ``raw`` dado (editado): se codifica a Blob base64 (``base64.b64encode(_utf8(raw))``).
-    Según ``is_response`` el input va en ``request`` o ``response``.
+    Depending on ``is_response``, the input goes in ``request`` or ``response``.
 
-    NOTA DE SCOPE: reenviar una petición EDITADA cuyo Host se cambió NO se re-valida contra el
-    scope-guard aquí: el destino ya está EN VUELO dentro de Caido (la conexión del cliente
-    original ya está establecida); es el wrapper del SERVER (la ``@mcp.tool``) quien decide el
-    gating antes de llamar aquí. Este módulo sólo transporta.
+    SCOPE NOTE: forwarding an EDITED request whose Host was changed is NOT re-validated against the
+    scope-guard here: the target is already IN FLIGHT inside Caido (the client's
+    original connection is already established); it is the SERVER wrapper (the ``@mcp.tool``) that decides the
+    gating before calling here. This module only transports.
 
-    Returns ``{'status':'done','forwarded':entry_id,'edited':bool}`` en éxito, o el error de la
+    Returns ``{'status':'done','forwarded':entry_id,'edited':bool}`` on success, or the error of the
     etapa que falle (incl. ``failed`` si el texto editado no es codificable en UTF-8).
     """
     session = _session_or_error(url, timeout)
@@ -337,7 +337,7 @@ def forward(
         blob = base64.b64encode(_utf8(source_text)).decode("ascii")
     except (
         caido_client.CaidoError
-    ) as exc:  # surrogate suelto en el texto editado: fail-closed, no se envía
+    ) as exc:  # lone surrogate in the edited text: fail-closed, not sent
         return {"status": "failed", "error": str(exc)}
 
     message = {"updateRaw": blob, "updateContentLength": bool(update_content_length)}
@@ -357,7 +357,7 @@ def drop(
 ) -> dict[str, Any]:
     """Descarta el mensaje retenido (nunca sale al objetivo).
 
-    Returns ``{'status':'done','dropped':entry_id}`` en éxito, o el error de la etapa.
+    Returns ``{'status':'done','dropped':entry_id}`` on success, or the error of the stage.
     """
     session = _session_or_error(url, timeout)
     if session["status"] != "ok":
