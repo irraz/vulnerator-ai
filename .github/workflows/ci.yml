@@ -56,11 +56,14 @@ jobs:
       - name: Quick-fix comment rule
         run: python scripts/check_quick_fix_comments.py --all
 
+      - name: Language guard
+        run: python scripts/check_language.py --all
+
       - name: Ruff (correctness)
         run: python -m ruff check .
 
       - name: Type-check (correctness)
-        run: python -m mypy --config-file pyproject.toml docker/kali/scope_guard.py docker/kali/finding_store.py docker/kali/session_log.py docker/kali/tool_streaming.py docker/kali/shell_exec.py docker/mcp/mcp_tool_logic.py docker/web/ooda_parse.py docker/web/event_model.py
+        run: python -m mypy --config-file pyproject.toml scripts/check_language.py docker/kali/scope_guard.py docker/kali/finding_store.py docker/kali/session_log.py docker/kali/tool_streaming.py docker/kali/shell_exec.py docker/mcp/mcp_tool_logic.py docker/web/ooda_parse.py docker/web/event_model.py
 
       - name: Test suites
         run: python scripts/smoke.py --quick
