@@ -74,7 +74,7 @@ def _load_one(mcp, name: str, plugin_dir: str) -> PluginRecord:
     # (phase name) The dir name must match the regex BEFORE touching sys.path/import.
     if not PLUGIN_DIR_NAME_RE.match(name):
         print(
-            f"{_LOG_PREFIX} plugin '{name}' rechazado: nombre de directorio inválido",
+            f"{_LOG_PREFIX} plugin '{name}' rejected: invalid directory name",
             flush=True,
         )
         return PluginRecord(

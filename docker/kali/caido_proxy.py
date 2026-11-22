@@ -1,27 +1,27 @@
-"""Enrutado del tráfico del agente POR el proxy de Caido (STDLIB PURA) — captura HTTPS.
+"""Routing of the agent's traffic THROUGH Caido's proxy (PURE STDLIB) — HTTPS capture.
 
-Es la LÓGICA testeable del enganche de arranque que hará que el OTRO tráfico web del agente
+It is the testable LOGIC of the startup hook that makes the agent's OTHER web traffic
 —los ``curl``/``nuclei`` que lanza ``kali_run``/``kali_exec`` y el navegador headless de
-playwright-mcp— salga A TRAVÉS del proxy de Caido y quede CAPTURADO en su historial (el mismo
+playwright-mcp — go THROUGH Caido's proxy and be CAPTURED in its history (the same
 que ``caido_history`` consulta). Igual que ``caido_client`` / ``shell_exec`` / ``scope_guard``,
-vive en un módulo aparte con SOLO la librería estándar (sin ``mcp`` ni ``requests``; HTTP por
+lives in a separate module with ONLY the standard library (no ``mcp`` or ``requests``; HTTP via
 ``urllib``) para cubrirse con tests unitarios en el venv de dev, sin el SDK.
 
-Qué resuelve: Caido escucha en ``0.0.0.0:8080`` para UI Y PROXY a la vez (log: "Listening on
-0.0.0.0:8080 (Proxy, UI)"), así que el MISMO ``host:port`` de la API GraphQL es el endpoint del
+What it solves: Caido listens on ``0.0.0.0:8080`` for UI AND PROXY at once (log: "Listening on
+0.0.0.0:8080 (Proxy, UI)"), so the SAME ``host:port`` of the GraphQL API is the endpoint of the
 proxy. Exportando ``HTTP_PROXY``/``HTTPS_PROXY`` hacia ese endpoint, un cliente que los respete
-(curl, la mayoría de HTTP libs, Chromium) enruta su tráfico por Caido. Para que el HTTPS se
+(curl, most HTTP libs, Chromium) routes its traffic through Caido. For HTTPS to be
 INTERCEPTE (y no reviente por certificado), hay que confiar en la CA por-instancia que Caido
 genera en runtime y publica SIN auth en ``http://<caido>:8080/ca.crt`` (HTTP 200).
 
 Reparto puro/efectos:
   - ``proxy_env`` / ``build_proxy_cli_args`` / el endpoint del proxy son PUROS (derivan de
-    ``CAIDO_URL`` vía ``caido_client.resolve_url``): el núcleo cubierto por tests.
-  - ``fetch_ca`` es la ÚNICA función con I/O de red en runtime (GET del PEM); en los tests se
+    ``CAIDO_URL`` via ``caido_client.resolve_url``): the core covered by tests.
+  - ``fetch_ca`` is the ONLY function with network I/O at runtime (GET of the PEM); in tests it is
     monkeypatchea ``urllib.request.urlopen``.
   - ``install_ca`` hace I/O de fichero + un ``subprocess.run`` del actualizador del trust store;
     en los tests se apunta a un ``dest`` temporal y a un ``update_cmd`` falso.
-  - ``enable_capture`` ORQUESTA los tres (fetch -> install -> env); es lo que llamaría el hook.
+  - ``enable_capture`` ORCHESTRATES the three (fetch -> install -> env); this is what the hook would call.
 
 NO se finge: si el PEM no llega, no es un certificado, no se puede escribir, o el actualizador
 del trust store falta/falla, se devuelve el estado real (``unreachable``/``failed``/``absent``),
@@ -38,18 +38,18 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlsplit
 
-# Se importa el MÓDULO (no los nombres sueltos) y se referencia ``caido_client.resolve_url`` /
-# ``caido_client.CaidoError`` en cada llamada: así, si otro test recarga ``caido_client``
+# Import the MODULE (not loose names) and reference ``caido_client.resolve_url`` /
+# ``caido_client.CaidoError`` on each call: this way, if another test reloads ``caido_client``
 # (``importlib.reload``), siempre se usa la clase/func VIGENTE y el ``except`` sigue casando
-# (un ``from caido_client import CaidoError`` capturaría una clase que una recarga deja obsoleta).
+# (a ``from caido_client import CaidoError`` would capture a class left stale by a reload).
 import caido_client
 
-# --- Configuración por entorno (overridable; defaults para la red interna docker) -------
+# --- Environment configuration (overridable; defaults for the docker internal network) -------
 
 # Ruta del PEM de la CA por-instancia que Caido publica sin auth.
 CA_PATH = os.environ.get("CAIDO_CA_PATH", "/ca.crt")
 
-# Dónde se deposita la CA en el trust store del sistema (Debian/Kali). ``update-ca-certificates``
+# Where the CA is placed in the system trust store (Debian/Kali). ``update-ca-certificates``
 # consume ``/usr/local/share/ca-certificates/*.crt``.
 DEFAULT_CA_DEST = (
     os.environ.get("CAIDO_CA_DEST") or ""
@@ -74,7 +74,7 @@ _MAX_ERROR_BODY = 2000
 def proxy_endpoint(url: str | None = None) -> str:
     """Endpoint del proxy de Caido como ``http://<host>:<port>``. PURO.
 
-    Caido sirve UI y PROXY en el MISMO ``host:port``, así que se reutiliza
+    Caido serves UI and PROXY on the SAME ``host:port``, so it reuses
     ``caido_client.resolve_url`` para normalizar ``CAIDO_URL`` y se extrae ``host:port``. El
     esquema del VALOR es siempre ``http`` (un proxy HTTP se direcciona por http aunque tunelice
     HTTPS; el 8080 de Caido es texto plano). IPv6 se corchetea. Fail-closed: sin URL o con
@@ -89,9 +89,9 @@ def proxy_endpoint(url: str | None = None) -> str:
         raise caido_client.CaidoError(f"CAIDO_URL sin host: {base!r}")
     try:
         port = parts.port or (443 if parts.scheme == "https" else 80)
-    except ValueError as exc:  # puerto no numérico / fuera de rango
+    except ValueError as exc:  # non-numeric / out-of-range port
         raise caido_client.CaidoError(
-            f"CAIDO_URL con puerto inválido ({exc}): {base!r}"
+            f"CAIDO_URL with invalid port ({exc}): {base!r}"
         ) from exc
     host_fmt = f"[{host}]" if ":" in host else host
     return f"http://{host_fmt}:{port}"
@@ -100,12 +100,12 @@ def proxy_endpoint(url: str | None = None) -> str:
 def proxy_env(url: str | None = None) -> dict[str, Any]:
     """Variables de entorno de proxy para enrutar un subproceso POR Caido. Nunca lanza.
 
-    Deriva ``HTTP_PROXY``/``HTTPS_PROXY`` (y sus variantes en minúscula, que muchas libs leen)
-    del endpoint del proxy. Devuelve ``{'status':'ok','env':{...}}`` o, si no hay URL/es inválida,
+    Derives ``HTTP_PROXY``/``HTTPS_PROXY`` (and their lowercase variants, which many libs read)
+    from the proxy endpoint. Returns ``{'status':'ok','env':{...}}`` or, if there is no URL/it is invalid,
     ``{'status':'failed','error':...}`` (fail-closed: el que llama NO propaga un proxy a medias).
 
     OJO (ver proposal): las llamadas del PROPIO kali-mcp a Caido NO deben ir por este proxy
-    (bucle); eso se resuelve con ``NO_PROXY`` en la integración, no aquí.
+    (loop); that is handled with ``NO_PROXY`` in the integration, not here.
     """
     try:
         endpoint = proxy_endpoint(url)
@@ -126,7 +126,7 @@ def build_proxy_cli_args(url: str | None = None) -> list[str]:
     """Args estilo Chromium/Playwright para apuntar el navegador al proxy de Caido. PURO.
 
     Devuelve ``["--proxy-server=http://<host>:<port>"]`` para cablear el browser headless. Si no
-    hay URL o es inválida, devuelve ``[]`` (fail-closed: sin arg el navegador va directo, no se
+    there is a URL or it is invalid, returns ``[]`` (fail-closed: without the arg the browser goes direct, it is not
     inventa un endpoint). No lanza.
     """
     try:
@@ -136,7 +136,7 @@ def build_proxy_cli_args(url: str | None = None) -> list[str]:
     return [f"--proxy-server={endpoint}"]
 
 
-# --- Descarga de la CA por-instancia (ÚNICA I/O de red en runtime) -----------------------
+# --- Per-instance CA download (ONLY network I/O at runtime) -----------------------
 
 
 def fetch_ca(
@@ -144,7 +144,7 @@ def fetch_ca(
 ) -> dict[str, Any]:
     """GET del PEM de la CA de Caido (``<base>/ca.crt``). Nunca lanza por red/HTTP.
 
-    Es la ÚNICA función de este módulo que sale a la red en runtime (en tests se monkeypatchea
+    It is the ONLY function in this module that goes to the network at runtime (in tests it is monkeypatched
     ``urllib.request.urlopen``). Caido publica la CA por-instancia SIN auth y con HTTP 200.
     Valida que el cuerpo PAREZCA un PEM (``-----BEGIN CERTIFICATE-----``); si no, es ``failed``
     (no se finge: un portal cautivo o un 200 con HTML no es un certificado).
@@ -152,7 +152,7 @@ def fetch_ca(
     Returns:
       - ``{'status':'ok','pem':<str>}``
       - ``{'status':'unreachable','error':...}``  (no se pudo conectar / transporte roto)
-      - ``{'status':'failed','error':...}``        (HTTP de error, URL inválida, o no es PEM)
+      - ``{'status':'failed','error':...}``        (HTTP error, invalid URL, or not PEM)
     """
     try:
         base = caido_client.resolve_url(url)
@@ -161,7 +161,7 @@ def fetch_ca(
     ca_url = base + CA_PATH
     try:
         req = urllib.request.Request(ca_url, method="GET")
-        # El esquema sale de CAIDO_URL (operador) y `resolve_url` sólo admite http/https: no hay
+        # The scheme comes from CAIDO_URL (operator) and `resolve_url` only allows http/https: there is no
         # file:// ni esquemas raros, y ninguna entrada de Hermes llega a esta URL.
         with urllib.request.urlopen(  # noqa: S310  # nosec B310
             req, timeout=timeout
@@ -188,8 +188,8 @@ def fetch_ca(
             "status": "unreachable",
             "error": f"Fallo de transporte al pedir la CA ({ca_url}): {type(exc).__name__}: {exc}",
         }
-    except ValueError as exc:  # URL inválida (InvalidURL/espacios/corchetes)
-        return {"status": "failed", "error": f"URL de la CA inválida ({ca_url}): {exc}"}
+    except ValueError as exc:  # invalid URL (InvalidURL/spaces/brackets)
+        return {"status": "failed", "error": f"invalid CA URL ({ca_url}): {exc}"}
 
     pem = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
     if "-----BEGIN CERTIFICATE-----" not in pem:
@@ -197,7 +197,7 @@ def fetch_ca(
     return {"status": "ok", "pem": pem}
 
 
-# --- Instalación de la CA en el trust store (I/O de fichero + subprocess) -----------------
+# --- Installing the CA in the trust store (file I/O + subprocess) -----------------
 
 
 def install_ca(
@@ -207,23 +207,23 @@ def install_ca(
 ) -> dict[str, Any]:
     """Deposita el PEM en el trust store y refresca con ``update_cmd``. Nunca lanza.
 
-    Flujo: valida ``pem`` (string no vacío, fail-closed) -> lo escribe en ``dest`` (I/O envuelta
+    Flow: validate ``pem`` (non-empty string, fail-closed) -> write it to ``dest`` (wrapped I/O
     en try/except) -> ejecuta ``update_cmd`` con ``subprocess.run`` (captura salida, timeout,
-    ``check=False``). ``dest`` y ``update_cmd`` son parámetros para que los tests apunten a un
+    ``check=False``). ``dest`` and ``update_cmd`` are parameters so tests can point to a
     tmpdir y a un comando falso.
 
-    NO se finge: si falta el binario del actualizador se devuelve ``absent``; si éste falla
-    (returncode != 0) se devuelve ``failed`` con su salida; sólo un refresco exitoso es ``done``.
+    No faking: if the updater binary is missing, ``absent`` is returned; if it fails
+    (returncode != 0), ``failed`` is returned with its output; only a successful refresh is ``done``.
 
     Returns:
       - ``{'status':'done','path':dest}``
       - ``{'status':'absent','path':dest,'error':...}``   (binario del actualizador ausente)
-      - ``{'status':'failed','path'?:dest,'error':...}``   (PEM inválido / I/O / actualizador falló)
+      - ``{'status':'failed','path'?:dest,'error':...}``   (invalid PEM / I/O / updater failed)
     """
     if not isinstance(pem, str) or not pem.strip():
         return {
             "status": "failed",
-            "error": "PEM vacío: no hay certificado que instalar.",
+            "error": "empty PEM: no certificate to install.",
         }
 
     try:
@@ -247,22 +247,22 @@ def install_ca(
             check=False,
         )
     except FileNotFoundError as exc:
-        # El binario del actualizador no está en la imagen: la CA quedó escrita pero el trust
-        # store NO se refrescó. Se reporta tal cual (no se finge que el HTTPS quedó confiado).
+        # The updater binary is not in the image: the CA was written but the trust
+        # store was NOT refreshed. Reported as-is (no faking that HTTPS is trusted).
         return {
             "status": "absent",
             "path": dest,
             "error": (
                 f"actualizador del trust store ausente ({update_cmd[0] if update_cmd else '?'}): "
-                f"{exc}. La CA se escribió pero el trust store NO se refrescó."
+                f"{exc}. The CA was written but the trust store was NOT refreshed."
             ),
         }
     except (OSError, subprocess.SubprocessError) as exc:
-        # Incluye TimeoutExpired: el actualizador se colgó o cascó. Estado reportable, no excepción.
+        # Includes TimeoutExpired: the updater hung or failed. Reportable status, not an exception.
         return {
             "status": "failed",
             "path": dest,
-            "error": f"el actualizador del trust store falló: {type(exc).__name__}: {exc}",
+            "error": f"trust store updater failed: {type(exc).__name__}: {exc}",
         }
 
     if proc.returncode != 0:
@@ -271,12 +271,12 @@ def install_ca(
             "status": "failed",
             "path": dest,
             "returncode": proc.returncode,
-            "error": f"{update_cmd[0]} devolvió {proc.returncode}: {detail}",
+            "error": f"{update_cmd[0]} returned {proc.returncode}: {detail}",
         }
     return {"status": "done", "path": dest}
 
 
-# --- Orquestador: habilitar la captura (lo que llamaría el hook de arranque) --------------
+# --- Orchestrator: enable capture (what the startup hook would call) --------------
 
 
 def enable_capture(
@@ -287,12 +287,12 @@ def enable_capture(
 ) -> dict[str, Any]:
     """Habilita la captura por proxy: fetch_ca -> install_ca -> proxy_env. Nunca lanza.
 
-    Es lo que un hook de arranque (opt-in, p. ej. ``CAIDO_PROXY_CAPTURE=1``) llamaría para dejar
-    el entorno listo: confía la CA por-instancia y deriva las variables de proxy a propagar a los
+    This is what a startup hook (opt-in, e.g. ``CAIDO_PROXY_CAPTURE=1``) would call to leave
+    the environment ready: it trusts the per-instance CA and derives the proxy variables to propagate to the
     subprocesos (``kali_run``/``kali_exec``) y al navegador. Fail-closed: devuelve el dict de la
     PRIMERA etapa que falle (``unreachable``/``failed``/``absent``), sin continuar.
 
-    Returns ``{'status':'done','ca_path':<dest>,'env':{...}}`` en éxito, o el dict de error de la
+    Returns ``{'status':'done','ca_path':<dest>,'env':{...}}`` on success, or the error dict of the
     etapa que falle.
     """
     ca = fetch_ca(url, timeout=timeout)

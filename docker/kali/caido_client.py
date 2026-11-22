@@ -1,38 +1,38 @@
 """Cliente de la API GraphQL de Caido (STDLIB PURA) — el canal del agente hacia Caido.
 
-Es la LÓGICA testeable de las tools ``caido_graphql`` / ``caido_request`` / ``caido_history``
+It is the testable LOGIC of the ``caido_graphql`` / ``caido_request`` / ``caido_history`` tools
 que ``kali_mcp_server`` expone como ``@mcp.tool``. Igual que ``dnsdumpster_client`` /
-``shell_exec`` / ``scope_guard``, vive en un módulo aparte con SOLO la librería estándar
+``shell_exec`` / ``scope_guard``, it lives in a separate module with ONLY the standard library
 (sin ``mcp`` ni ``requests``; HTTP por ``urllib``) para cubrirse con tests unitarios en el
 venv de dev, sin el SDK.
 
-Qué resuelve: darle al bucle OODA acceso a TODA la superficie de Caido (el moderno toolkit
+What it solves: give the OODA loop access to the ENTIRE Caido surface (the modern toolkit
 web, proxy + Replay + HTTPQL + workflows + scope + findings). Caido publica su API GraphQL
-a propósito para herramientas de terceros, pero AVISA de que CAMBIA en cada release. Por eso
-la pieza central es un passthrough genérico (``graphql``): Hermes manda la query/mutación y
-funciona contra cualquier versión del esquema. Encima, dos orquestadores ergonómicos para
-los caminos calientes —enviar una petición por Replay (``send_request``) y buscar en el
+intentionally for third-party tools, but WARNS that it CHANGES on every release. That is why
+the centerpiece is a generic passthrough (``graphql``): Hermes sends the query/mutation and
+works against any schema version. On top, two ergonomic orchestrators for
+the hot paths —send a request via Replay (``send_request``) and search the
 historial por HTTPQL (``search_history``)— construidos sobre el flujo REAL del esquema,
 VERIFICADO EN VIVO contra una instancia + OWASP Juice Shop (ver docs/caido.md). Si el esquema
-difiere en otra versión, el error GraphQL del servidor se transporta VERBATIM (no se finge).
+differs in another version, the server's GraphQL error is transported VERBATIM (not faked).
 
-Modelo de auth (verificado en vivo): la introspección del esquema NO necesita token, pero
-TODA operación real (Replay, historial) exige ``Authorization: Bearer <token>`` y, además,
-un PROYECTO seleccionado (el repositorio de datos es por-proyecto). Hay dos orígenes de token:
+Auth model (live-verified): schema introspection does NOT need a token, but
+EVERY real operation (Replay, history) requires ``Authorization: Bearer *** and, in addition,
+a PROJECT selected (the data store is per-project). There are two token sources:
   - Token del operador por entorno: ``CAIDO_PAT`` (Personal Access Token) o
-    ``CAIDO_ACCESS_TOKEN`` (token de sesión del GUI). Para un Caido con cuenta/licencia.
-  - Invitado headless: si la instancia corre con ``--allow-guests`` (así la levanta el
-    compose), ``loginAsGuest`` emite un token SIN cuenta ni login GUI -> integración
-    ZERO-TOUCH. Es el camino por defecto para el lab autónomo.
-``ensure_session`` resuelve ambos: usa el token de entorno si está; si no, inicia sesión de
+    ``CAIDO_ACCESS_TOKEN`` (GUI session token). For a Caido with an account/license.
+  - Headless guest: if the instance runs with ``--allow-guests`` (as the
+    compose starts it), ``loginAsGuest`` issues a token WITHOUT account or GUI login -> integration
+    ZERO-TOUCH. This is the default path for the autonomous lab.
+``ensure_session`` handles both: it uses the environment token if present; otherwise it logs in as
 invitado (cacheada), y en ambos casos SELECCIONA un proyecto (crea uno si no hay). Sin token
 y sin invitados permitidos, las operaciones devuelven ``unauthenticated`` fail-closed (no se
 finge; ``server_info`` refleja el estado).
 
 Dato NO confiable: todo lo que devuelve Caido (``data``/``errors``) se transporta verbatim;
-aquí sólo se NORMALIZA la forma del transporte (HTTP/JSON/errores GraphQL), nunca se
+here only the transport shape (HTTP/JSON/GraphQL errors) is NORMALIZED, it is never
 interpreta el contenido. Las funciones ``build_*``/``normalize_*``/``split_target_url`` son
-PURAS y son el núcleo cubierto por tests; ``graphql``/``ensure_session``/``send_request``/
+PURE and are the core covered by tests; ``graphql``/``ensure_session``/``send_request``/``
 ``search_history`` son los orquestadores con I/O de red.
 """
 
@@ -51,7 +51,7 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlsplit
 
-# --- Configuración por entorno (overridable; defaults para la red interna docker) -------
+# --- Environment configuration (overridable; defaults for the docker internal network) -------
 
 DEFAULT_URL = os.environ.get("CAIDO_URL", "http://caido:8080")
 GRAPHQL_PATH = os.environ.get("CAIDO_GRAPHQL_PATH", "/graphql")
@@ -60,7 +60,7 @@ ALT_TOKEN_ENV = "CAIDO_ACCESS_TOKEN"
 
 
 def _env_int(name: str, default: int) -> int:
-    """Entero de entorno TOLERANTE: vacío o basura -> ``default`` (no aborta el servidor)."""
+    """TOLERANT environment integer: empty or garbage -> ``default`` (does not abort the server)."""
     try:
         return int((os.environ.get(name) or "").strip() or default)
     except ValueError:
@@ -68,7 +68,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _env_float(name: str, default: float) -> float:
-    """Float de entorno TOLERANTE: vacío o basura -> ``default``."""
+    """TOLERANT environment float: empty or garbage -> ``default``."""
     try:
         return float((os.environ.get(name) or "").strip() or default)
     except ValueError:
@@ -78,10 +78,10 @@ def _env_float(name: str, default: float) -> float:
 DEFAULT_TIMEOUT_S = _env_int("CAIDO_TIMEOUT", 60)
 
 # Login de invitado headless (loginAsGuest). On por defecto: el compose levanta Caido con
-# --allow-guests, así las tools funcionan sin que el operador monte una cuenta. Se puede
-# desactivar (CAIDO_ALLOW_GUEST=0) para forzar que sólo valga un token de entorno.
-# FAIL-CLOSED: sólo valores explícitamente afirmativos (o vacío = default) lo activan; cualquier
-# otro (0/false/no/off/basura) lo DESACTIVA, así "no" nunca deja el invitado abierto en silencio.
+# --allow-guests, so tools work without the operator setting up an account. It can be
+# disabled (CAIDO_ALLOW_GUEST=0) to force only an environment token to be valid.
+# FAIL-CLOSED: only explicitly affirmative values (or empty = default) enable it; any
+# other (0/false/no/off/garbage) DISABLES it, so "no" never silently leaves the guest open.
 ALLOW_GUEST = os.environ.get("CAIDO_ALLOW_GUEST", "1").strip().lower() in (
     "",
     "1",
@@ -94,7 +94,7 @@ ALLOW_GUEST = os.environ.get("CAIDO_ALLOW_GUEST", "1").strip().lower() in (
 # si ya hay proyectos, selecciona el primero READY en vez de crear).
 PROJECT_NAME = (os.environ.get("CAIDO_PROJECT") or "").strip() or "vulnerator"
 
-# Sondeo de la respuesta de Replay (es asíncrona: startReplayTask lanza y la respuesta
+# Polling of the Replay response (it is async: startReplayTask launches and the response
 # aparece en el historial). Tope y cadencia del polling.
 REPLAY_POLL_TRIES = _env_int("CAIDO_REPLAY_POLL_TRIES", 30)
 REPLAY_POLL_INTERVAL_S = _env_float("CAIDO_REPLAY_POLL_INTERVAL", 1.0)
@@ -108,10 +108,10 @@ _MAX_ERROR_BODY = 2000
 
 
 class CaidoError(ValueError):
-    """Entrada inválida a una build_* (fail-closed: la tool no llega a llamar a Caido)."""
+    """Invalid input to a build_* (fail-closed: the tool never calls Caido)."""
 
 
-# --- Resolución de endpoint / token (I/O de entorno, sin red) ---------------------------
+# --- Endpoint / token resolution (environment I/O, no network) ---------------------------
 
 
 def resolve_url(url: str | None = None) -> str:
@@ -119,19 +119,19 @@ def resolve_url(url: str | None = None) -> str:
     base = (url or DEFAULT_URL or "").strip()
     if not base:
         raise CaidoError(
-            "Falta la URL de Caido: pásala o exporta CAIDO_URL (p. ej. http://caido:8080)."
+            "Missing Caido URL: pass it or export CAIDO_URL (e.g. http://caido:8080)."
         )
     if "://" not in base:
         base = "http://" + base
-    # Sólo http/https: `urlopen` aceptaría file://, ftp://... y CAIDO_URL es config del operador
+    # Only http/https: `urlopen` would accept file://, ftp://... and CAIDO_URL is operator config
     # pero no debe poder abrir ficheros locales por un descuido (bandit B310).
     try:
         scheme = urlsplit(base).scheme.lower()
     except ValueError as exc:
-        raise CaidoError(f"CAIDO_URL inválida ({exc}): {base!r}") from exc
+        raise CaidoError(f"invalid CAIDO_URL ({exc}): {base!r}") from exc
     if scheme not in ("http", "https"):
         raise CaidoError(
-            f"CAIDO_URL con esquema no permitido ({scheme!r}): sólo http/https."
+            f"CAIDO_URL with disallowed scheme ({scheme!r}): only http/https."
         )
     return base.rstrip("/")
 
@@ -153,7 +153,7 @@ def env_token() -> str | None:
 
 
 def token_present() -> bool:
-    """¿Hay token de entorno configurado? Lo usa ``server_info`` (sin llamar a Caido)."""
+    """Is an environment token configured? Used by ``server_info`` (without calling Caido)."""
     return env_token() is not None
 
 
@@ -162,18 +162,18 @@ def graphql_endpoint(url: str | None = None) -> str:
     return resolve_url(url) + GRAPHQL_PATH
 
 
-# --- Normalización de la respuesta (PURA: dict de transporte -> dict de estado) ----------
+# --- Response normalization (PURE: transport dict -> status dict) ----------
 
 
 def normalize_graphql_response(payload: dict[str, Any]) -> dict[str, Any]:
     """Clasifica una respuesta GraphQL YA parseada (HTTP 200) en un estado uniforme.
 
-    GraphQL devuelve 200 incluso con errores de resolución (array ``errors``). Caido marca
+    GraphQL returns 200 even with resolver errors (``errors`` array). Caido marks
     los fallos de auth dentro de ``errors[].extensions.CAIDO.code == 'AUTHORIZATION'``; se
-    detecta para devolver ``unauthenticated`` (señal accionable para el OODA), sin interpretar
+    detects to return ``unauthenticated`` (an actionable signal for the OODA), without interpreting
     el resto. DATO NO CONFIABLE: ``data``/``errors`` verbatim.
       - ``{'status':'ok','data':...}``                           sin ``errors``.
-      - ``{'status':'unauthenticated','error':...,'errors':...}`` si algún error es de auth.
+      - ``{'status':'unauthenticated','error':...,'errors':...}`` if any error is auth-related.
       - ``{'status':'graphql_error','errors':...,'data':...}``    otros errores GraphQL.
     """
     errors = payload.get("errors")
@@ -188,7 +188,7 @@ def normalize_graphql_response(payload: dict[str, Any]) -> dict[str, Any]:
         ):
             return {
                 "status": "unauthenticated",
-                "error": "Caido rechazó el token (AUTHORIZATION/INVALID_TOKEN).",
+                "error": "Caido rejected the token (AUTHORIZATION/INVALID_TOKEN).",
                 "errors": errors,
             }
     return {"status": "graphql_error", "errors": errors, "data": payload.get("data")}
@@ -209,12 +209,12 @@ def graphql(
     """POST al endpoint GraphQL de Caido. Nunca lanza por un error de red/HTTP.
 
     Transporte puro: si se pasa ``token`` adjunta ``Authorization: Bearer``; si no, va sin
-    auth (la introspección y ``loginAsGuest`` no la necesitan; las operaciones devolverán
-    ``unauthenticated``). Es el passthrough genérico sobre el que se apoyan todas las tools.
+    auth (introspection and ``loginAsGuest`` do not need it; operations will return
+    ``unauthenticated``). It is the generic passthrough all tools rely on.
 
     Devuelve un dict de estado uniforme (fail-closed; el bloqueo/errores prevalecen):
       - ``{'status':'ok','data':...}``
-      - ``{'status':'unauthenticated',...}``   (sin token válido / 401/403 / error de auth)
+      - ``{'status':'unauthenticated',...}``   (no valid token / 401/403 / auth error)
       - ``{'status':'graphql_error',...}``     (200 con errores GraphQL no-auth)
       - ``{'status':'unreachable','error':...}`` (no se pudo conectar)
       - ``{'status':'failed','http_status':n,'error':...}`` (otros HTTP / respuesta no-JSON)
@@ -237,7 +237,7 @@ def graphql(
             method="POST",
             headers=headers,
         )
-        # El esquema sale de CAIDO_URL (operador) y `resolve_url` sólo admite http/https: no hay
+        # The scheme comes from CAIDO_URL (operator) and `resolve_url` only allows http/https: there is no
         # file:// ni esquemas raros, y ninguna entrada de Hermes llega a esta URL.
         with urllib.request.urlopen(  # noqa: S310  # nosec B310
             req, timeout=timeout
@@ -253,7 +253,7 @@ def graphql(
             return {
                 "status": "unauthenticated",
                 "error": err_body
-                or f"HTTP {exc.code}: token de Caido inválido o expirado.",
+                or f"HTTP {exc.code}: Caido token invalid or expired.",
             }
         return {
             "status": "failed",
@@ -266,18 +266,18 @@ def graphql(
             "error": f"No se pudo conectar a Caido ({endpoint}): {exc.reason}",
         }
     except (OSError, http.client.HTTPException) as exc:
-        # Conexión cortada a mitad, timeout de LECTURA, respuesta truncada/basura...: Caido
-        # reiniciándose o un cuerpo lento. Estado reportable, nunca una excepción de la tool.
+        # Connection cut mid-way, READ timeout, truncated/garbage response...: Caido
+        # restarting or a slow body. A reportable status, never a tool exception.
         return {
             "status": "unreachable",
             "error": f"Fallo de transporte con Caido ({endpoint}): {type(exc).__name__}: {exc}",
         }
     except (
         ValueError
-    ) as exc:  # URL inválida en CAIDO_URL (InvalidURL/espacios/corchetes)
+    ) as exc:  # invalid URL in CAIDO_URL (InvalidURL/spaces/brackets)
         return {
             "status": "failed",
-            "error": f"URL de Caido inválida ({endpoint}): {exc}",
+            "error": f"invalid Caido URL ({endpoint}): {exc}",
         }
 
     try:
@@ -292,12 +292,12 @@ def graphql(
     return normalize_graphql_response(parsed)
 
 
-# --- Documentos GraphQL del flujo REAL (verificados en vivo; dependientes de versión) ---
+# --- GraphQL documents of the REAL flow (live-verified; version-dependent) ---
 #
-# Caido avisa de que el esquema cambia en cada release. Estos documentos están VERIFICADOS
-# contra una instancia real (ver docs/caido.md); si una versión los rompe, ``graphql``
-# devuelve ``graphql_error`` con el error del servidor verbatim (no se finge éxito), y
-# ``caido_graphql`` (passthrough) sigue alcanzando el esquema nuevo sin tocar este módulo.
+# Caido warns that the schema changes every release. These documents are VERIFIED
+# against a real instance (see docs/caido.md); if a version breaks them, ``graphql``
+# returns ``graphql_error`` with the server's error verbatim (success is not faked), and
+# ``caido_graphql`` (passthrough) still reaches the new schema without touching this module.
 
 _GUEST_LOGIN = (
     "mutation{ loginAsGuest{ token{ accessToken expiresAt } error{ __typename } } }"
@@ -325,14 +325,14 @@ HISTORY_QUERY = (
 )
 
 
-# --- Gestión de sesión (token invitado/entorno + proyecto), cacheada y thread-safe ------
+# --- Session management (guest/environment token + project), cached and thread-safe ------
 
 _SESSION: dict[str, Any] = {"token": None, "project_id": None}
 _SESSION_LOCK = threading.Lock()
 
 
 def reset_session() -> None:
-    """Limpia la sesión cacheada (token + proyecto). Para tests y re-auth tras expirar."""
+    """Clears the cached session (token + project). For tests and re-auth after expiry."""
     with _SESSION_LOCK:
         _SESSION["token"] = None
         _SESSION["project_id"] = None
@@ -349,7 +349,7 @@ def _guest_login(url: str | None, timeout: int) -> dict[str, Any]:
         return {
             "status": "unauthenticated",
             "error": (
-                "loginAsGuest no emitió token (%s). ¿Corre Caido con --allow-guests?"
+                "loginAsGuest issued no token (%s). Is Caido running with --allow-guests?"
                 % (payload.get("error") or "sin detalle")
             ),
         }
@@ -450,12 +450,12 @@ def split_target_url(url: str) -> dict[str, Any]:
     """Descompone una URL de objetivo en ``{host, port, is_tls, path}``. PURA.
 
     Deriva el esquema (``https`` -> tls y puerto 443 por defecto; ``http`` -> 80); un puerto
-    explícito gana. Sin esquema se asume ``https``. ``path`` conserva la query para reproducir
-    la petición tal cual. Fail-closed: una URL sin host es ``CaidoError``.
+    explicit one wins. Without a scheme, ``https`` is assumed. ``path`` keeps the query to reproduce
+    the request as-is. Fail-closed: a URL without a host is a ``CaidoError``.
     """
     raw = (url or "").strip()
     if not raw:
-        raise CaidoError("URL de objetivo vacía.")
+        raise CaidoError("empty target URL.")
     if "://" not in raw:
         raw = "https://" + raw
     try:
@@ -463,17 +463,17 @@ def split_target_url(url: str) -> dict[str, Any]:
         host = parts.hostname
         explicit_port = (
             parts.port
-        )  # lanza ValueError si es no numérico / fuera de rango
+        )  # raises ValueError if non-numeric / out of range
     except ValueError as exc:
-        raise CaidoError(f"URL de objetivo inválida ({exc}): {url!r}") from exc
+        raise CaidoError(f"invalid target URL ({exc}): {url!r}") from exc
     if not host:
         raise CaidoError(f"URL sin host: {url!r}")
     host = host.rstrip(".")  # `example.com.` y `example.com` son el MISMO destino
     if not host:
         raise CaidoError(f"URL sin host: {url!r}")
     # Un IPv6 "IPv4-mapped" (::ffff:a.b.c.d, o ::ffff:a9fe:a9fe) CONECTA por IPv4 pero un CIDR
-    # IPv4 de `deny` no lo casaría (familias distintas en el guard): se normaliza a la IPv4
-    # real, así gate y conexión ven EXACTAMENTE el mismo destino (bypass hallado en revisión).
+    # IPv4 of `deny` would not match (different families in the guard): it is normalized to the IPv4
+    # actual, so gate and connection see EXACTLY the same destination (bypass found in review).
     try:
         _ip = ipaddress.ip_address(host)
     except ValueError:
@@ -503,7 +503,7 @@ _CTL_RE = re.compile(r"[\r\n\x00]")
 
 
 def host_header_value(host: str, port: int, is_tls: bool) -> str:
-    """Valor correcto de ``Host``: corchetes para IPv6 y puerto sólo si NO es el por defecto."""
+    """Correct ``Host`` value: brackets for IPv6 and port only if NOT the default."""
     h = f"[{host}]" if ":" in host and not host.startswith("[") else host
     default = 443 if is_tls else 80
     return h if int(port) == default else f"{h}:{int(port)}"
@@ -512,9 +512,9 @@ def host_header_value(host: str, port: int, is_tls: bool) -> str:
 def scope_target(target: dict[str, Any]) -> str:
     """Destino ``esquema://host:puerto`` que se declara al scope-guard (IPv6 con corchetes). PURA.
 
-    Es la ÚNICA fuente de verdad del destino que se valida: se construye de lo mismo que se
-    usa para conectar (``split_target_url``), nunca re-parseando la URL del usuario, así el
-    gate y la conexión no pueden discrepar.
+    It is the ONLY source of truth of the validated target: built from the same thing that is
+    used to connect (``split_target_url``), never re-parsing the user's URL, so the
+    gate and the connection cannot disagree.
     """
     scheme = "https" if target["is_tls"] else "http"
     host = target["host"]
@@ -531,27 +531,27 @@ def build_raw_request(
     http_version: str = "HTTP/1.1",
     host_header: str | None = None,
 ) -> str:
-    """Construye una petición HTTP CRUDA (líneas CRLF). PURA.
+    """Builds a RAW HTTP request (CRLF lines). PURE.
 
-    Garantiza ``Host`` (de ``host`` si no viene en ``headers``), añade ``Content-Length`` si
-    hay cuerpo y no se declaró, y fuerza ``Connection: close`` si no se especifica (así el
-    Replay no se queda esperando keep-alive). Lo demás, lo que se pasa y nada más (el objetivo
+    Ensures ``Host`` (from ``host`` if not in ``headers``), adds ``Content-Length`` if
+    there is a body and it was not declared, and forces ``Connection: close`` if unspecified (so the
+    Replay does not wait on keep-alive). Everything else: what is passed and nothing more (the target
     ve exactamente lo pedido; DATO NO confiable transportado verbatim).
     """
     m = (method or "GET").strip().upper()
     if not _METHOD_RE.match(m):
-        raise CaidoError(f"método HTTP inválido: {method!r}")
+        raise CaidoError(f"invalid HTTP method: {method!r}")
     p = (path or "/").strip() or "/"
     if not p.startswith("/"):
         p = "/" + p
     if _CTL_RE.search(p) or " " in p:
-        raise CaidoError("path inválido: contiene CR/LF/NUL o espacios.")
+        raise CaidoError("invalid path: contains CR/LF/NUL or spaces.")
     hdrs = {k: v for k, v in (headers or {}).items() if k and v is not None}
-    # CRLF/NUL en nombre o valor de cabecera permitiría inyectar una segunda petición (request
+    # CRLF/NUL in a header name or value would allow injecting a second request (request
     # smuggling/pipelining) hacia vhosts o rutas no previstas. Se rechaza, no se sanea.
     for k, v in hdrs.items():
         if _CTL_RE.search(str(k)) or _CTL_RE.search(str(v)) or ":" in str(k):
-            raise CaidoError(f"cabecera inválida (CR/LF/NUL o ':' en el nombre): {k!r}")
+            raise CaidoError(f"invalid header (CR/LF/NUL or ':' in the name): {k!r}")
     if not any(k.lower() == "host" for k in hdrs):
         hdrs["Host"] = host_header or host
     if body and not any(k.lower() == "content-length" for k in hdrs):
@@ -568,16 +568,16 @@ def build_replay_input(
 ) -> dict[str, Any]:
     """Arma las ``variables`` de ``CREATE_REPLAY_SESSION``. PURA (sin red).
 
-    Codifica la petición cruda a base64 (el escalar ``Blob`` del esquema lo exige) y usa el
+    Encodes the raw request to base64 (the schema's ``Blob`` scalar requires it) and uses the
     nombre REAL del campo del esquema: ``isTLS`` (no ``isTls``). Valida host/puerto fail-closed.
     """
     h = (host or "").strip()
     if not h:
-        raise CaidoError("host vacío: Replay necesita un destino.")
+        raise CaidoError("empty host: Replay needs a destination.")
     try:
         p = int(port)
     except (TypeError, ValueError):
-        raise CaidoError(f"puerto inválido: {port!r}")
+        raise CaidoError(f"invalid port: {port!r}")
     if not (1 <= p <= 65535):
         raise CaidoError(f"puerto fuera de rango (1..65535): {p}")
     blob = base64.b64encode(_utf8(raw_request or "")).decode("ascii")
@@ -597,9 +597,9 @@ def build_replay_input(
 def build_history_vars(httpql: str = "", limit: int = 50) -> dict[str, Any]:
     """Arma las ``variables`` de ``HISTORY_QUERY``. PURA.
 
-    ``httpql`` es la expresión de Caido (p. ej. ``resp.code.eq:200``); vacío trae los últimos
+    ``httpql`` is Caido's expression (e.g. ``resp.code.eq:200``); empty brings the latest
     ``limit`` sin filtrar. El filtro va en el campo REAL del esquema ``HTTPQLInput.code``.
-    Orden por id descendente (lo más reciente primero). ``limit`` se acota a 1..1000.
+    Order by descending id (most recent first). ``limit`` is bounded to 1..1000.
     """
     try:
         n = int(limit)
@@ -618,7 +618,7 @@ def decode_blob(blob: str | None) -> str:
     """Decodifica un ``Blob`` base64 de Caido a texto (best-effort). PURA.
 
     Los ``raw`` de request/response viajan como base64; esta ayuda los vuelve legibles para
-    el OODA. Si no es base64 válido se devuelve tal cual (DATO NO confiable, no se revienta).
+    the OODA. If not valid base64 it is returned as-is (UNTRUSTED data, no crash).
     """
     if not blob:
         return ""
@@ -628,7 +628,7 @@ def decode_blob(blob: str | None) -> str:
         return blob
 
 
-# --- Orquestadores ergonómicos (I/O): enviar por Replay / buscar historial --------------
+# --- Ergonomic orchestrators (I/O): send via Replay / search history --------------
 
 
 _STALE_RE = re.compile(
@@ -643,18 +643,18 @@ def _graphql_reauth(
     url: str | None,
     timeout: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """``graphql`` con la sesión cacheada y UN reintento si ésta quedó obsoleta.
+    """``graphql`` with the cached session and ONE retry if it became stale.
 
     Si Caido se recrea (volumen nuevo -> secretos nuevos) o el proyecto temporal desaparece,
-    el token/proyecto cacheados dejan de valer y TODAS las llamadas fallarían hasta reiniciar
+    the cached token/project stop being valid and ALL calls would fail until the session is
     kali-mcp (reproducido en vivo). Ante ``unauthenticated``/``graphql_error`` se renueva la
-    sesión (``force=True``) y se repite UNA vez. Sólo se usa en etapas SIN efecto lateral sobre
-    el objetivo (crear sesión de Replay, consultar historial); nunca tras enviar tráfico, para
-    no reenviar. Devuelve ``(resultado, sesión_vigente)``.
+    restarted (``force=True``), and it is retried ONCE. Only used in stages WITHOUT side effects on
+    the target (create Replay session, query history); never after sending traffic, so as
+    not to resend. Returns ``(result, current_session)``.
     """
     out = graphql(query, variables, url=url, token=session["token"], timeout=timeout)
     # Se renueva ante rechazo de auth, o ante el error interno de "sin proyecto/BD" (proyecto
-    # temporal desaparecido). Un graphql_error LEGÍTIMO (HTTPQL malo, input inválido) NO debe
+    # temporary disappearance). A LEGITIMATE graphql_error (bad HTTPQL, invalid input) must NOT
     # forzar un login de invitado nuevo en cada llamada.
     stale_project = out["status"] == "graphql_error" and bool(
         _STALE_RE.search(json.dumps(out.get("errors") or []))
@@ -672,10 +672,10 @@ def _graphql_reauth(
 
 
 def _latest_request_id(token: str, url: str | None, timeout: int) -> int | None:
-    """Último id de petición del historial: 0 si está vacío, ``None`` si la consulta FALLA.
+    """Last request id in history: 0 if empty, ``None`` if the query FAILS.
 
-    Línea base para correlacionar la respuesta de un Replay: sólo se aceptan entradas con id
-    MAYOR, así una respuesta antigua de la misma URL nunca se confunde con la nueva.
+    Baseline for correlating a Replay response: only entries with an id
+    GREATER are accepted, so an old response from the same URL is never confused with the new one.
     """
     out = graphql(
         HISTORY_QUERY,
@@ -701,7 +701,7 @@ def _fetch_response_raw(
     """Raw (cabeceras + cuerpo) de la respuesta, decodificado y acotado a ``max_bytes``.
 
     Best-effort: si la consulta falla devuelve ``("", False)`` (el resto del resultado ya es
-    válido). DATO NO confiable: se transporta verbatim (sólo se decodifica y se corta).
+    valid). UNTRUSTED data: transported verbatim (only decoded and truncated).
     """
     out = graphql(
         REQUEST_RAW_QUERY,
@@ -731,14 +731,14 @@ def send_request(
     timeout: int = DEFAULT_TIMEOUT_S,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
 ) -> dict[str, Any]:
-    """Envía una petición al objetivo POR el Replay de Caido y DEVUELVE su respuesta.
+    """Sends a request to the target THROUGH Caido's Replay and RETURNS its response.
 
     Flujo REAL (verificado en vivo): ``ensure_session`` (token invitado/entorno + proyecto)
-    -> ``createReplaySession`` con la petición cruda (base64) y el destino -> ``startReplayTask``
+    -> ``createReplaySession`` with the raw request (base64) and the target -> ``startReplayTask``
     -> SONDEA el historial hasta que aparece la respuesta correlacionada por host/puerto/path.
-    El tráfico queda en el proxy de Caido (reproducible, buscable por ``search_history``).
+    Traffic stays in Caido's proxy (reproducible, searchable via ``search_history``).
 
-    Returns en éxito ``{'status':'done','session_id':..,'request':{...},'response':{status_code,
+    Returns on success ``{'status':'done','session_id':..,'request':{...},'response':{status_code,
     length,roundtrip_ms,raw}}``; o el dict de error de la etapa que falle
     (``unauthenticated``/``unreachable``/``graphql_error``/``failed``); o ``timeout`` si la
     respuesta no llega dentro del polling.
@@ -761,13 +761,13 @@ def send_request(
     except (
         CaidoError,
         UnicodeError,
-    ) as exc:  # entrada inválida: fail-closed, no se envía
+    ) as exc:  # invalid input: fail-closed, nothing is sent
         return {"status": "failed", "error": str(exc)}
 
     session = ensure_session(url=url, timeout=timeout)
     if session["status"] != "ok":
         return session
-    # Etapa SIN efecto lateral: si la sesión cacheada está obsoleta, se renueva y repite.
+    # Stage WITHOUT side effects: if the cached session is stale, it is renewed and retried.
     created, session = _graphql_reauth(
         CREATE_REPLAY_SESSION, variables, session, url, timeout
     )
@@ -776,17 +776,17 @@ def send_request(
         return created
     baseline_id = _latest_request_id(token, url, timeout)
     if baseline_id is None:
-        # Sin línea base no se puede correlacionar con seguridad (aceptaría una respuesta
-        # vieja como nueva). Fail-closed ANTES de enviar tráfico.
+        # Without a baseline, correlation is unsafe (it would accept an old
+        # response as new). Fail-closed BEFORE sending traffic.
         return {
             "status": "failed",
-            "error": "No se pudo leer el historial de Caido (línea base); no se envía.",
+            "error": "Could not read Caido history (baseline); not sending.",
         }
     cs = (created.get("data") or {}).get("createReplaySession") or {}
     if not cs.get("session"):
         return {
             "status": "failed",
-            "error": "createReplaySession no devolvió sesión: %s"
+            "error": "createReplaySession returned no session: %s"
             % (cs.get("error") or "?"),
         }
     session_id = cs["session"]["id"]
@@ -797,7 +797,7 @@ def send_request(
     if started["status"] != "ok":
         return started
 
-    # La respuesta es asíncrona: sondea el historial por host/puerto/path con respuesta.
+    # The response is async: polls history by host/port/path for a response.
     hv = build_history_vars("", limit=20)
     for _ in range(REPLAY_POLL_TRIES):
         time.sleep(REPLAY_POLL_INTERVAL_S)
@@ -847,7 +847,7 @@ def send_request(
         "status": "timeout",
         "session_id": session_id,
         "error": (
-            "La respuesta de Replay no apareció en el historial tras "
+            "Replay response did not appear in history after "
             f"{REPLAY_POLL_TRIES * REPLAY_POLL_INTERVAL_S:.0f}s. Consulta con caido_history."
         ),
     }
@@ -860,11 +860,11 @@ def search_history(
     url: str | None = None,
     timeout: int = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Busca en el historial de tráfico de Caido por HTTPQL. Devuelve estado uniforme.
+    """Searches Caido traffic history by HTTPQL. Returns a uniform status.
 
     ``ensure_session`` (token + proyecto) -> query ``requests`` filtrada. DATO NO confiable:
     los nodos se transportan verbatim. Returns ``{'status':'done','count':n,'entries':[...]}``
-    en éxito, o el dict de error de la etapa que falle.
+    on success, or the error dict of the stage that fails.
     """
     session = ensure_session(url=url, timeout=timeout)
     if session["status"] != "ok":
@@ -887,15 +887,15 @@ def search_history(
     }
 
 
-# Con scope activo `caido_graphql` no puede validar el destino de una query opaca, así que
-# rechaza los documentos que ENVÍAN tráfico y remite a `caido_request` (que sí pasa por el
-# scope-guard). En Caido enviar tráfico es SIEMPRE una mutation (Replay/Automate/workflows/
-# intercept/plugins), así que las queries de lectura nunca se tocan (sin falsos positivos por
+# With an active scope, `caido_graphql` cannot validate the target of an opaque query, so it
+# rejects documents that SEND traffic and refers to `caido_request` (which does pass through the
+# scope-guard). In Caido, sending traffic is ALWAYS a mutation (Replay/Automate/workflows/
+# intercept/plugins), so read queries are never touched (no false positives from
 # mencionar `connectionInfo` o `automate` en un select). Dentro de una mutation se rechaza por
-# VERBOS de envío (substring, no nombres exactos), para cubrir también campos que Caido añada o
-# renombre en otra release. Sigue siendo una heurística (no una prueba): falla del lado seguro
-# con las mutaciones de aspecto "ejecutable" y puede dejar pasar un campo de envío con un
-# nombre sin ninguno de estos verbos; está documentado en docs/caido.md.
+# SEND VERBS (substring, not exact names), to also cover fields Caido adds or
+# renames in another release. It is still a heuristic (not a proof): it fails safe
+# with "executable-looking" mutations and may let through a send field with a
+# name lacking any of these verbs; this is documented in docs/caido.md.
 _MUTATION_RE = re.compile(r"\bmutation\b", re.IGNORECASE)
 _SENDING_RE = re.compile(
     r"start|send|run|forward|replay|automate|connect|execute|fire|trigger|invoke|test|"
@@ -905,6 +905,6 @@ _SENDING_RE = re.compile(
 
 
 def graphql_sends_traffic(query: str) -> bool:
-    """¿El documento GraphQL es una mutation que parece enviar tráfico? PURA (heurística)."""
+    """Is the GraphQL document a mutation that appears to send traffic? PURE (heuristic)."""
     doc = query or ""
     return bool(_MUTATION_RE.search(doc) and _SENDING_RE.search(doc))

@@ -2,27 +2,27 @@
 
 Produce el ENTREGABLE al cerrar un engagement, complementando a ``ooda-report-handoff``
 (que solo da el resumen conversacional DURANTE el engagement). LEE el registro durable de
-hallazgos (``finding_store``) en vez de reconstruir desde la conversación, y escribe un
+findings (``finding_store``) rather than rebuilding from the conversation, and writes a
 informe Markdown que se deja como ARTEFACTO en el plano de datos (``/artifacts``), para
 descargarlo por el canal HTTP (:8901) sin sacar nada por el MCP.
 
-Patrón igual que el resto de scripts horneados (Prowler/Pacu): STDLIB PURA, se invoca con
-``kali_run`` (``python3 report_gen.py --engagement <id>``). La LÓGICA de render es testeable
+Pattern like the other baked-in scripts (Prowler/Pacu): PURE STDLIB, invoked with
+``kali_run`` (``python3 report_gen.py --engagement <id>``). The render LOGIC is testable
 sin el SDK (``render_markdown`` sobre una lista de hallazgos); ``main`` encadena
 leer-del-store -> render -> stage.
 
-Estructura del informe (destilada de plantillas públicas de pentest, con atribución —
+Report structure (distilled from public pentest templates, with attribution —
 Theophilus/athena-pentest y Marmeus/pentesting-report-generator): engagement details,
-executive summary (no técnico), tabla de severidades, metodología (OODA/PTES/OWASP),
-findings con CVSS 3.1 + CWE y evidencia reproducible, remediación. CVSS/severidad solo para
+executive summary (non-technical), severity table, methodology (OODA/PTES/OWASP),
+findings with CVSS 3.1 + CWE and reproducible evidence, remediation. CVSS/severity only for
 hallazgos CONFIRMADOS (coherente con "no hay hallazgo sin evidencia").
 
-IDIOMA DE SALIDA: el informe se emite en INGLÉS (alineado con la documentación pública del
-repo). Los comentarios/docstrings de este módulo permanecen en español, como el resto de
-docker/kali/. Solo las cadenas que acaban en el Markdown entregable están en inglés.
+OUTPUT LANGUAGE: the report is emitted in ENGLISH (aligned with the repo's public
+documentation). This module's comments/docstrings are translated to English, like the rest of
+docker/kali/. Only strings ending up in the deliverable Markdown are in English.
 
 Dato NO confiable: la evidencia de cada hallazgo (comando/salida) viene de tools contra un
-target real. Aquí se RENDERIZA verbatim dentro de bloques de código; nunca se interpreta.
+real target. Here it is RENDERED verbatim inside code blocks; it is never interpreted.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ from datetime import datetime, timezone
 import artifact_store
 import finding_store
 
-# Nombre canónico del informe dentro del directorio del engagement (artefacto descargable).
+# Canonical name of the report inside the engagement directory (downloadable artifact).
 REPORT_NAME = "pentest-report.md"
 
-# Orden de presentación de los estados y su etiqueta humana (salida en inglés).
+# Presentation order of states and their human label (output in English).
 _STATE_LABEL = {
     "confirmed": "Confirmed",
     "partial": "Partial",
@@ -52,7 +52,7 @@ def _now_iso() -> str:
 
 
 def _fence(text: str) -> str:
-    """Envuelve texto (dato no confiable) en un bloque de código verbatim.
+    """Wraps text (untrusted data) in a verbatim code block.
 
     Usa una valla de 4 backticks para no romperse si el contenido trae ``` dentro.
     """
@@ -81,13 +81,13 @@ def _evidence_block(evidence: dict) -> list[str]:
         name = ref.get("name", "")
         out.append(f"**Artifact:** `{exec_id}/{name}` (downloadable via the data channel).")
     if not out:
-        # Evidencia con forma desconocida: se vuelca verbatim para no perder información.
+        # Evidence of unknown shape: dumped verbatim to avoid losing information.
         out.append(_fence(repr(evidence)))
     return out
 
 
 def _finding_section(index: int, finding: dict) -> list[str]:
-    """Renderiza un hallazgo individual como sección Markdown."""
+    """Renders a single finding as a Markdown section."""
     title = finding.get("title", "(untitled)")
     state = finding.get("state", "")
     lines = [f"### F{index}. {title}", ""]
@@ -100,7 +100,7 @@ def _finding_section(index: int, finding: dict) -> list[str]:
         ("Confidence", finding.get("confidence") or "—"),
     ]
     # CVSS/CWE solo tienen sentido en hallazgos confirmados (disciplina "no hay hallazgo
-    # sin evidencia"): se muestran si el agente los registró.
+    # without evidence"): they are shown if the agent recorded them.
     if state == "confirmed":
         meta_rows.append(("CVSS 3.1", finding.get("cvss") or "— (not scored)"))
         meta_rows.append(("CWE", finding.get("cwe") or "—"))
@@ -142,13 +142,13 @@ def _finding_section(index: int, finding: dict) -> list[str]:
 def render_markdown(engagement_id: str, findings: list[dict], generated_at: str | None = None) -> str:
     """Renderiza el informe Markdown completo a partir de la lista de hallazgos.
 
-    Función PURA y testeable (no toca el store ni el FS): recibe los hallazgos ya leídos y
+    PURE, testable function (does not touch the store or FS): receives already-read findings and
     devuelve el texto del informe. Agrupa por estado (confirmados primero), con tabla de
-    severidades por estado y las secciones de metodología/remediación.
+    severities by state and the methodology/remediation sections.
     """
     generated_at = generated_at or _now_iso()
 
-    # Agrupa por estado conservando el orden de inserción dentro de cada grupo.
+    # Groups by state, preserving insertion order within each group.
     by_state: dict[str, list[dict]] = {s: [] for s in _STATE_ORDER}
     extra: list[dict] = []
     for f in findings:
@@ -165,7 +165,7 @@ def render_markdown(engagement_id: str, findings: list[dict], generated_at: str 
     lines.append(f"- **Total recorded findings:** {len(findings)}")
     lines.append("")
 
-    # --- Resumen ejecutivo (no técnico) ---
+    # --- Executive summary (non-technical) ---
     confirmed = by_state["confirmed"]
     lines.append("## Executive summary")
     lines.append("")
@@ -196,7 +196,7 @@ def render_markdown(engagement_id: str, findings: list[dict], generated_at: str 
         lines.append(f"| Other | {len(extra)} |")
     lines.append("")
 
-    # --- Metodología ---
+    # --- Methodology ---
     lines.append("## Methodology")
     lines.append("")
     lines.append(
@@ -247,7 +247,7 @@ def render_markdown(engagement_id: str, findings: list[dict], generated_at: str 
 def generate(engagement_id: str) -> dict:
     """Lee TODO el store del engagement, renderiza el informe y lo stagea como artefacto.
 
-    Devuelve la entrada de meta del artefacto staged (``{name, size, sha256, ...}``) más el
+    Returns the meta entry of the staged artifact (``{name, size, sha256, ...}``) plus the
     recuento de hallazgos. El Markdown queda descargable por el canal de datos en
     ``<engagement_id>/pentest-report.md``.
     """
@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     entry = result["artifact"]
-    # Línea de salida legible para el bucle OODA (la ve por kali_run).
+    # Readable output line for the OODA loop (seen via kali_run).
     print(
         f"report generated: {args.engagement}/{entry['name']} "
         f"({entry['size']} bytes, {result['findings_count']} findings, "

@@ -1,22 +1,22 @@
 # Manifiesto de dependencias de la imagen Kali. Este archivo es la fuente de verdad
 # de lo que se instala con pip en la imagen docker/kali/Dockerfile.
 #
-# Prowler: runtime determinista de recolección de postura AWS (read-only).
+# Prowler: deterministic runtime for AWS posture collection (read-only).
 #   Paquete Python puro -> compatible arm64 y amd64. Requiere Python >=3.10,<3.14
 #   (por eso la imagen usa un venv de Python 3.13; ver Dockerfile).
-#   Versión fijada para reproducibilidad del runtime determinista.
+#   Version pinned for deterministic runtime reproducibility.
 prowler==5.44.0
 
 # SDK oficial de MCP (modelcontextprotocol/python-sdk). Lo usa el SERVIDOR
 #   kali-mcp (docker/kali/kali_mcp_server.py: FastMCP + transporte streamable-HTTP)
 #   que corre dentro del contenedor.
 #
-#   Se fija a la línea 1.x (<2) a propósito: el servidor usa la API 1.x de FastMCP,
+#   Deliberately pinned to the 1.x line (<2): the server uses FastMCP's 1.x API,
 #   que v2 renombra/elimina. Mantener el servidor y sus clientes en la misma era de
 #   protocolo evita un desajuste cliente/servidor.
 mcp>=1.28,<2
 
-# anyio: dependencia del transporte asíncrono del SDK mcp (streamable-HTTP).
+# anyio: dependency of the mcp SDK's async transport (streamable-HTTP).
 anyio>=4.15.1
 
 # BloodHound.py — ingestor de Active Directory (dirkjanm/fox-it, basado en Impacket).
@@ -26,20 +26,20 @@ anyio>=4.15.1
 #   eliminado upstream) y aborta el build entero de la imagen.
 #
 #   OJO con el nombre: el paquete correcto en PyPI es `bloodhound` (instala el ejecutable
-#   `bloodhound-python`). NO usar el nombre de instalación `bloodhound-python`: estuvo
+#   `bloodhound-python`). Do NOT use the install name `bloodhound-python`: it was
 #   DESREGISTRADO en PyPI, lo que lo convierte en un vector de dependency-confusion
-#   (quien registre ese nombre ejecuta código en quien lo instale).
+#   (whoever registers that name runs code on whoever installs it).
 #
-#   Compatible arm64/amd64 (Python puro). Versión fijada para reproducibilidad.
+#   arm64/amd64 compatible (pure Python). Version pinned for reproducibility.
 bloodhound==1.9.0
 
-# ScoutSuite y Cloudsplaining (fuentes de collection EN VIVO adicionales) NO van aquí: se
+# ScoutSuite and Cloudsplaining (additional LIVE collection sources) do NOT go here: they are
 # instalan AISLADAS con pipx (venv propio por herramienta) en el Dockerfile.
 #
-# Motivo (causa raíz, verificada): kali-mcp invoca estas tools como SUBPROCESOS (argv), NO
-# las importa como librerías; meterlas en el MISMO venv que Prowler rompe la resolución de
+# Reason (verified root cause): kali-mcp invokes these tools as SUBPROCESSES (argv), NOT
+# importing them as libraries; putting them in the SAME venv as Prowler breaks resolution of
 # dependencias — p. ej. prowler fija `python-dateutil==2.9.0.post0` y ScoutSuite exige
-# `python-dateutil<2.8.1`, conflicto irreconciliable que tumbaría el build entero. Aislar
-# cada tool (patrón correcto para ejecutables independientes) elimina el acoplamiento.
+# `python-dateutil<2.8.1`, an irreconcilable conflict that would break the whole build. Isolating
+# each tool (the right pattern for independent executables) removes the coupling.
 # La disciplina fail-closed se mantiene: si una tool no instala/arranca, server_info la
 # reporta ausente y su collection falla claro. Ver docker/kali/Dockerfile.

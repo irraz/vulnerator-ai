@@ -1,91 +1,102 @@
-# 🛡️ Configuración de Protección de Ramas
+# 🛡️ Branch Protection Setup
 
-## Pasos para Configurar Branch Protection en GitHub
+## Steps to Set Up Branch Protection on GitHub
 
-Para asegurar que la pipeline de seguridad se ejecute **obligatoriamente** antes de hacer merge a `main`, sigue estos pasos:
+To make sure the security pipeline runs **mandatorily** before merging into `main`, follow these steps:
 
-### 1. Acceder a Branch Protection Rules
+### 1. Open Branch Protection Rules
 
-1. Ve a tu repositorio en GitHub
-2. Click en **Settings** (⚙️)
-3. En el menú lateral, click en **Branches**
-4. En "Branch protection rules", click en **Add branch protection rule**
+1. Go to your repository on GitHub
+2. Click **Settings** (⚙️)
+3. In the side menu, click **Branches**
+4. Under "Branch protection rules", click **Add branch protection rule**
 
-### 2. Configuración Recomendada
+### 2. Recommended Configuration
 
 #### Branch name pattern:
 ```
 main
 ```
 
-#### ✅ Checks Obligatorios que DEBES Habilitar:
+#### ✅ Required Checks You MUST Enable:
 
 **Require a pull request before merging**
-- ☑️ Require approvals: `1` (al menos 1 aprobación)
+- ☑️ Require approvals: `1` (at least 1 approval)
 - ☑️ Dismiss stale pull request approvals when new commits are pushed
-- ☑️ Require review from Code Owners (opcional)
+- ☑️ Require review from Code Owners (optional)
 
 **Require status checks to pass before merging**
 - ☑️ Require branches to be up to date before merging
-- **Status checks que deben pasar** (búscalos y selecciónalos):
+- **Status checks that must pass** (search for them and select them):
   ```
-  ☑️ TruffleHog - Detección de Secretos
-  ☑️ CodeQL - Análisis de Código  
-  ☑️ Python Linting
-  ☑️ Escaneo de Dependencias
-  ☑️ Trivy - Escaneo de Imágenes Docker
-  ☑️ Validación de PR
-  ☑️ Dockerfile Linting
+  ☑️ 🧱 Base scaffolding   <-- BLOCKING gate for the scaffolding (ci.yml)
+  ☑️ 🔐 TruffleHog - Secret Detection
+  ☑️ 🔍 CodeQL - Code Analysis (python)
+  ☑️ 🐍 Python Linting
+  ☑️ 📦 Dependency Scan
+  ☑️ 🐳 Trivy - Docker Image Scan (kali)
+  ☑️ 🐳 Trivy - Docker Image Scan (mcp)
+  ☑️ ✅ PR Validation
+  ☑️ 🔒 Sensitive Change Review
+  ☑️ 🐳 Dockerfile Linting
   ```
+
+  > `🧱 Base scaffolding` (`.github/workflows/ci.yml`) is the blocking gate: static
+  > smoke + `docker compose config` + quick-fix comment rule + ruff + mypy + the 6
+  > suites. The rest of the legacy pipeline is
+  > informative (it does not block the merge).
 
 **Require conversation resolution before merging**
-- ☑️ Todos los comentarios deben resolverse antes del merge
+- ☑️ All comments must be resolved before merging
 
-**Require signed commits** (opcional pero recomendado)
+**Require signed commits** (optional but recommended)
 - ☑️ Require signed commits
 
-**Require linear history** (opcional)
-- ☑️ Previene merge commits, solo permite rebase y squash
+**Require linear history** (optional)
+- ☑️ Prevents merge commits; only allows rebase and squash
 
 **Do not allow bypassing the above settings**
-- ☑️ Aplicar a administradores también
-- ⚠️ Desactiva esto solo si necesitas hacer hotfixes de emergencia
+- ☑️ Apply to administrators too
+- ⚠️ Turn this off only if you need to ship emergency hotfixes
 
-#### 🔒 Protecciones Adicionales Recomendadas:
+#### 🔒 Additional Recommended Protections:
 
 **Restrict who can push to matching branches**
-- Limitar push directo solo a:
-  - Administradores
-  - Service accounts para CI/CD
+- Limit direct pushes to:
+  - Administrators
+  - CI/CD service accounts
 
 **Allow force pushes**
-- ❌ **Deshabilitado** (NUNCA permitir force push a main)
+- ❌ **Disabled** (NEVER allow a force push to main)
 
 **Allow deletions**
-- ❌ **Deshabilitado** (Prevenir borrado accidental de main)
+- ❌ **Disabled** (prevent accidental deletion of main)
 
-### 3. Guardar
+### 3. Save
 
-Click en **Create** o **Save changes**
+Click **Create** or **Save changes**
 
 ---
 
-## 📋 Configuración Completa (Copiar/Pegar Template)
+## 📋 Complete Configuration (Copy/Paste Template)
 
-Si prefieres usar la API de GitHub o Terraform, aquí está la configuración en formato JSON:
+If you prefer the GitHub API or Terraform, here is the configuration in JSON format:
 
 ```json
 {
   "required_status_checks": {
     "strict": true,
     "contexts": [
-      "secrets-scan",
-      "codeql-analysis",
-      "python-lint",
-      "dependency-scan",
-      "docker-scan",
-      "pr-validation",
-      "dockerfile-lint"
+      "🧱 Base scaffolding",
+      "🔐 TruffleHog - Secret Detection",
+      "🔍 CodeQL - Code Analysis (python)",
+      "🐍 Python Linting",
+      "📦 Dependency Scan",
+      "🐳 Trivy - Docker Image Scan (kali)",
+      "🐳 Trivy - Docker Image Scan (mcp)",
+      "✅ PR Validation",
+      "🔒 Sensitive Change Review",
+      "🐳 Dockerfile Linting"
     ]
   },
   "enforce_admins": true,
@@ -107,7 +118,7 @@ Si prefieres usar la API de GitHub o Terraform, aquí está la configuración en
 }
 ```
 
-### Aplicar con GitHub CLI:
+### Apply with the GitHub CLI:
 
 ```bash
 gh api repos/:owner/:repo/branches/main/protection \
@@ -117,12 +128,12 @@ gh api repos/:owner/:repo/branches/main/protection \
 
 ---
 
-## 🔐 Configuración de CODEOWNERS (Opcional)
+## 🔐 CODEOWNERS Configuration (Optional)
 
-Crea el archivo `.github/CODEOWNERS` para asignar revisores automáticos:
+Create the `.github/CODEOWNERS` file to assign automatic reviewers:
 
 ```
-# Default owners para todo el repo
+# Default owners for the whole repo
 * @irraz
 
 # Security-sensitive files
@@ -138,104 +149,104 @@ requirements.txt @irraz @security-team
 
 ---
 
-## 🚨 Política de Excepciones
+## 🚨 Exception Policy
 
-### ¿Cuándo saltarse las protecciones?
+### When to bypass the protections?
 
-**NUNCA** en situaciones normales. Solo en:
+**NEVER** in normal situations. Only in:
 
-1. **Hotfix crítico de producción**: 
-   - Documentar en el commit el motivo
-   - Crear issue post-mortem
-   - Abrir PR retrospectivo con los checks
+1. **Critical production hotfix**: 
+   - Document the reason in the commit
+   - Create a post-mortem issue
+   - Open a retrospective PR with the checks
 
-2. **Emergencia de seguridad**:
-   - Parchear vulnerabilidad crítica
-   - Notificar al equipo inmediatamente
-   - Ejecutar pipeline manualmente después
+2. **Security emergency**:
+   - Patch the critical vulnerability
+   - Notify the team immediately
+   - Run the pipeline manually afterwards
 
-### Proceso de Excepción:
+### Exception Process:
 
 ```bash
-# 1. Documentar
-git commit -m "HOTFIX: [TICKET-123] Descripción del problema crítico"
+# 1. Document
+git commit -m "HOTFIX: [TICKET-123] Description of the critical problem"
 
-# 2. Push con bypass (si tienes permisos)
+# 2. Push with bypass (if you have permissions)
 git push origin main
 
-# 3. Inmediatamente después, crear PR de verificación
+# 3. Immediately afterwards, create a verification PR
 git checkout -b hotfix/verify-TICKET-123
 git push origin hotfix/verify-TICKET-123
-gh pr create --title "Verificación post-hotfix TICKET-123" --body "Ejecutar pipeline completa sobre el hotfix"
+gh pr create --title "Post-hotfix verification TICKET-123" --body "Run the full pipeline over the hotfix"
 ```
 
 ---
 
-## ✅ Verificación
+## ✅ Verification
 
-Después de configurar, verifica que funciona:
+After configuring, verify that it works:
 
-1. Crea una rama de prueba:
+1. Create a test branch:
    ```bash
    git checkout -b test/branch-protection
    echo "test" >> README.md
    git add README.md
-   git commit -m "test: Verificar branch protection"
+   git commit -m "test: verify branch protection"
    git push origin test/branch-protection
    ```
 
-2. Abre un PR hacia `main`
+2. Open a PR into `main`
 
-3. Intenta hacer merge **sin esperar a que pasen los checks**:
-   - ❌ Debería estar **deshabilitado**
-   - ✅ Mensaje: "Required status checks must pass"
+3. Try to merge **without waiting for the checks to pass**:
+   - ❌ It should be **disabled**
+   - ✅ Message: "Required status checks must pass"
 
-4. Espera a que pasen todos los checks
+4. Wait for all checks to pass
 
-5. Intenta hacer merge **sin aprobación**:
-   - ❌ Debería estar **deshabilitado**
-   - ✅ Mensaje: "At least 1 approving review is required"
+5. Try to merge **without approval**:
+   - ❌ It should be **disabled**
+   - ✅ Message: "At least 1 approving review is required"
 
-6. Aprueba el PR y haz merge
-   - ✅ Ahora **sí debería permitir** el merge
+6. Approve the PR and merge
+   - ✅ Now it **should allow** the merge
 
 ---
 
 ## 📊 Monitoring
 
-### Ver Intentos de Bypass
+### View Bypass Attempts
 
-Settings → Branches → Ver "Protection rule activity"
+Settings → Branches → View "Protection rule activity"
 
-### Auditoría
+### Audit
 
-Settings → Security → Audit log → Filtrar por "protected branch"
+Settings → Security → Audit log → Filter by "protected branch"
 
 ---
 
 ## 🆘 Troubleshooting
 
-### "Status check no aparece en la lista"
+### "The status check does not appear in the list"
 
-**Causa**: El check debe ejecutarse al menos una vez para aparecer.
+**Cause**: The check must run at least once before it appears.
 
-**Solución**:
-1. Abre cualquier PR
-2. Espera a que se ejecute la pipeline
-3. Vuelve a la configuración de protección
-4. Ahora debería aparecer en la lista
+**Solution**:
+1. Open any PR
+2. Wait for the pipeline to run
+3. Go back to the protection configuration
+4. It should now appear in the list
 
-### "No puedo hacer merge aunque los checks pasen"
+### "I cannot merge even though the checks pass"
 
-**Verifica**:
-- ¿Tiene al menos 1 aprobación?
-- ¿Todos los comentarios están resueltos?
-- ¿La rama está actualizada con main?
+**Check**:
+- Does it have at least 1 approval?
+- Are all comments resolved?
+- Is the branch up to date with main?
 
-### "Los administradores pueden saltarse las reglas"
+### "Administrators can bypass the rules"
 
-**Solución**: Marca "Do not allow bypassing the above settings" y aplica a administradores.
+**Solution**: Enable "Do not allow bypassing the above settings" and apply it to administrators.
 
 ---
 
-**Configuración recomendada aplicada a**: `main`, `master`, `develop`, `production`
+**Recommended configuration applied to**: `main`, `master`, `develop`, `production`

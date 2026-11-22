@@ -1,13 +1,13 @@
-"""Tests de la DECISIÓN de scope para el destino que declara ``caido_request`` (STDLIB PURA).
+"""Tests of the scope DECISION for the target declared by ``caido_request`` (PURE STDLIB).
 
 Ejercitan ``scope_guard`` con el MISMO destino que construye el servidor
 (``caido_client.scope_target(split_target_url(url))``, ``esquema://host:puerto``). El
-comportamiento de las tools completas (que un bloqueo no llegue a enviar tráfico) se prueba en
+behavior of the full tools (that a block never sends traffic) is tested in
 ``test_caido_server.py``.
 
-Regresión que fijan: una versión inicial declaraba sólo el HOST al gate; el puerto se perdía
-y un target sin puerto se permitía "por host", saltándose ``ports`` del scope. Se detectó en
-la verificación EN VIVO (petición a :9999 con ``ports:[3000]`` llegó a Caido).
+Regression they pin: an early version declared only the HOST to the gate; the port was lost
+and a target without a port was allowed "by host", skipping scope ``ports``. It was detected in
+the LIVE verification (request to :9999 with ``ports:[3000]`` reached Caido).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _config():
 
 
 def _declared(url: str) -> str:
-    # La MISMA función que usa el servidor para declarar el destino al gate.
+    # The SAME function the server uses to declare the target to the gate.
     return caido_client.scope_target(caido_client.split_target_url(url))
 
 
@@ -48,7 +48,7 @@ def test_puerto_permitido_pasa():
 
 
 def test_puerto_fuera_de_ports_se_bloquea():
-    # La regresión: con sólo el host declarado esto pasaba.
+    # The regression: with only the host declared this used to pass.
     assert _allowed("http://juice-shop:9999/") is False
 
 
@@ -57,7 +57,7 @@ def test_host_fuera_de_allow_se_bloquea():
 
 
 def test_el_host_solo_perderia_el_puerto():
-    # Documenta POR QUÉ se declara esquema://host:puerto: sólo el host se permite por host.
+    # Documents WHY scheme://host:port is declared: host-only is allowed "by host".
     d = scope_guard.evaluate(_config(), ["juice-shop"], "caido_request x")
     assert d.allowed is True
 

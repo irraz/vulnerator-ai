@@ -6,35 +6,35 @@ on:
   push:
     branches: [ main, master, develop ]
   schedule:
-    # Ejecutar escaneo completo semanalmente (lunes a las 2 AM UTC)
+    # Run the full scan weekly (Mondays at 2 AM UTC)
     - cron: '0 2 * * 1'
-  workflow_dispatch:  # Permitir ejecución manual
+  workflow_dispatch:  # Allow manual runs
 
 jobs:
   # ============================================================================
-  # DETECCIÓN DE SECRETOS CON TRUFFLEHOG
+  # SECRET DETECTION WITH TRUFFLEHOG
   # ============================================================================
   secrets-scan:
-    name: 🔐 TruffleHog - Detección de Secretos
+    name: 🔐 TruffleHog - Secret Detection
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # Historial completo para TruffleHog
+          fetch-depth: 0  # Full history for TruffleHog
 
       - name: TruffleHog OSS
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          # Solo archivos versionados, ignorar .env y archivos locales
+          # Versioned files only; ignore .env and local files
           extra_args: --only-verified
 
   # ============================================================================
-  # ANÁLISIS DE SEGURIDAD CON CODEQL (SAST)
+  # SECURITY ANALYSIS WITH CODEQL (SAST)
   # ============================================================================
   codeql-analysis:
-    name: 🔍 CodeQL - Análisis de Código
+    name: 🔍 CodeQL - Code Analysis
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -65,7 +65,7 @@ jobs:
           category: "/language:${{matrix.language}}"
 
   # ============================================================================
-  # LINTING Y FORMATEO DE CÓDIGO PYTHON
+  # PYTHON LINTING AND FORMATTING
   # ============================================================================
   python-lint:
     name: 🐍 Python Linting
@@ -85,9 +85,9 @@ jobs:
 
       - name: Lint with flake8
         run: |
-          # Detener el build si hay errores de sintaxis o nombres indefinidos
+          # Stop the build on syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Advertencias por complejidad y longitud de línea
+          # Warnings for complexity and line length
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
         continue-on-error: true
 
@@ -110,10 +110,10 @@ jobs:
           path: bandit-report.json
 
   # ============================================================================
-  # ESCANEO DE DEPENDENCIAS PYTHON
+  # PYTHON DEPENDENCY SCAN
   # ============================================================================
   dependency-scan:
-    name: 📦 Escaneo de Dependencias
+    name: 📦 Dependency Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -150,16 +150,16 @@ jobs:
             safety-mcp-report.json
 
   # ============================================================================
-  # ESCANEO DE CONTENEDORES DOCKER
+  # DOCKER CONTAINER SCAN
   # ============================================================================
   docker-scan:
-    name: 🐳 Trivy - Escaneo de Imágenes Docker
+    name: 🐳 Trivy - Docker Image Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
       actions: read
-    # Solo ejecutar en schedule, workflow_dispatch, o PRs (no en push directo)
+    # Run only on schedule, workflow_dispatch, or PRs (not on direct pushes)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     strategy:
       fail-fast: false
@@ -214,24 +214,24 @@ jobs:
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
   # ============================================================================
-  # ESCANEO DE ARCHIVOS DE CONFIGURACIÓN Y SECRETOS
+  # CONFIGURATION AND SECRET FILE SCAN
   # ============================================================================
   config-scan:
-    name: ⚙️ Escaneo de Configuración
+    name: ⚙️ Configuration Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Detect secrets in config files
         run: |
-          echo "Verificando archivos de configuración sensibles..."
-          # Verificar que no haya archivos .env con secretos reales
+          echo "Checking sensitive configuration files..."
+          # Verify that there is no .env file with real secrets
           if [ -f .env ]; then
-            echo "⚠️ Archivo .env encontrado - verificar que no contenga secretos reales"
-            grep -i "api_key\|password\|secret\|token" .env || echo "✅ No se detectaron patrones de secretos"
+            echo "⚠️ .env file found - verify that it contains no real secrets"
+            grep -i "api_key\|password\|secret\|token" .env || echo "✅ No secret patterns detected"
           fi
 
       - name: Check Docker secrets
         run: |
-          echo "Verificando secretos en Dockerfiles..."
-          grep -rn "ENV.*\(PASSWORD\|SECRET\|TOKEN\|KEY\)" docker/ || echo "✅ No se encontraron secretos hardcodeados en Dockerfiles"
+          echo "Checking secrets in Dockerfiles..."
+          grep -rn "ENV.*\(PASSWORD\|SECRET\|TOKEN\|KEY\)" docker/ || echo "✅ No hardcoded secrets found in Dockerfiles"

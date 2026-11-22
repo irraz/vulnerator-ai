@@ -6,10 +6,10 @@ on:
 
 jobs:
   # ============================================================================
-  # VERIFICACIÓN RÁPIDA DE PR
+  # QUICK PR VALIDATION
   # ============================================================================
   pr-validation:
-    name: ✅ Validación de PR
+    name: ✅ PR Validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -19,44 +19,44 @@ jobs:
           PR_TITLE="${{ github.event.pull_request.title }}"
           echo "PR Title: $PR_TITLE"
           
-          # Verificar que el título no esté vacío y tenga longitud razonable
+          # Check that the title is not empty and has a reasonable length
           if [ ${#PR_TITLE} -lt 10 ]; then
-            echo "❌ El título del PR es demasiado corto (mínimo 10 caracteres)"
+            echo "❌ The PR title is too short (minimum 10 characters)"
             exit 1
           fi
           
           if [ ${#PR_TITLE} -gt 100 ]; then
-            echo "⚠️ El título del PR es muy largo (recomendado <100 caracteres)"
+            echo "⚠️ The PR title is very long (recommended <100 characters)"
           fi
           
-          echo "✅ Título del PR válido"
+          echo "✅ PR title is valid"
 
       - name: Check for merge conflicts
         run: |
           git fetch origin ${{ github.base_ref }}
           if git merge-tree $(git merge-base HEAD origin/${{ github.base_ref }}) HEAD origin/${{ github.base_ref }} | grep -q '<<<<<<'; then
-            echo "❌ El PR tiene conflictos de merge"
+            echo "❌ The PR has merge conflicts"
             exit 1
           fi
-          echo "✅ No hay conflictos de merge"
+          echo "✅ No merge conflicts"
 
       - name: Check for large files
         run: |
-          # Verificar que no se añadan archivos muy grandes (>10MB)
+          # Check that no very large files (>10MB) are added
           git diff --name-only origin/${{ github.base_ref }}...HEAD | while read file; do
             if [ -f "$file" ]; then
               size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo 0)
               if [ $size -gt 10485760 ]; then
-                echo "⚠️ Archivo grande detectado: $file ($(numfmt --to=iec $size 2>/dev/null || echo $size bytes))"
+                echo "⚠️ Large file detected: $file ($(numfmt --to=iec $size 2>/dev/null || echo $size bytes))"
               fi
             fi
           done
 
   # ============================================================================
-  # VERIFICACIÓN DE CAMBIOS SENSIBLES
+  # SENSITIVE CHANGE REVIEW
   # ============================================================================
   sensitive-changes:
-    name: 🔒 Revisión de Cambios Sensibles
+    name: 🔒 Sensitive Change Review
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,9 +65,9 @@ jobs:
 
       - name: Check for sensitive file changes
         run: |
-          echo "Revisando cambios en archivos sensibles..."
+          echo "Reviewing changes in sensitive files..."
           
-          # Lista de patrones de archivos sensibles
+          # Sensitive file pattern list
           SENSITIVE_PATTERNS=(
             "*.pem"
             "*.key"
@@ -85,7 +85,7 @@ jobs:
           for pattern in "${SENSITIVE_PATTERNS[@]}"; do
             files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -i "$pattern" || true)
             if [ ! -z "$files" ]; then
-              echo "⚠️ Cambios detectados en archivos sensibles que coinciden con: $pattern"
+              echo "⚠️ Changes detected in sensitive files matching: $pattern"
               echo "$files"
               FOUND_SENSITIVE=true
             fi
@@ -93,16 +93,16 @@ jobs:
           
           if [ "$FOUND_SENSITIVE" = true ]; then
             echo ""
-            echo "⚠️⚠️⚠️ ATENCIÓN ⚠️⚠️⚠️"
-            echo "Se detectaron cambios en archivos potencialmente sensibles."
-            echo "Por favor, revisa que no contengan secretos o credenciales."
-            echo "Este es un WARNING, no bloquea el PR."
+            echo "⚠️⚠️⚠️ ATTENTION ⚠️⚠️⚠️"
+            echo "Changes were detected in potentially sensitive files."
+            echo "Please verify that they contain no secrets or credentials."
+            echo "This is a WARNING; it does not block the PR."
           else
-            echo "✅ No se detectaron cambios en archivos sensibles"
+            echo "✅ No changes detected in sensitive files"
           fi
 
   # ============================================================================
-  # VERIFICACIÓN DE DOCKERFILE
+  # DOCKERFILE VALIDATION
   # ============================================================================
   dockerfile-lint:
     name: 🐳 Dockerfile Linting
@@ -123,10 +123,10 @@ jobs:
           failure-threshold: error
 
   # ============================================================================
-  # COMENTARIO AUTOMÁTICO EN PR
+  # AUTOMATIC PR COMMENT
   # ============================================================================
   pr-comment:
-    name: 💬 Comentario Automático
+    name: 💬 Automatic Comment
     runs-on: ubuntu-latest
     needs: [pr-validation, sensitive-changes, dockerfile-lint]
     if: always()
@@ -138,30 +138,30 @@ jobs:
         with:
           script: |
             const jobs = ${{ toJSON(needs) }};
-            let status = '✅ Todos los checks pasaron';
+            let status = '✅ All checks passed';
             let emoji = '🎉';
             
             const failedJobs = Object.entries(jobs).filter(([_, job]) => job.result === 'failure');
             const warningJobs = Object.entries(jobs).filter(([_, job]) => job.result === 'success');
             
             if (failedJobs.length > 0) {
-              status = '❌ Algunos checks fallaron';
+              status = '❌ Some checks failed';
               emoji = '⚠️';
             }
             
             const comment = `
-            ## ${emoji} Reporte de Quality Checks
+            ## ${emoji} Quality Checks Report
             
             **Status**: ${status}
             
-            ### Resultados:
+            ### Results:
             ${Object.entries(jobs).map(([name, job]) => {
               const icon = job.result === 'success' ? '✅' : job.result === 'failure' ? '❌' : '⏭️';
               return `- ${icon} **${name}**: ${job.result}`;
             }).join('\n')}
             
             ---
-            *Pipeline de seguridad ejecutada automáticamente*
+            *Security pipeline run automatically*
             `;
             
             github.rest.issues.createComment({

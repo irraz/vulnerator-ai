@@ -1,13 +1,13 @@
 """Tests stdlib-only del cliente de Caido (`docker/kali/caido_client.py`).
 
-No importan `mcp`/`anyio` ni salen a la red (sólo algún test abre un socket en loopback): cubren SÓLO las funciones PURAS (builders de
-payload, normalización de respuesta, parsing de URL, resolución de endpoint/token) y la
-mecánica fail-closed de `graphql` cuando falta el token (ahí no hay I/O). El patrón calca
+They do not import `mcp`/`anyio` nor go to the network (only some test opens a loopback socket): they cover ONLY the PURE functions (builders of
+payload, response normalization, URL parsing, endpoint/token resolution) and the
+fail-closed mechanics of `graphql` when the token is missing (no I/O there). The pattern mirrors
 ``tests/test_scope_guard.py`` / ``tests/test_finding_store.py``.
 
 El orquestador `graphql` con red real se valida aparte, EN VIVO, contra un Caido + Juice
-Shop levantados en local (la verificación end-to-end que exige "no se finge"); aquí sólo se
-cubre su rama sin-token (sin red) y la clasificación de respuestas ya parseadas.
+Shop running locally (the end-to-end verification that demands "no faking"); here only
+the no-token branch (no network) and classification of already-parsed responses are covered.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-# El módulo bajo prueba vive en docker/kali/ (el servidor MCP NO se importa: arrastra
-# `mcp`/`anyio`). Se añade el padre al path explícitamente.
+# The module under test lives in docker/kali/ (the MCP server is NOT imported: it pulls in
+# `mcp`/`anyio`). The parent is added to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import caido_client  # noqa: E402
@@ -84,7 +84,7 @@ def _limpia_sesion():
 
 
 def _fake_graphql(responses):
-    """Devuelve un sustituto de ``graphql`` que responde según el documento enviado."""
+    """Returns a stand-in for ``graphql`` that responds based on the sent document."""
     calls = []
 
     def fake(query, variables=None, **kw):
@@ -137,8 +137,8 @@ def test_ensure_session_reutiliza_proyecto_ready_y_cachea(monkeypatch):
     second = caido_client.ensure_session()
     assert first["token"] == "pat" and first["project_id"] == "p9"
     assert second == first
-    assert len(fake.calls) == n_calls  # segunda llamada: caché, sin red
-    # No crea proyecto si ya había uno.
+    assert len(fake.calls) == n_calls  # second call: cache, no network
+    # It does not create a project if one already existed.
     assert not any("createProject" in c[0] for c in fake.calls)
 
 
@@ -270,7 +270,7 @@ def test_build_raw_request_respeta_host_y_connection_explicitos():
 
 
 def test_build_raw_request_content_length_cuenta_bytes():
-    body = '{"user":"ñ"}'
+    body = '{"user":"ö"}'
     raw = caido_client.build_raw_request("POST", "/login", "h", body=body)
     assert f"Content-Length: {len(body.encode('utf-8'))}" in raw
     assert raw.endswith("\r\n\r\n" + body)
@@ -374,12 +374,12 @@ def test_send_request_flujo_completo_correlaciona_respuesta(monkeypatch):
             "request(id": {
                 "status": "ok",
                 "data": {
-                    "request": {"response": {"raw": "SFRUUC8xLjEgMjAwIE9LDQoNCmhvbGE="}}
+                    "request": {"response": {"raw": "SFRUUC8xLjEgMjAwIE9LDQoNCmhvbGE="}}  # pragma: allowlist secret
                 },
             },
         }
     )
-    # Historial realista: la consulta de línea base (1ª) lo ve vacío; el sondeo ya ve la nueva.
+    # Realistic history: the baseline query (1st) sees it empty; the poll sees the new one.
     history = iter(
         [
             {"status": "ok", "data": {"requests": {"edges": []}}},
@@ -400,9 +400,9 @@ def test_send_request_flujo_completo_correlaciona_respuesta(monkeypatch):
     out = caido_client.send_request("http://juice-shop:3000/")
     assert out["status"] == "done"
     assert out["response"]["status_code"] == 200
-    assert out["response"]["raw"].endswith("hola")  # cuerpo devuelto, no sólo el código
+    assert out["response"]["raw"].endswith("hola")  # returned body, not just the status
     assert out["response"]["raw_truncated"] is False
-    # El token de sesión se propaga a cada llamada.
+    # The session token is propagated to each call.
     assert all(c[2] == "t" for c in fake.calls)
 
 
@@ -465,7 +465,7 @@ def test_search_history_devuelve_entradas(monkeypatch):
 
 
 def test_send_request_ignora_respuesta_antigua_de_la_misma_url(monkeypatch):
-    """Una entrada previa (id <= línea base) con respuesta NO debe confundirse con la nueva."""
+    """An earlier entry (id <= baseline) with a response must NOT be confused with the new one."""
     monkeypatch.setattr(caido_client, "REPLAY_POLL_INTERVAL_S", 0)
     monkeypatch.setattr(caido_client, "REPLAY_POLL_TRIES", 3)
     monkeypatch.setattr(
@@ -492,7 +492,7 @@ def test_send_request_ignora_respuesta_antigua_de_la_misma_url(monkeypatch):
                 "status": "ok",
                 "data": {"startReplayTask": {"task": {"id": "1"}}},
             },
-            # El historial sólo contiene la entrada antigua (id 5) = la línea base.
+            # History contains only the old entry (id 5) = the baseline.
             "requests(": {
                 "status": "ok",
                 "data": {"requests": {"edges": [{"node": stale}]}},
@@ -504,7 +504,7 @@ def test_send_request_ignora_respuesta_antigua_de_la_misma_url(monkeypatch):
     assert out["status"] == "timeout"  # nunca devuelve la respuesta obsoleta
 
 
-# --- renovación de sesión obsoleta (Caido recreado) -------------------------------------
+# --- stale session renewal (Caido recreated) -------------------------------------
 
 
 def _seq_graphql(monkeypatch, script):
@@ -515,7 +515,7 @@ def _seq_graphql(monkeypatch, script):
     def fake(query, variables=None, **kw):
         calls.append((query, kw.get("token")))
         needle, resp = next(it)
-        assert needle in query, f"esperaba {needle!r}, llegó {query[:50]!r}"
+        assert needle in query, f"expected {needle!r}, got {query[:50]!r}"
         return resp
 
     monkeypatch.setattr(caido_client, "graphql", fake)
@@ -525,7 +525,7 @@ def _seq_graphql(monkeypatch, script):
 def test_search_history_renueva_sesion_obsoleta_y_reintenta_una_vez(monkeypatch):
     monkeypatch.delenv(caido_client.TOKEN_ENV, raising=False)
     monkeypatch.delenv(caido_client.ALT_TOKEN_ENV, raising=False)
-    # Sesión cacheada con un token que Caido ya no reconoce.
+    # Cached session with a token Caido no longer recognizes.
     caido_client._SESSION.update(token="viejo", project_id="p-viejo")
     auth_err = {"status": "unauthenticated", "error": "INVALID_TOKEN"}
     calls = _seq_graphql(
@@ -562,7 +562,7 @@ def test_search_history_renueva_sesion_obsoleta_y_reintenta_una_vez(monkeypatch)
 
 
 def test_send_request_no_reenvia_trafico_si_falla_tras_start(monkeypatch):
-    """El reintento sólo cubre etapas sin efecto lateral: startReplayTask se llama UNA vez."""
+    """The retry only covers stages without side effects: startReplayTask is called ONCE."""
     monkeypatch.setattr(caido_client, "REPLAY_POLL_INTERVAL_S", 0)
     monkeypatch.setattr(
         caido_client,
@@ -588,7 +588,7 @@ def test_send_request_no_reenvia_trafico_si_falla_tras_start(monkeypatch):
     assert len(starts) == 1
 
 
-# --- revisión independiente: robustez y seguridad ---------------------------------------
+# --- independent review: robustness and security ---------------------------------------
 
 import socket  # noqa: E402
 import threading  # noqa: E402
@@ -728,7 +728,7 @@ def test_send_request_con_linea_base_fallida_no_envia_trafico(monkeypatch):
         if "startReplayTask" in query:
             started.append(1)
             return {"status": "ok", "data": {}}
-        return {"status": "unreachable", "error": "caído"}  # la línea base falla
+        return {"status": "unreachable", "error": "down"}  # the baseline fails
 
     monkeypatch.setattr(caido_client, "graphql", fake)
     out = caido_client.send_request("http://h:80/x")
@@ -806,7 +806,7 @@ def test_reauth_no_se_dispara_con_graphql_error_legitimo(monkeypatch):
     monkeypatch.setattr(
         caido_client,
         "ensure_session",
-        lambda **kw: (_ for _ in ()).throw(AssertionError("no debe renovar sesión")),
+        lambda **kw: (_ for _ in ()).throw(AssertionError("must not renew session")),
     )
     out, _ = caido_client._graphql_reauth("q", {}, {"token": "t"}, None, 5)
     assert out["status"] == "graphql_error" and len(calls) == 1
@@ -829,7 +829,7 @@ def test_graphql_sends_traffic(doc, expected):
     assert caido_client.graphql_sends_traffic(doc) is expected
 
 
-# --- revisión final: esquema, surrogates, IPv4-mapped, filtro de mutaciones -------------
+# --- final review: schema, surrogates, IPv4-mapped, mutation filter -------------
 
 
 @pytest.mark.parametrize("bad", ["file:///etc/passwd", "ftp://caido:21", "gopher://x"])

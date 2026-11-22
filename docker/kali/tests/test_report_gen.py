@@ -1,12 +1,12 @@
 """Tests stdlib-only del generador de informe de pentest (`docker/kali/report_gen.py`).
 
-No importan `mcp`/`anyio`: sólo librería estándar + pytest. Verifican:
+They do not import `mcp`/`anyio`: only standard library + pytest. They verify:
   - ``render_markdown`` produce las secciones esperadas y agrupa por estado;
-  - CVSS/CWE sólo aparecen en hallazgos confirmados;
-  - la evidencia (comando/salida) se renderiza verbatim en bloques de código;
+  - CVSS/CWE appear only in confirmed findings;
+  - evidence (command/output) is rendered verbatim in code blocks;
   - el resumen ejecutivo refleja "sin confirmados" cuando no los hay (no dice "seguro");
   - ``generate`` lee del store y stagea el Markdown como artefacto descargable;
-  - ``main`` escribe la línea legible y devuelve 0.
+  - ``main`` writes the readable line and returns 0.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def test_render_groups_and_counts_by_state():
     assert "| Partial | 1 |" in md
     assert "| Hypothesis | 1 |" in md
     assert "| Discarded | 1 |" in md
-    # Confirmados se renderizan antes que hipótesis.
+    # Confirmed findings render before hypotheses.
     assert md.index("Confirmed (2)") < md.index("Hypothesis (1)")
 
 
@@ -74,7 +74,7 @@ def test_render_cvss_only_for_confirmed():
     assert "CWE-89" in confirmed
 
     hypo = report_gen.render_markdown("e", [{"title": "x", "state": "hypothesis", "cvss": "9.8"}])
-    assert "CVSS 3.1" not in hypo  # no se puntúa lo no confirmado
+    assert "CVSS 3.1" not in hypo  # unconfirmed items are not scored
 
 
 def test_render_evidence_verbatim_in_fence():
@@ -90,7 +90,7 @@ def test_render_evidence_verbatim_in_fence():
     md = report_gen.render_markdown("e", [finding])
     assert "curl 'http://t/ping?ip=;id'" in md
     assert "uid=0(root)" in md
-    assert "````" in md  # bloque de código de 4 backticks
+    assert "````" in md  # 4-backtick code block
 
 
 def test_render_change_block_has_tag_and_revert():
@@ -113,18 +113,18 @@ def test_generate_reads_store_and_stages_markdown(staging):
         "state": "confirmed",
         "evidence": {"command": "nmap -p22 -sV 10.0.0.5", "output": "22/tcp open ssh OpenSSH 8.9p1", "returncode": 0},
     })
-    finding_store.append("eng-gen", {"title": "quizá SQLi", "state": "hypothesis"})
+    finding_store.append("eng-gen", {"title": "maybe SQLi", "state": "hypothesis"})
 
     result = report_gen.generate("eng-gen")
     assert result["status"] == "done"
     assert result["findings_count"] == 2
     assert result["artifact"]["name"] == report_gen.REPORT_NAME
 
-    # El Markdown quedó staged y es descargable; contiene los títulos.
+    # The Markdown was staged and is downloadable; it contains the titles.
     staged = artifact_store.resolve("eng-gen", report_gen.REPORT_NAME)
     text = staged.read_text(encoding="utf-8")
     assert "SSH abierto" in text
-    assert "quizá SQLi" in text
+    assert "maybe SQLi" in text
 
 
 def test_main_prints_line_and_returns_zero(staging, capsys):

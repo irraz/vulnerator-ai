@@ -1,10 +1,10 @@
 """Tests de COMPORTAMIENTO de las tools de Caido del servidor (sin red, sin Docker, sin `mcp`).
 
-``kali_mcp_server`` exige el SDK ``mcp<2``; aquí se importa con un STUB mínimo de
+``kali_mcp_server`` requires the ``mcp<2`` SDK; here it is imported with a minimal STUB of
 ``mcp.server.fastmcp.FastMCP`` (decorador identidad), de modo que las funciones ``caido_*`` se
 ejecutan de verdad y se comprueba lo que importa: con ``scope.json`` activo ``caido_request`` NO
-llega a enviar tráfico, ``caido_graphql`` rechaza mutaciones de envío, y ``server_info`` expone el
-estado de Caido. ``caido_client.send_request``/``graphql`` se sustituyen por espías.
+it ever sends traffic, ``caido_graphql`` rejects sending mutations, and ``server_info`` exposes the
+Caido state. ``caido_client.send_request``/``graphql`` are replaced by spies.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import caido_client  # noqa: E402
 
 
 class _StubFastMCP:
-    """Sustituto de FastMCP: ``@mcp.tool(...)``/``@mcp.tool()`` devuelven la función tal cual."""
+    """FastMCP stand-in: ``@mcp.tool(...)``/``@mcp.tool()`` return the function as-is."""
 
     def __init__(self, *a, **k):
         self.tools = {}
@@ -124,8 +124,8 @@ def spy(monkeypatch):
 def test_caido_request_fuera_de_scope_no_envia_trafico(server, scope_on, spy, url):
     out = server.caido_request(url, engagement_id="e1")
     assert out["status"] == "failed" and out["scope_violation"] is True
-    assert spy["send"] == []  # NUNCA se llamó a send_request
-    assert server._violations, "la violación debe registrarse como evidencia"
+    assert spy["send"] == []  # send_request was NEVER called
+    assert server._violations, "the violation must be recorded as evidence"
 
 
 def test_caido_request_en_scope_envia_y_declara_el_destino_validado(
@@ -280,7 +280,7 @@ def test_caido_automate_fuera_de_scope_no_lanza_fuzz(server, scope_on, monkeypat
         "http://example.net/?q=§", payloads=["a", "b"], engagement_id="e"
     )
     assert out["status"] == "failed" and out["scope_violation"] is True
-    assert called == []  # el motor Automate nunca se invocó
+    assert called == []  # the Automate engine was never invoked
 
 
 def test_caido_automate_en_scope_delega_con_destino_validado(
@@ -402,7 +402,7 @@ def test_caido_proxy_enable_status_disable(server, monkeypatch):
     assert server.caido_proxy("status")["enabled"] is False
     en = server.caido_proxy("enable")
     assert en["status"] == "done"
-    # el env del proxy se inyectó a los subprocesos, con NO_PROXY al host de Caido
+    # the proxy env was injected into subprocesses, with NO_PROXY for Caido's host
     assert shell_exec._SUBPROCESS_ENV.get("HTTP_PROXY") == "http://caido:8080"
     assert shell_exec._SUBPROCESS_ENV.get("NO_PROXY") == "caido"
     st = server.caido_proxy("status")

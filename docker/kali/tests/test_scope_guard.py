@@ -1,6 +1,6 @@
 """Tests stdlib-only del scope-guard opt-in (`docker/kali/scope_guard.py`).
 
-No importan `mcp`/`anyio`: sólo librería estándar + pytest (patrón de
+They do not import `mcp`/`anyio`: only standard library + pytest (pattern of
 ``tests/test_finding_store.py``). Cubren los 13 casos del plan §10:
 
   1. scope ausente -> no gate (passthrough).
@@ -11,23 +11,22 @@ No importan `mcp`/`anyio`: sólo librería estándar + pytest (patrón de
   6. deny tiene prioridad sobre allow.
   7. puerto fuera de ``ports`` -> bloquea; sin puerto con ports definido -> permitido por host.
   8. sin ``targets`` con scope activo -> bloquea.
-  9. cinturón best-effort bloquea una IP obvia no declarada; una IP en allow no basta sola.
+  9. best-effort belt blocks an obvious undeclared IP; an IP in allow alone is not enough.
  10. URL normalizada (http host:3000, https IP con 443 inferido).
- 11. config corrupta/JSON inválido/CIDR inválido -> ScopeError.
+ 11. corrupt config/invalid JSON/invalid CIDR -> ScopeError.
  12. ``format_violation_message`` produce el texto esperado.
- 13. logging aislado de la violación: finding_store.read recupera el SCOPE_VIOLATION.
+ 13. isolated violation logging: finding_store.read retrieves the SCOPE_VIOLATION.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import pytest
 
-# Los módulos bajo prueba viven en docker/kali/ (el servidor MCP NO se importa: arrastra
-# `mcp`/`anyio`). Se añade el padre al path explícitamente.
+# The modules under test live in docker/kali/ (the MCP server is NOT imported: it pulls in
+# `mcp`/`anyio`). The parent is added to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import finding_store  # noqa: E402
@@ -36,7 +35,7 @@ import scope_guard  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _clear_enforce(monkeypatch):
-    """Asegura que SCOPE_ENFORCE no esté puesto por el entorno del CI."""
+    """Ensures SCOPE_ENFORCE is not set by the CI environment."""
     monkeypatch.delenv("SCOPE_ENFORCE", raising=False)
 
 
@@ -153,7 +152,7 @@ def test_no_targets_with_scope_active_blocks():
     assert any(v.get("target") is None for v in none.violations)
 
 
-# ------------------------------------------------------------------ 9. cinturón extra
+# ------------------------------------------------------------------ 9. extra belt
 
 
 def test_belt_blocks_obvious_undeclared_ip():
@@ -251,11 +250,11 @@ def test_format_violation_message_no_targets():
 
 
 def _log_violation(engagement_id, decision, config, command):
-    """Réplica del logging best-effort del servidor para probarlo de forma AISLADA.
+    """Replica of the server's best-effort logging to test it in ISOLATION.
 
     Escribe un finding ``state="discarded"`` ``title="SCOPE_VIOLATION"`` con los targets
     rechazados + el comando + el motivo. El servidor hace exactamente esto envuelto en
-    try/except; aquí se prueba que el registro es recuperable por ``finding_store.read``.
+    try/except; here we test that the record is retrievable via ``finding_store.read``.
     """
     message = scope_guard.format_violation_message(decision, config)
     rejected = [v.get("target") for v in decision.violations if v.get("target") is not None]

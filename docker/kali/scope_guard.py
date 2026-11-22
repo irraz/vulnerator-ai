@@ -1,36 +1,36 @@
 """Scope-guard OPT-IN de `kali-mcp` (STDLIB PURA) — valida el destino antes de ejecutar.
 
-Capa DETERMINISTA (código, no prompt) que valida el destino de cada acción ofensiva de
+DETERMINISTIC layer (code, not prompt) that validates the target of every offensive action of
 ``kali_run``/``kali_exec`` ANTES de ejecutarla. Es OPT-IN: sin un ``scope.json`` presente
 y ``enabled: true``, el comportamiento actual no cambia en absoluto (passthrough). Cuando
-está activo es FAIL-CLOSED: si el destino no está permitido —o si Hermes no declara
+is active it is FAIL-CLOSED: if the target is not allowed —or if Hermes does not declare
 destinos— la tool falla con un error estructurado y NO ejecuta el comando.
 
-Por qué un módulo aparte, igual que ``shell_exec.py``/``finding_store.py``:
-``kali_mcp_server.py`` importa ``mcp``/``anyio`` (no están en el venv de dev). Esta
-mecánica usa SOLO la librería estándar (``os``/``json``/``ipaddress``/``urllib.parse``/
-``re``), así su lógica se cubre con tests unitarios sin el SDK. CERO dependencias nuevas
+Why a separate module, like ``shell_exec.py``/``finding_store.py``:
+``kali_mcp_server.py`` imports ``mcp``/``anyio`` (not in the dev venv). This
+mechanism uses ONLY the standard library (``os``/``json``/``ipaddress``/``urllib.parse``/
+``re``), so its logic is covered by unit tests without the SDK. ZERO new dependencies
 (ni YAML/pyyaml): el archivo de scope es ``scope.json`` y se parsea con ``json``.
 
-Diseño (decisiones cerradas con el operador):
-  - Activación SOLO si el archivo (``SCOPE_FILE``, default ``/scope/scope.json``) existe y
+Design (decisions agreed with the operator):
+  - Activation ONLY if the file (``SCOPE_FILE``, default ``/scope/scope.json``) exists and
     contiene ``enabled: true``. ``SCOPE_ENFORCE=0`` es un kill-switch que fuerza desactivar.
-    Las env vars son SOLO interruptores booleanos; la ÚNICA fuente de datos (allow/deny/
+    Env vars are ONLY boolean switches; the ONLY data source (allow/deny/
     ports) es el archivo.
-  - Extracción de destinos HÍBRIDA: Hermes declara ``targets`` (fuente de verdad del gate)
-    y, además, un parsing best-effort del comando como CINTURÓN EXTRA que solo puede
-    BLOQUEAR destinos obvios fuera de scope, NUNCA aprobar por sí solo.
+  - HYBRID target extraction: Hermes declares ``targets`` (the gate's source of truth)
+    and, additionally, best-effort parsing of the command as an EXTRA BELT that can only
+    BLOCK obvious out-of-scope targets, NEVER approve on its own.
   - ESTRICTO: con scope activo y SIN ``targets`` declarados -> se bloquea (no se ejecuta).
-  - Validación v1: IP contra CIDRs de allow (``ipaddress``); hostname por match LITERAL
+  - v1 validation: IP against allow CIDRs (``ipaddress``); hostname by LITERAL match
     (SIN DNS; un sufijo NO coincide); puertos opcionales. deny tiene PRIORIDAD sobre allow.
 
-La carga del archivo (I/O + parse) se separa de la validación (lógica pura sobre dicts)
-para poder testear la decisión con dicts en memoria sin tocar el filesystem.
+File loading (I/O + parse) is separated from validation (pure logic over dicts)
+so the decision can be tested with in-memory dicts without touching the filesystem.
 
 Disciplina de seguridad: el ``command`` y los ``targets`` son DATO NO CONFIABLE. El
-cinturón best-effort es deliberadamente conservador (ver notas en ``evaluate``): nunca
-aprueba, solo endurece. Una config corrupta con el guard activándose es un fallo de
-configuración fail-closed (``ScopeError``), no un passthrough silencioso.
+best-effort belt is deliberately conservative (see notes in ``evaluate``): it never
+approves, it only tightens. A corrupt config with the guard triggering is a
+fail-closed configuration failure (``ScopeError``), not a silent passthrough.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 from urllib.parse import urlsplit
 
-# Ruta canónica del archivo de scope dentro del contenedor Kali (overridable por env).
+# Canonical path of the scope file inside the Kali container (overridable via env).
 DEFAULT_SCOPE_FILE = "/scope/scope.json"
 
 # Objetos de red de la stdlib (IPv4/IPv6) devueltos por ``ipaddress.ip_network``.
@@ -52,7 +52,7 @@ _Address = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
 
 class ScopeError(ValueError):
-    """Config de scope inválida/corrupta (fail-closed: con el guard activo, no se ejecuta)."""
+    """Invalid/corrupt scope config (fail-closed: with the guard active, nothing runs)."""
 
 
 @dataclass
@@ -60,7 +60,7 @@ class Target:
     """Destino normalizado a partir de una entrada de ``targets`` o del comando.
 
     ``ip`` es un objeto ``ipaddress`` si ``host`` parsea como IP literal, o ``None`` si es
-    un hostname. ``port`` es el puerto explícito/inferido, o ``None`` si no hay.
+    a hostname. ``port`` is the explicit/inferred port, or ``None`` if absent.
     """
 
     raw: str
@@ -71,7 +71,7 @@ class Target:
 
 @dataclass
 class ScopeConfig:
-    """Configuración de scope ya compilada (redes como objetos, hosts normalizados)."""
+    """Already-compiled scope config (networks as objects, normalized hosts)."""
 
     enabled: bool
     allow_cidrs: list[_Network] = field(default_factory=list)
@@ -90,14 +90,14 @@ class ScopeDecision:
     enforced: bool = False
 
 
-# ---------------------------------------------------------------- activación / carga
+# ---------------------------------------------------------------- activation / loading
 
 
 def is_enforcing(config: Optional[ScopeConfig]) -> bool:
     """True si el guard debe aplicar el gate.
 
-    Regla centralizada de activación: hay ``config``, está ``enabled`` y el kill-switch
-    ``SCOPE_ENFORCE`` no es ``"0"``. Así el operador puede desactivar el guard en caliente
+    Centralized activation rule: ``config`` exists, is ``enabled``, and the kill-switch
+    ``SCOPE_ENFORCE`` is not ``"0"``. This lets the operator disable the guard hot
     (``SCOPE_ENFORCE=0``) aunque el archivo diga ``enabled: true``, sin tocar el archivo.
     """
     if config is None or not config.enabled:
@@ -108,15 +108,15 @@ def is_enforcing(config: Optional[ScopeConfig]) -> bool:
 
 
 def load_scope(path: Optional[str] = None) -> Optional[ScopeConfig]:
-    """Carga el archivo de scope (I/O + parse AISLADOS de la validación de destinos).
+    """Loads the scope file (I/O + parse ISOLATED from target validation).
 
     Lee ``path`` o, si no se pasa, ``SCOPE_FILE`` (default ``/scope/scope.json``).
 
       - Si el archivo NO existe -> devuelve ``None`` (sin gate; comportamiento actual).
       - Si existe -> lo parsea con ``json.loads`` y delega en ``parse_scope``.
-      - Si existe pero es ilegible/JSON inválido -> ``ScopeError`` (fail-closed de config).
+      - If it exists but is unreadable/invalid JSON -> ``ScopeError`` (config fail-closed).
     """
-    scope_path = path or os.environ.get("SCOPE_FILE", DEFAULT_SCOPE_FILE)
+    scope_path: str = path or os.environ.get("SCOPE_FILE") or DEFAULT_SCOPE_FILE
     if not os.path.isfile(scope_path):
         return None
     try:
@@ -125,7 +125,7 @@ def load_scope(path: Optional[str] = None) -> Optional[ScopeConfig]:
         data = json.loads(raw)
     except (OSError, json.JSONDecodeError) as exc:
         raise ScopeError(
-            "scope file %r ilegible o JSON inválido: %s" % (scope_path, exc)
+            "scope file %r unreadable or invalid JSON: %s" % (scope_path, exc)
         ) from exc
     return parse_scope(data)
 
@@ -135,7 +135,7 @@ def _compile_entries(
 ) -> tuple[list[_Network], set[str]]:
     """Compila una lista de ``{cidr: ...}``/``{host: ...}`` a (redes, hosts).
 
-    Lógica PURA (sin filesystem). Entradas malformadas -> ``ScopeError`` (fail-closed de
+    PURE logic (no filesystem). Malformed input -> ``ScopeError`` (fail-closed of
     config): un CIDR no parseable o una entrada sin ``cidr``/``host`` detiene la carga en
     vez de ignorarse en silencio (una config corrupta con el guard activo no debe ejecutar).
     """
@@ -154,17 +154,17 @@ def _compile_entries(
         if "cidr" in entry:
             value = entry["cidr"]
             if not isinstance(value, str) or not value.strip():
-                raise ScopeError("'%s' tiene un 'cidr' vacío o no-string." % where)
+                raise ScopeError("'%s' has an empty or non-string 'cidr'." % where)
             try:
                 cidrs.append(ipaddress.ip_network(value.strip(), strict=False))
             except ValueError as exc:
                 raise ScopeError(
-                    "'%s' tiene un CIDR inválido %r: %s" % (where, value, exc)
+                    "'%s' has an invalid CIDR %r: %s" % (where, value, exc)
                 ) from exc
         elif "host" in entry:
             value = entry["host"]
             if not isinstance(value, str) or not value.strip():
-                raise ScopeError("'%s' tiene un 'host' vacío o no-string." % where)
+                raise ScopeError("'%s' has an empty or non-string 'host'." % where)
             hosts.add(value.strip())
         else:
             raise ScopeError(
@@ -174,21 +174,21 @@ def _compile_entries(
 
 
 def parse_scope(data: Any) -> ScopeConfig:
-    """Valida y compila un dict de scope a ``ScopeConfig`` (lógica PURA, testeable).
+    """Validates and compiles a scope dict into ``ScopeConfig`` (PURE logic, testable).
 
-    Reglas (fail-closed de configuración):
+    Rules (configuration fail-closed):
       - ``data`` es un objeto JSON (dict).
       - ``enabled`` es bool (default ``False`` si falta).
       - ``allow``/``deny`` son listas de ``{cidr}``/``{host}`` (compiladas con ``ipaddress``).
-      - ``ports``, si viene, es una lista de enteros (puertos permitidos). Lista vacía o
+      - ``ports``, if present, is a list of integers (allowed ports). Empty list or
         ausente -> ``None`` (cualquier puerto permitido para un host permitido).
     """
     if not isinstance(data, dict):
-        raise ScopeError("scope inválido: se espera un objeto JSON en la raíz.")
+        raise ScopeError("invalid scope: expected a JSON object at the root.")
 
     enabled = data.get("enabled", False)
     if not isinstance(enabled, bool):
-        raise ScopeError("scope inválido: 'enabled' debe ser booleano.")
+        raise ScopeError("invalid scope: 'enabled' must be boolean.")
 
     allow_cidrs, allow_hosts = _compile_entries(data.get("allow"), "allow")
     deny_cidrs, deny_hosts = _compile_entries(data.get("deny"), "deny")
@@ -197,13 +197,13 @@ def parse_scope(data: Any) -> ScopeConfig:
     ports: Optional[set[int]] = None
     if ports_raw is not None:
         if not isinstance(ports_raw, list):
-            raise ScopeError("scope inválido: 'ports' debe ser una lista de enteros.")
+            raise ScopeError("invalid scope: 'ports' must be a list of integers.")
         compiled_ports: set[int] = set()
         for port in ports_raw:
-            # bool es subclase de int; se excluye explícitamente para no aceptar True/False.
+            # bool is a subclass of int; explicitly excluded so True/False are not accepted.
             if isinstance(port, bool) or not isinstance(port, int) or not (0 <= port <= 65535):
                 raise ScopeError(
-                    "scope inválido: 'ports' contiene un valor que no es puerto: %r" % (port,)
+                    "invalid scope: 'ports' contains a non-port value: %r" % (port,)
                 )
             compiled_ports.add(port)
         if compiled_ports:
@@ -219,7 +219,7 @@ def parse_scope(data: Any) -> ScopeConfig:
     )
 
 
-# ---------------------------------------------------------------- normalización destinos
+# ---------------------------------------------------------------- target normalization
 
 
 _SCHEME_DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -244,7 +244,7 @@ def normalize_target(raw: str) -> Target:
       - IP literal: ``"8.8.8.8"``, ``"::1"``.
       - Hostname: ``"juice-shop"`` (match LITERAL contra allow hosts).
       - URL: ``"http://juice-shop:3000/x"``, ``"https://10.0.0.5"`` (puerto del ``:port``
-        explícito o inferido del esquema solo a efectos de la comprobación de ``ports``).
+        explicit or inferred from the scheme only for the ``ports`` check).
       - host:port sin esquema: ``"10.0.0.5:8080"``, ``"juice-shop:3000"``, ``"[::1]:8080"``.
     """
     token = (raw or "").strip()
@@ -270,7 +270,7 @@ def normalize_target(raw: str) -> Target:
             port = int(m6.group("port"))
         return Target(raw=raw, host=host, ip=_as_ip(host), port=port)
 
-    # IP literal directa (IPv4 o IPv6 sin corchetes): no partir por ':' (rompería IPv6).
+    # Direct literal IP (IPv4 or IPv6 without brackets): do not split on ':' (would break IPv6).
     direct_ip = _as_ip(token)
     if direct_ip is not None:
         return Target(raw=raw, host=token, ip=direct_ip, port=None)
@@ -286,15 +286,15 @@ def normalize_target(raw: str) -> Target:
     return Target(raw=raw, host=host, ip=None, port=port)
 
 
-# Tokens candidatos a IP/URL/host:port en el comando (cinturón best-effort, conservador).
+# Candidate IP/URL/host:port tokens in the command (best-effort belt, conservative).
 _CMD_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _CMD_URL_RE = re.compile(r"\bhttps?://[^\s'\"]+", re.IGNORECASE)
 
 
 def extract_targets_from_command(command: str) -> list[Target]:
-    """Parsing BEST-EFFORT del comando -> lista de ``Target`` (posiblemente vacía).
+    """BEST-EFFORT parsing of the command -> list of ``Target`` (possibly empty).
 
-    CINTURÓN EXTRA (decisión 3): su salida solo se usa para BLOQUEAR destinos obvios fuera
+    EXTRA BELT (decision 3): its output is only used to BLOCK obvious targets outside
     de scope, NUNCA para aprobar. Deliberadamente conservador: extrae URLs ``http(s)://`` y
     tokens que parezcan IPv4 literales. No intenta un parser de shell completo (una IP
     ofuscada/construida por el comando puede no detectarse -> falso negativo; por eso la
@@ -314,7 +314,7 @@ def extract_targets_from_command(command: str) -> list[Target]:
     for match in _CMD_IPV4_RE.findall(command):
         if match in seen:
             continue
-        # Solo IPv4 bien formadas (descarta "1.2.3.4" que no sea IP válida, p. ej. 999.*).
+        # Only well-formed IPv4 (discards "1.2.3.4" that is not a valid IP, e.g. 999.*).
         ip = _as_ip(match)
         if ip is None:
             continue
@@ -324,7 +324,7 @@ def extract_targets_from_command(command: str) -> list[Target]:
     return found
 
 
-# ---------------------------------------------------------------- decisión del gate
+# ---------------------------------------------------------------- gate decision
 
 
 def _in_cidrs(ip: _Address, cidrs: list[_Network]) -> bool:
@@ -333,13 +333,13 @@ def _in_cidrs(ip: _Address, cidrs: list[_Network]) -> bool:
             if ip in net:
                 return True
         except TypeError:
-            # Comparación IPv4 vs IPv6: no aplica, se ignora.
+            # IPv4 vs IPv6 comparison: not applicable, ignored.
             continue
     return False
 
 
 def _check_target(config: ScopeConfig, target: Target) -> Optional[dict[str, Any]]:
-    """Evalúa un target contra el scope. Devuelve una violación (dict) o ``None`` si pasa.
+    """Evaluates a target against the scope. Returns a violation (dict) or ``None`` if it passes.
 
     Orden: deny PRIMERO (prioridad); luego allow (IP en cidr O host literal); luego ports
     (solo si el target trae puerto y hay ``ports`` definido).
@@ -350,7 +350,7 @@ def _check_target(config: ScopeConfig, target: Target) -> Optional[dict[str, Any
     if target.host in config.deny_hosts:
         return {"target": target.raw, "reason": "target en deny (host)"}
 
-    # allow: IP en algún cidr permitido O host literal en allow.
+    # allow: IP in an allowed cidr OR literal host in allow.
     in_allow = False
     if target.ip is not None and _in_cidrs(target.ip, config.allow_cidrs):
         in_allow = True
@@ -374,18 +374,18 @@ def evaluate(
     declared_targets: Optional[list[str]],
     command: str,
 ) -> ScopeDecision:
-    """Núcleo del gate. Decide si la ejecución puede proceder.
+    """Gate core. Decides whether execution may proceed.
 
     Reglas, en orden:
-      1. Si el guard no está activo (``is_enforcing`` False) -> passthrough
+      1. If the guard is not active (``is_enforcing`` False) -> passthrough
          (``allowed=True, enforced=False``). Compat total con el comportamiento actual.
-      2. Scope activo y SIN ``targets`` declarados -> bloquea (decisión estricta): Hermes
+      2. Active scope with NO declared ``targets`` -> block (strict decision): Hermes
          DEBE declarar los destinos del comando.
-      3. Cada target declarado se normaliza y evalúa (``_check_target``). Cualquier target
-         fuera de scope añade una violación.
-      4. CINTURÓN EXTRA: destinos extraídos del comando que caigan en deny, o que sean IP y
-         no caigan en ningún allow, añaden violación. Nunca aprueban por sí solos.
-      5. Si hay cualquier violación -> ``allowed=False``.
+      3. Each declared target is normalized and evaluated (``_check_target``). Any target
+         outside scope adds a violation.
+      4. EXTRA BELT: targets extracted from the command that fall in deny, or are IPs and
+         fall in no allow, add a violation. They never approve on their own.
+      5. If there is any violation -> ``allowed=False``.
     """
     if not is_enforcing(config):
         return ScopeDecision(allowed=True, violations=[], enforced=False)
@@ -413,7 +413,7 @@ def evaluate(
         if violation is not None:
             violations.append(violation)
 
-    # (4) Cinturón extra: solo BLOQUEA destinos obvios del comando, nunca aprueba.
+    # (4) Extra belt: only BLOCKS obvious targets from the command, never approves.
     for extracted in extract_targets_from_command(command):
         if extracted.ip is not None and _in_cidrs(extracted.ip, config.deny_cidrs):
             violations.append(
@@ -428,7 +428,7 @@ def evaluate(
                 {
                     "target": extracted.raw,
                     "reason": (
-                        "IP detectada en el comando fuera de allow (declárala en "
+                        "IP detected in the command outside allow (declare it in "
                         "'targets' si es intencionada)"
                     ),
                 }
@@ -440,7 +440,7 @@ def evaluate(
 
 
 def _allowed_summary(config: ScopeConfig) -> str:
-    """Resumen legible de lo permitido (cidrs + hosts) para el mensaje de violación."""
+    """Readable summary of what is allowed (cidrs + hosts) for the violation message."""
     parts: list[str] = [str(net) for net in config.allow_cidrs]
     parts.extend(sorted(config.allow_hosts))
     summary = ", ".join(parts) if parts else "(nada)"

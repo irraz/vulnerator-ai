@@ -1,15 +1,15 @@
 """Tests stdlib-only del cliente DNSDumpster (`dnsdumpster_client.py`).
 
-Ejercitan la LÓGICA del cliente SIN tocar la red (``_get`` se sustituye por un fake o se
+They exercise the client's LOGIC without touching the network (``_get`` is replaced by a fake or
 monkeypatchea ``urllib.request.urlopen``). Fijan que:
   - ``_validate_domain`` normaliza (quita esquema/barras) y rechaza fail-closed la basura;
-  - ``_resolve_key`` toma la key explícita o la del entorno y falla sin ella;
+  - ``_resolve_key`` takes the explicit or environment key and fails without one;
   - ``extract_surface`` aplana A/CNAME/MX/NS a filas (host, IP, ASN, banners), deduplica
-    IPs y CIDRs y recoge TXT — comprobado contra un fixture SINTÉTICO (example.com, IPs de
-    rango documentación TEST-NET) con la forma real de la API;
+    IPs and CIDRs and collects TXT — checked against a SYNTHETIC fixture (example.com, IPs in the
+    TEST-NET documentation range) with the real API shape;
   - el manejo de estados HTTP: 200->ok, 429->rate_limited (con reintento), 401/403->
     unauthorized, otros->failed, cuerpo no-JSON->failed;
-  - ``recon_domain`` devuelve el error de la primera página si falla, y agrega páginas.
+  - ``recon_domain`` returns the first page's error on failure, and aggregates pages.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
-# --------------------------------------------------------------- validación de entrada
+# --------------------------------------------------------------- input validation
 
 
 @pytest.mark.parametrize(
@@ -62,7 +62,7 @@ def test_resolve_key_explicita_o_entorno(monkeypatch):
         dd._resolve_key(None)
 
 
-# --------------------------------------------------------------- normalización de salida
+# --------------------------------------------------------------- output normalization
 
 
 def test_extract_surface_fixture():
@@ -71,14 +71,14 @@ def test_extract_surface_fixture():
     # El fixture trae hosts en A/MX/NS; se aplanan a una fila por IP.
     assert surface["counts"]["hosts"] == 5
     assert len(surface["ips"]) == len(set(surface["ips"]))  # deduplicadas
-    assert all(ip for ip in surface["ips"])  # sin vacíos
+    assert all(ip for ip in surface["ips"])  # no empties
     # Debe haber registros A y NS (el fixture usa ambos).
     types = surface["counts"]["by_record_type"]
     assert "A" in types and "NS" in types
     # Las filas llevan los campos normalizados esperados.
     row = surface["hosts"][0]
     assert set(["record_type", "host", "ip", "asn", "ptr", "apps"]).issubset(row)
-    # TXT se recoge verbatim (el fixture publica SPF + verificación).
+    # TXT is collected verbatim (the fixture publishes SPF + verification).
     assert "v=spf1 -all" in surface["txt"]
 
 
@@ -124,7 +124,7 @@ def test_extract_surface_banners_y_apps():
 
 
 def test_extract_surface_robusto_a_basura():
-    # Secciones ausentes, tipos inesperados: no revienta, devuelve vacío coherente.
+    # Missing sections, unexpected types: no crash, returns a consistent empty result.
     assert dd.extract_surface({})["ips"] == []
     assert dd.extract_surface({"a": "no-es-lista"})["hosts"] == []
     assert dd.extract_surface(None)["hosts"] == []

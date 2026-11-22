@@ -1,45 +1,45 @@
 # =============================================================================
-# .gitignore — mantener FUERA del repo público todo secreto, credencial o dato
-# de un engagement. Los ficheros *.example SÍ se versionan (son plantillas).
+# .gitignore — keep OUT of the public repo every secret, credential or engagement
+# data. The *.example files ARE versioned (they are templates).
 # =============================================================================
 
-# --- Secretos y entorno local (NUNCA versionar) ---
+# --- Secrets and local environment (NEVER version) ---
 .env
 .env.*
 !.env.example
 *.local
 
-# --- Scope-guard: el scope real de un engagement NO se versiona (la plantilla sí) ---
+# --- Scope-guard: the real scope of an engagement is NOT versioned (the template is) ---
 scope.json
 
-# --- Credenciales AWS que pudieran caer en el árbol de trabajo ---
+# --- AWS credentials that could end up in the working tree ---
 .aws/
 credentials
 *.pem
 *.key
 !**/profile/env.example
 
-# --- Datos de un engagement: artefactos, hallazgos, informes, capturas ---
-# Evidencia y salida de pentest no deben acabar en el repo.
+# --- Engagement data: artifacts, findings, reports, captures ---
+# Pentest evidence and output must not end up in the repo.
 artifacts/
 /artifacts/
 *.jsonl
 findings-*.json
 report-*.md
 *.pcap
-# Excepción: muestra REDACTADA versionada a propósito como documentación (docs/).
-# La IP es la de documentación RFC 5737 (192.0.2.1) y el nº de serie/hostname están redactados.
+# Exception: REDACTED sample versioned on purpose as documentation (docs/).
+# The IP is the RFC 5737 documentation IP (192.0.2.1) and the serial number/hostname are redacted.
 !docs/example-findings.jsonl
 
-# --- Estado de perfil de Hermes generado en pruebas ---
+# --- Hermes profile state generated in tests ---
 profiles/
 state.db
 state.db-*
 
-# --- Ruido de macOS ---
+# --- macOS noise ---
 .DS_Store
 
-# --- Artefactos de Python / pytest (ruido de build, no fuente) ---
+# --- Python / pytest artifacts (build noise, not source) ---
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -47,17 +47,19 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+# uv lockfile: local environment noise; the dev pins live in requirements-dev.txt.
+uv.lock
 
-# --- Notas de trabajo locales (no versionar) ---
-# Backlog interno de features y planificación; vive en el repo pero fuera de git.
+# --- Local work notes (do not version) ---
+# Internal feature and planning backlog; it lives in the repo but outside git.
 backlog.md
-# Artefactos internos de agentes/workflows (informes, notas de verificación): no son producto.
+# Internal agent/workflow artifacts (reports, verification notes): not product.
 .agents/
 .worktrees/
 
-# --- Labs: exploits ejecutables nunca se versionan (SEGURIDAD) ---
-# Los labs documentan vulnerabilidades, pero exploits funcionales no deben estar en el repo.
+# --- Labs: executable exploits are NEVER versioned (SECURITY) ---
+# The labs document vulnerabilities, but functional exploits must not be in the repo.
 labs/**/exploits/
 
-# --- Vulnerable lab (entorno de testing con Workers) ---
+# --- Vulnerable lab (testing environment with Workers) ---
 vulnerable-lab/

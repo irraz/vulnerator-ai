@@ -1,73 +1,75 @@
-# Pre-commit hooks para ejecutar checks localmente antes de push
-# Instalación: pip install pre-commit && pre-commit install
+# Pre-commit hooks to run checks locally before push
+# Install: pip install pre-commit && pre-commit install
 #
-# Uso:
-#   - Automático: Se ejecuta en cada git commit
+# Usage:
+#   - Automatic: runs on every git commit
 #   - Manual: pre-commit run --all-files
-#
-# Para saltar hooks (emergencias): git commit --no-verify
 
 repos:
   # ============================================================================
-  # HOOKS BÁSICOS DE CALIDAD
+  # BASIC QUALITY HOOKS
   # ============================================================================
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
-      # Evitar commits directos a main
+      # Prevent direct commits to main
       - id: no-commit-to-branch
         args: ['--branch', 'main', '--branch', 'master']
         
-      # Detectar archivos grandes (>500KB)
+      # Detect large files (>500KB)
       - id: check-added-large-files
         args: ['--maxkb=500']
         
-      # Verificar que archivos terminen con newline
+      # Verify files end with a newline
       - id: end-of-file-fixer
         
-      # Remover whitespace al final de líneas
+      # Remove trailing whitespace
       - id: trailing-whitespace
         
-      # Verificar sintaxis YAML
+      # Verify YAML syntax
       - id: check-yaml
-        args: ['--unsafe']  # Permite tags de Docker Compose
+        args: ['--unsafe']  # Allows Docker Compose tags
+        additional_dependencies: [ruamel.yaml]
         
-      # Verificar sintaxis JSON
+      # Verify JSON syntax
       - id: check-json
         
-      # Detectar merge conflict markers
+      # Detect merge conflict markers
       - id: check-merge-conflict
         
-      # Verificar que scripts tengan shebang
+      # Verify scripts have a shebang
       - id: check-shebang-scripts-are-executable
         
-      # Detectar private keys
+      # Detect private keys
       - id: detect-private-key
         
-      # Verificar formato de archivos Docker Compose
+      # Verify Docker Compose file format
       - id: check-yaml
         files: docker-compose.*\.yml$
+        additional_dependencies: [ruamel.yaml]
 
   # ============================================================================
-  # SEGURIDAD - DETECCIÓN DE SECRETOS
+  # SECURITY - SECRET DETECTION
   # ============================================================================
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: 
+        args:
           - '--baseline'
           - '.secrets.baseline'
+        additional_dependencies: [requests]
         exclude: |
           (?x)^(
             \.env\.example|
             \.pre-commit-config\.yaml|
             package-lock\.json|
-            .*\.lock
+            .*\.lock|
+            docs/example-findings\.jsonl
           )$
 
   # ============================================================================
-  # PYTHON - FORMATEO Y LINTING
+  # PYTHON - FORMATTING AND LINTING
   # ============================================================================
   - repo: https://github.com/psf/black
     rev: 24.10.0
@@ -111,7 +113,7 @@ repos:
         args: ['--ignore', 'DL3008', '--ignore', 'DL3009']
 
   # ============================================================================
-  # PYTHON - IMPORTS Y TYPE CHECKING
+  # PYTHON - IMPORTS AND TYPE CHECKING
   # ============================================================================
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
@@ -119,8 +121,31 @@ repos:
       - id: isort
         args: ['--profile', 'black']
 
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
+    hooks:
+      - id: ruff
+        args: ['--config=pyproject.toml']
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args: ['--config-file=pyproject.toml']
+        files: \.py$
+        exclude: (^|/)tests/
+
+  - repo: local
+    hooks:
+      - id: quick-fix-comments
+        name: Blocks quick-fix/shortcut/debt comments
+        entry: python3 scripts/check_quick_fix_comments.py
+        language: system
+        files: \.(py|sh|bash|js|ts|yml|yaml|toml|ini|cfg|conf|dockerfile|mk|make)$
+        pass_filenames: true
+
   # ============================================================================
-  # MARKDOWN Y DOCUMENTACIÓN
+  # MARKDOWN AND DOCUMENTATION
   # ============================================================================
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8

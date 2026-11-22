@@ -1,12 +1,12 @@
 """Tests stdlib-only del Automate de Caido (`docker/kali/caido_automate.py`).
 
-No importan `mcp`/`anyio` ni salen a la red: cubren las funciones PURAS (localización del
-punto de inyección en BYTES, builder de ajustes con su validación fail-closed, aplanado de
+They do not import `mcp`/`anyio` nor go to the network: they cover the PURE functions (locating the
+injection point in BYTES, settings builder with fail-closed validation, flattening of
 nodos) y el orquestador `run_automate` con el transporte `graphql` y `ensure_session`
 SUSTITUIDOS por fakes con dicts guionizados. Calca la estructura de `tests/test_caido_client.py`.
 
-El flujo end-to-end con Caido real se verificó aparte, EN VIVO (fuzz sobre OWASP Juice Shop);
-aquí no se ejecuta Caido: sólo se fija la mecánica create->update->start->poll y que cada
+The end-to-end flow with real Caido was verified separately, LIVE (fuzzing OWASP Juice Shop);
+Caido is not run here: only the create->update->start->poll mechanics and that each
 etapa que falla devuelve su error SIN lanzar.
 """
 
@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-# El módulo bajo prueba vive en docker/kali/ (el servidor MCP NO se importa: arrastra
-# `mcp`/`anyio`). Se añade el padre al path explícitamente.
+# The module under test lives in docker/kali/ (the MCP server is NOT imported: it pulls in
+# `mcp`/`anyio`). The parent is added to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import caido_automate  # noqa: E402
@@ -32,9 +32,9 @@ MARKER = caido_automate.DEFAULT_MARKER  # §
 
 
 def test_placeholder_offset_es_en_bytes_no_en_caracteres():
-    # Cuerpo multibyte: "José" lleva una é (2 bytes en UTF-8) ANTES del marcador, así el
-    # offset en bytes del marcador difiere de su índice en caracteres.
-    body = "usuario=José" + MARKER
+    # Multibyte body: "Jörg" has an ö (2 bytes in UTF-8) BEFORE the marker, so the
+    # marker's byte offset differs from its character index.
+    body = "user=Jörg" + MARKER
     out = caido_automate.build_placeholder_request("POST", "/login", "h", body=body)
     assert out["start"] == out["end"]
     assert MARKER not in out["raw"]
@@ -43,11 +43,11 @@ def test_placeholder_offset_es_en_bytes_no_en_caracteres():
     char_idx = marked.index(MARKER)
     byte_idx = marked.encode("utf-8").index(MARKER.encode("utf-8"))
     assert out["start"] == byte_idx
-    assert byte_idx != char_idx  # prueba la semántica de BYTES (é mete 1 byte extra)
+    assert byte_idx != char_idx  # tests BYTE semantics (ö adds 1 extra byte)
 
 
 def test_placeholder_reinsertar_en_offset_reproduce_la_peticion_marcada():
-    body = '{"q":"ña' + MARKER + '"}'  # ñ (2 bytes) antes del marcador
+    body = '{"q":"Jö' + MARKER + '"}'  # ö (2 bytes) before the marker
     out = caido_automate.build_placeholder_request("POST", "/x", "h", body=body)
     clean = out["raw"].encode("utf-8")
     reinserted = clean[: out["start"]] + MARKER.encode("utf-8") + clean[out["start"] :]
@@ -84,7 +84,7 @@ def test_placeholder_multiples_marcadores_usa_el_primero_sin_lanzar():
     assert out["start"] == first_byte_idx  # el PRIMERO, no lanza por haber dos
 
 
-# --- build_automate_settings: estructura y validación -----------------------------------
+# --- build_automate_settings: structure and validation -----------------------------------
 
 
 def test_settings_estructura_completa():
@@ -189,7 +189,7 @@ def test_parse_lista_vacia_y_none():
     assert caido_automate.parse_entry_requests(None) == []
 
 
-# --- run_automate: orquestación create->update->start->poll (transporte simulado) --------
+# --- run_automate: create->update->start->poll orchestration (mocked transport) --------
 
 
 @pytest.fixture(autouse=True)
@@ -208,7 +208,7 @@ def _ok_session(monkeypatch):
 
 
 def _fake_graphql(responses):
-    """Sustituto de ``graphql`` que responde según un substring del documento enviado.
+    """Stand-in for ``graphql`` that responds based on a substring of the sent document.
 
     ``responses`` puede mapear un needle a un dict fijo o a un iterador (para guionizar
     sondeos sucesivos de la misma query).
@@ -297,7 +297,7 @@ def test_run_automate_flujo_completo_create_update_start_poll(monkeypatch):
     assert "updateAutomateSession" in docs[1]
     assert "startAutomateTask" in docs[2]
     assert "automateEntry" in docs[3]
-    # El token de sesión se propaga a cada llamada.
+    # The session token is propagated to each call.
     assert all(c[2] == "t" for c in fake.calls)
 
 
@@ -319,7 +319,7 @@ def test_run_automate_sondea_hasta_que_la_cuenta_deja_de_crecer(monkeypatch):
         "http://h:3000/?q=" + MARKER, payloads=["apple"], strategy="PARALLEL"
     )
     assert out["status"] == "done" and out["count"] == 1
-    # Exactamente 2 sondeos a automateEntry (se estabilizó en el segundo).
+    # Exactly 2 polls of automateEntry (it stabilized on the second).
     assert sum(1 for c in fake.calls if "automateEntry" in c[0]) == 2
 
 
@@ -339,7 +339,7 @@ def test_run_automate_sin_marcador_no_llama_a_caido(monkeypatch):
 
     monkeypatch.setattr(caido_automate, "graphql", boom)
     monkeypatch.setattr(caido_automate, "ensure_session", boom)
-    # La URL no lleva § en ningún sitio -> build_placeholder_request falla fail-closed.
+    # The URL has no § anywhere -> build_placeholder_request fails closed.
     out = caido_automate.run_automate("http://h/", payloads=["a"])
     assert out["status"] == "failed"
 
@@ -352,7 +352,7 @@ def test_run_automate_sesion_fallida_se_devuelve_tal_cual(monkeypatch):
     )
 
     def boom(*a, **k):
-        raise AssertionError("no debe llamar a graphql si no hay sesión")
+        raise AssertionError("must not call graphql without a session")
 
     monkeypatch.setattr(caido_automate, "graphql", boom)
     out = caido_automate.run_automate("http://h/?q=" + MARKER, payloads=["a"])
