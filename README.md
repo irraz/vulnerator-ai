@@ -239,7 +239,8 @@ env -u PYTHONPATH python3 scripts/smoke.py --check
 ```
 
 The 6 test suites, separately: `env -u PYTHONPATH python3 scripts/smoke.py --tests` (or
-`bash scripts/run_tests.sh`).
+`bash scripts/run_tests.sh`; both fail if a suite directory is missing, mirroring the
+CI gate's `--strict-suites`).
 
 ## Models
 

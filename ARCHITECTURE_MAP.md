@@ -281,7 +281,8 @@ are in **Annex B** (section 12). Profiles and volumes:
 
 Six suites, one per component. They run with `bash scripts/run_tests.sh`
 (`scripts/run_tests.sh:1`) or `env -u PYTHONPATH python3 scripts/smoke.py --tests`
-(`scripts/smoke.py:1`). The CI gate invokes them in static mode
+(`scripts/smoke.py:1`). Both fail if a suite directory is missing, matching the CI
+gate (`--quick --strict-suites`). The CI gate invokes them in static mode
 (`.github/workflows/ci.yml:1`).
 
 | Suite | Covers | Reference |
@@ -422,13 +423,15 @@ env -u PYTHONPATH python3 scripts/smoke.py --static   # contracts + AST tools + 
 env -u PYTHONPATH python3 scripts/smoke.py --tests    # the 6 suites in a subprocess
 env -u PYTHONPATH python3 scripts/smoke.py --quick    # static + tests
 env -u PYTHONPATH python3 scripts/smoke.py --check     # alias of --static
+env -u PYTHONPATH python3 scripts/smoke.py --quick --strict-suites  # static + tests (CI gate)
 bash scripts/run_tests.sh                             # shell runner for the 6 suites
 ```
 
 - The blocking gate is `🧱 Base scaffolding` (`.github/workflows/ci.yml:1`): it runs
   `--static`, `docker compose config --quiet`, `scripts/check_quick_fix_comments.py --all`,
-  type-check (mypy) and `--quick` (the 6 suites).
-- The smoke exit code is non-zero if **any** suite fails.
+  type-check (mypy) and `--quick --strict-suites` (the 6 suites).
+- The smoke exit code is non-zero if **any** suite fails, and a missing suite
+  directory is a failure in every mode (the local runner matches the gate).
 
 ## 14. Known debt
 

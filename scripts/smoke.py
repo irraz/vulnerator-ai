@@ -51,8 +51,8 @@ SDK_FREE_IMPORT = [
 ]
 
 # The suites and the dependencies each one needs in the test interpreter.
-# If a suite does not exist in this worktree it is reported with ⚠️ (a missing suite
-# is not a red suite).
+# A suite that does not exist is a FAILURE (not a warning): the local runner must
+# see exactly what the CI gate sees.
 SUITES: list[tuple[str, list[str]]] = [
     ("agent-ooda/tests", ["pytest", "pyyaml"]),
     ("docker/kali/tests", ["pytest"]),
@@ -150,13 +150,29 @@ def load_yaml_file(rep: Report, section: str, path: Path) -> dict | None:
 # --------------------------------------------------------------------------- utils
 
 
-def ast_tool_decorations(path: Path) -> list[tuple[str, int]]:
+def ast_tool_decorations(rep: "Report | None", section: str, path: Path) -> list[tuple[str, int]]:
     """Returns [(name, line)] of the functions decorated with @mcp.tool(...).
 
     AST only: the file is NOT imported. The line is the `def` line (the decorator
-    line is the immediately preceding one in this repo).
+    line is the immediately preceding one in this repo). A missing file, invalid
+    UTF-8 or a syntax error is reported as a failure instead of raising, so a
+    corrupted server never dumps a traceback.
     """
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    try:
+        src = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        if rep is not None:
+            rep.bad(section, f"cannot read {path.name}: {exc.__class__.__name__}")
+        return []
+    try:
+        tree = ast.parse(src, filename=str(path))
+    except SyntaxError as exc:
+        if rep is not None:
+            rep.bad(
+                section,
+                f"{path.name}: invalid Python syntax at line {exc.lineno}: {exc.msg}",
+            )
+        return []
     found: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -173,17 +189,43 @@ def ast_tool_decorations(path: Path) -> list[tuple[str, int]]:
     return found
 
 
-def tool_name_constants(path: Path) -> list[tuple[str, str]]:
-    """*_TOOL_NAME = "name" constant (same source of truth as the decorators)."""
-    src = path.read_text(encoding="utf-8")
+def tool_name_constants(rep: "Report | None", section: str, path: Path) -> list[tuple[str, str]]:
+    """*_TOOL_NAME = "name" constant (same source of truth as the decorators).
+
+    A missing file or invalid UTF-8 is reported as a failure instead of raising.
+    """
+    try:
+        src = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        if rep is not None:
+            rep.bad(section, f"cannot read {path.name}: {exc.__class__.__name__}")
+        return []
     return re.findall(
         r'^([A-Z][A-Z0-9_]*_TOOL_NAME)\s*=\s*["\']([^"\']+)["\']', src, re.M
     )
 
 
-def module_imports_mcp(path: Path) -> bool:
-    """True if the module imports the `mcp` SDK (by AST, without importing it)."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def module_imports_mcp(rep: "Report | None", section: str, path: Path) -> bool | None:
+    """True if the module imports the `mcp` SDK (by AST, without importing it).
+
+    None means the file could not be read or parsed: the caller reports the
+    failure instead of a traceback.
+    """
+    try:
+        src = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        if rep is not None:
+            rep.bad(section, f"cannot read {path.name}: {exc.__class__.__name__}")
+        return None
+    try:
+        tree = ast.parse(src, filename=str(path))
+    except SyntaxError as exc:
+        if rep is not None:
+            rep.bad(
+                section,
+                f"{path.name}: invalid Python syntax at line {exc.lineno}: {exc.msg}",
+            )
+        return None
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             if any(
@@ -360,9 +402,30 @@ def check_tools(rep: Report) -> None:
         rep.bad(section, "the MCP servers are missing")
         return
 
-    kali_tools = ast_tool_decorations(KALI_SERVER)
-    vuln_tools = ast_tool_decorations(VULN_SERVER)
-    kali_consts = tool_name_constants(KALI_SERVER)
+    kali_tools = ast_tool_decorations(rep, section, KALI_SERVER)
+    vuln_tools = ast_tool_decorations(rep, section, VULN_SERVER)
+    # The constants live in the same file as the decorators: reading them again
+    # would duplicate the same failure when that file is unreadable.
+    kali_consts = (
+        [] if not kali_tools else tool_name_constants(rep, section, KALI_SERVER)
+    )
+
+    # A file that could not be read or parsed is already a reported failure; the
+    # count checks below would only add noise.
+    if not kali_tools:
+        # The kali file could not be read/parsed (already reported): only the vuln
+        # count check still makes sense.
+        if len(vuln_tools) == 6:
+            rep.ok(
+                section,
+                f"vulnerator_mcp_server.py: 6 @mcp.tool by AST ({[n for n, _ in vuln_tools]})",
+            )
+        else:
+            rep.bad(
+                section,
+                f"vulnerator_mcp_server.py: {len(vuln_tools)} @mcp.tool by AST (expected 6)",
+            )
+        return
 
     if len(kali_tools) == 21:
         rep.ok(
@@ -478,8 +541,8 @@ def check_map(rep: Report) -> None:
         return
     a_rows, b_rows, c_rows = _annex_tables(text)
 
-    kali_ast = dict(ast_tool_decorations(KALI_SERVER))
-    vuln_ast = dict(ast_tool_decorations(VULN_SERVER))
+    kali_ast = dict(ast_tool_decorations(rep, section, KALI_SERVER))
+    vuln_ast = dict(ast_tool_decorations(rep, section, VULN_SERVER))
 
     annex_kali = {
         name: (path, line)
@@ -492,7 +555,11 @@ def check_map(rep: Report) -> None:
         if path.startswith("docker/mcp/")
     }
 
-    if set(annex_kali) == set(kali_ast):
+    if not kali_ast:
+        # kali could not be read/parsed (already reported): the "extra" list of the
+        # annex comparison would only repeat that same failure.
+        rep.bad(section, "Annex A kali: the server could not be parsed")
+    elif set(annex_kali) == set(kali_ast):
         bad_lines = [n for n, (p, l) in annex_kali.items() if kali_ast[n] != l]
         if not bad_lines:
             rep.ok(
@@ -506,7 +573,9 @@ def check_map(rep: Report) -> None:
         extra = sorted(set(annex_kali) - set(kali_ast))
         rep.bad(section, f"Annex A kali: missing={missing} extra={extra}")
 
-    if set(annex_vuln) == set(vuln_ast):
+    if not vuln_ast:
+        rep.bad(section, "Annex A vulnerator-mcp: the server could not be parsed")
+    elif set(annex_vuln) == set(vuln_ast):
         bad_lines = [n for n, (p, l) in annex_vuln.items() if vuln_ast[n] != l]
         if not bad_lines:
             rep.ok(
@@ -634,17 +703,23 @@ def check_imports(rep: Report) -> None:
 
     # 1) Only place that may import the SDK: the two control planes.
     offenders = []
+    unreadable = []
     for path in sorted((ROOT / "docker").rglob("*.py")):
         if path in (KALI_SERVER, VULN_SERVER):
             continue
-        if module_imports_mcp(path):
+        imports = module_imports_mcp(rep, section, path)
+        if imports is None:
+            unreadable.append(str(path.relative_to(ROOT)))
+        elif imports:
             offenders.append(str(path.relative_to(ROOT)))
-    if not offenders:
+    if unreadable:
+        rep.bad(section, f"modules that could not be parsed: {unreadable}")
+    if not offenders and not unreadable:
         rep.ok(
             section,
             "only kali_mcp_server.py and vulnerator_mcp_server.py import the 'mcp' SDK",
         )
-    else:
+    elif offenders:
         rep.bad(
             section, f"modules importing 'mcp' outside the servers: {offenders}"
         )
@@ -653,6 +728,14 @@ def check_imports(rep: Report) -> None:
     missing = [str(p.relative_to(ROOT)) for p in SDK_FREE_IMPORT if not p.exists()]
     if missing:
         rep.bad(section, f"missing SDK-free modules: {missing}")
+        return
+    broken = [p for p in SDK_FREE_IMPORT if module_imports_mcp(None, section, p) is None]
+    if broken:
+        rep.bad(
+            section,
+            f"SDK-free modules that could not be parsed: "
+            f"{[str(p.relative_to(ROOT)) for p in broken]}",
+        )
         return
 
     script = (
@@ -727,14 +810,14 @@ def check_tests(rep: Report, strict_suites: bool = False) -> None:
     any_failed = False
     ran = 0
     absent = 0
+    # A missing suite is always a failure: the local runner must see exactly what
+    # the CI gate sees, so there is no permissive fallback. The absent count stays
+    # in the summary for readability.
     for suite, deps in SUITES:
         if not (ROOT / suite).is_dir():
             absent += 1
-            if strict_suites:
-                any_failed = True
-                rep.bad(section, f"{suite}: missing suite directory")
-            else:
-                rep.warn(section, f"{suite}: does not exist in this worktree")
+            any_failed = True
+            rep.bad(section, f"{suite}: missing suite directory")
             continue
         ran += 1
         rc, counts, output = run_suite(suite, deps, uv)
@@ -753,11 +836,8 @@ def check_tests(rep: Report, strict_suites: bool = False) -> None:
             any_failed = True
             rep.bad(section, f"{suite}: collection error ({summary}, exit 2)")
         elif rc == 5:
-            if strict_suites:
-                any_failed = True
-                rep.bad(section, f"{suite}: no tests collected (exit 5)")
-            else:
-                rep.warn(section, f"{suite}: no tests collected (exit 5)")
+            any_failed = True
+            rep.bad(section, f"{suite}: no tests collected (exit 5)")
         else:
             any_failed = True
             rep.bad(section, f"{suite}: exit {rc} ({summary})")
@@ -774,7 +854,6 @@ def check_tests(rep: Report, strict_suites: bool = False) -> None:
         rep.ok(section, f"{ran} suites pass; {absent} suite(s) absent in this branch")
     else:
         rep.ok(section, f"all {ran} suites pass")
-
 
 # --------------------------------------------------------------------------- main
 

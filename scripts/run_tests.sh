@@ -7,6 +7,9 @@
 # contaminates with mcp 2.3.0) and from the worktree root. Aggregates the exit
 # codes and prints totals. NEVER uses --import-mode=importlib.
 #
+# A suite that does not exist is a FAILURE (exit 1), mirroring
+# `scripts/smoke.py --strict-suites`: the local runner must see what CI sees.
+#
 # Per-suite dependencies: resolved with uv in an ephemeral environment (--no-project),
 # because the system python has neither pytest nor the component SDKs.
 
@@ -52,12 +55,14 @@ for entry in "${SUITES[@]}"; do
   suite="${entry%%|*}"
   deps="${entry#*|}"
 
-  # `scripts/tests` is added by feat/base-linters: if it does not exist yet, it is
-  # skipped with ⚠️ (a missing suite is not a red suite).
+  # A missing suite is a FAILURE, exactly what CI enforces with
+  # `--strict-suites`: the local runner must not report a green run while a suite
+  # is absent. It is counted in the summary but never in `ran`.
   if [ ! -d "$suite" ]; then
     echo "=== $suite ==="
-    echo "⚠️  $suite: does not exist in this branch (added by feat/base-linters); skipped"
+    echo "❌ $suite: missing suite directory"
     absent_suites=$((absent_suites + 1))
+    failed_suites=$((failed_suites + 1))
     echo
     continue
   fi
@@ -90,8 +95,8 @@ echo "suites absent  : $absent_suites"
 echo "suites failing : $failed_suites"
 echo "aggregated exit code: $total_rc"
 
-if [ "$failed_suites" -ne 0 ]; then
-  echo "⚠️  there are failing suites; dump each suite's summary"
+if [ "$failed_suites" -ne 0 ] || [ "$absent_suites" -ne 0 ]; then
+  echo "❌ $failed_suites failing, $absent_suites absent; the gate is red"
   exit 1
 fi
 

@@ -15,7 +15,7 @@
 #   4. correctness type-check (mypy)
 #      -> the dedicated step (pure logic files)
 #   5. the 6 suites
-#      -> `python scripts/smoke.py --quick`
+#      -> `python scripts/smoke.py --quick --strict-suites`
 #
 # The legacy pipeline (`security.yml`, `pr-checks.yml`) and `pre-commit run --all-files`
 # remain INFORMATIVE until the `chore(style)` that reformats the files black/isort/
