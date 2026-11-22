@@ -5,9 +5,11 @@ Deterministic guard over every UTF-8 text file: it flags lines containing an
 explicit set of Spanish/non-English characters by codepoint, so emoji and
 box-drawing characters never match. Known debt is sealed in
 ``.language.baseline.json`` keyed by SHA-256 of the NFC-normalized line
-content. A detected line whose hash is not in the baseline fails, and a
-baseline entry that no longer appears fails until ``--update-baseline``
-records the new state.
+content. Lines are normalized before matching, so NFD and NFC spellings are
+detected identically. A detected line whose hash is not in the baseline fails,
+and a baseline entry whose observed count differs from the recorded count
+(fewer occurrences, or more than were sealed) fails until
+``--update-baseline`` records the new state.
 
 Exit: ``0`` clean, ``1`` findings or stale baseline, ``2`` usage error.
 """
@@ -88,8 +90,11 @@ def scan_file(root: Path, path: Path) -> list[Finding]:
     rel = path.relative_to(root).as_posix()
     findings: list[Finding] = []
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if NON_ENGLISH_RE.search(line):
-            findings.append(Finding(rel, lineno, line, line_digest(line)))
+        # Normalize before matching: NFD spellings (e.g. "n" + combining tilde)
+        # must be flagged exactly like their NFC equivalent.
+        normalized = unicodedata.normalize(NORMALIZATION, line)
+        if NON_ENGLISH_RE.search(normalized):
+            findings.append(Finding(rel, lineno, line, line_digest(normalized)))
     return findings
 
 
@@ -125,19 +130,24 @@ def baseline_metadata_matches(baseline: dict) -> bool:
 def evaluate(
     findings: list[Finding], baseline: dict
 ) -> tuple[list[Finding], list[tuple[str, int, str]]]:
-    """Returns (new findings, stale baseline entries)."""
+    """Returns (new findings, baseline count mismatches).
+
+    A mismatch is reported when the observed count of a baselined line differs
+    from the recorded count in either direction: fewer occurrences mean the
+    baseline is stale, more mean the line was duplicated beyond the seal.
+    """
     counts = Counter(finding.digest for finding in findings)
     entries = baseline["entries"]
 
     new = [finding for finding in findings if finding.digest not in entries]
 
-    stale: list[tuple[str, int, str]] = []
+    mismatches: list[tuple[str, int, str]] = []
     for digest, meta in sorted(entries.items()):
         expected = int(meta["count"])
         actual = counts.get(digest, 0)
-        if actual < expected:
-            stale.append((digest, expected - actual, str(meta.get("first", ""))))
-    return new, stale
+        if actual != expected:
+            mismatches.append((digest, actual - expected, str(meta.get("first", ""))))
+    return new, mismatches
 
 
 def render_baseline(findings: list[Finding]) -> dict:
@@ -225,16 +235,19 @@ def main(argv: list[str] | None = None) -> int:
             findings.extend(scan_file(target.parent, target))
     findings.sort(key=lambda item: (item.path, item.lineno, item.digest))
 
-    new, stale = evaluate(findings, baseline)
+    new, mismatches = evaluate(findings, baseline)
     for finding in new:
         print(f"{finding.path}:{finding.lineno}: | {finding.text.strip()}")
-    for digest, missing, where in stale:
-        print(f"stale baseline entry: {digest} (-{missing}) last seen {where}")
+    for digest, delta, where in mismatches:
+        if delta < 0:
+            print(f"stale baseline entry: {digest} ({delta}) last seen {where}")
+        else:
+            print(f"baseline count exceeded: {digest} (+{delta}) last seen {where}")
 
-    if new or stale:
+    if new or mismatches:
         print(
             f"{len(new)} new non-English line(s), "
-            f"{len(stale)} stale baseline entr{'y' if len(stale) == 1 else 'ies'}"
+            f"{len(mismatches)} baseline count mismatch(es)"
         )
         return 1
 

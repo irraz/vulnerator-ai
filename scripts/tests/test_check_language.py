@@ -35,6 +35,19 @@ def test_spanish_markers_match():
         assert guard.NON_ENGLISH_RE.search(sample) is not None, sample
 
 
+def test_nfd_line_is_detected_like_nfc(tmp_path):
+    nfd = "an\u0303adir"
+    nfc = guard.unicodedata.normalize("NFC", nfd)
+    assert nfd != nfc
+    assert guard.line_digest(nfd) == guard.line_digest(nfc)
+
+    path = tmp_path / "nfd.txt"
+    path.write_text(nfd + "\n", encoding="utf-8")
+    findings = guard.scan_file(tmp_path, path)
+    assert len(findings) == 1
+    assert findings[0].digest == guard.line_digest(nfc)
+
+
 def test_new_finding_fails_the_guard():
     baseline = {
         "version": guard.BASELINE_VERSION,
@@ -60,6 +73,26 @@ def test_stale_baseline_entry_fails_the_guard():
     assert new == []
     assert len(stale) == 1
     assert stale[0][0] == orphan.digest
+    assert stale[0][1] == -1
+
+
+def test_duplicated_baselined_line_fails_the_guard(tmp_path):
+    path = tmp_path / "dup.txt"
+    path.write_text(SPANISH_SAMPLE + "\n" + SPANISH_SAMPLE + "\n", encoding="utf-8")
+    findings = guard.scan_file(tmp_path, path)
+    baseline = {
+        "version": guard.BASELINE_VERSION,
+        "regex": guard.NON_ENGLISH_RE.pattern,
+        "normalization": guard.NORMALIZATION,
+        "entries": {
+            guard.line_digest(SPANISH_SAMPLE): {"count": 1, "first": "dup.txt:1"}
+        },
+    }
+    new, stale = guard.evaluate(findings, baseline)
+    assert new == []
+    assert len(stale) == 1
+    assert stale[0][0] == guard.line_digest(SPANISH_SAMPLE)
+    assert stale[0][1] == 1
 
 
 def test_rendered_baseline_accepts_the_same_findings():
