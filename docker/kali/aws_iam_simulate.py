@@ -1,27 +1,27 @@
-"""Script de simulación de permisos efectivos IAM (read-only).
+"""IAM effective-permission simulation script (read-only).
 
-BINARIO determinista que corre en el venv del servidor Kali (boto3 llega vía Prowler). NO
+Deterministic BINARY that runs in the Kali server venv (boto3 comes via Prowler). It does NOT
 decide nada: dado UN principal IAM concreto, comprueba con ``iam:SimulatePrincipalPolicy``
 (API AWS **READ-ONLY**: NO modifica estado) si ese principal PUEDE ejecutar un conjunto FIJO
-de acciones de privesc clásicas, y escribe UN único documento JSON en la ruta de ``--out``.
+of classic privesc actions, and writes ONE single JSON document to the ``--out`` path.
 El runner STDLIB (``aws_simulate.py``) lo invoca como subproceso con ``tool_streaming``
 (kill de grupo/timeout, logs al ring).
 
-Es el ANÁLOGO per-candidato de ``aws_iam_enum.py`` (que es recon account-wide): aquí se
-confirma la EXPLOTABILIDAD efectiva de un principal, más fuerte que la mera enumeración.
+It is the per-candidate ANALOG of ``aws_iam_enum.py`` (which is account-wide recon): here
+the effective EXPLOITABILITY of a principal is confirmed, stronger than mere enumeration.
 
 Disciplina de seguridad:
-  - READ-ONLY: ``SimulatePrincipalPolicy`` SIMULA la evaluación de políticas; NO ejecuta las
+  - READ-ONLY: ``SimulatePrincipalPolicy`` SIMULATES policy evaluation; it does NOT execute the
     acciones ni cambia el estado de la cuenta. Las credenciales read-only vienen del entorno
     del contenedor (igual que Prowler/ScoutSuite).
   - FAIL-CLOSED: si el propio ``SimulatePrincipalPolicy`` devuelve ``AccessDenied`` (o cualquier
     otro error del cliente), NO se revienta con un traceback: se escribe un JSON con un ``error``
-    claro y ``simulation`` vacío, y el runner lo surfacea como fallo (dato NO confiable).
+    clear and ``simulation`` empty, and the runner surfaces it as a failure (UNTRUSTED data).
 
-THIN a propósito (KISS): sin lógica que pida test unitario; la mecánica testeable
-(construcción del comando, ejecución, lectura de salida, diagnóstico) vive en
+Deliberately THIN (KISS): no logic that would need a unit test; the testable mechanics
+(command construction, execution, output reading, diagnostics) live in
 ``aws_simulate.py`` (STDLIB puro). Este fichero solo se valida con ``ast.parse`` (no se
-importa en los tests: boto3 no está en el venv de dev).
+imported in tests: boto3 is not in the dev venv).
 """
 
 from __future__ import annotations
@@ -32,11 +32,11 @@ import sys
 
 import boto3  # provisto por el venv del servidor (Prowler lo arrastra)
 
-# Conjunto FIJO de acciones de PRIVESC clásicas de IAM que se simulan por principal. Son las
+# FIXED set of classic IAM PRIVESC actions simulated per principal. These are the
 # primitivas con las que un principal con permisos excesivos escala a admin (asumir roles,
-# pasar roles a servicios, crear credenciales, adjuntar/escribir políticas, versionar una
-# política gestionada, reescribir la trust policy de un rol). Es un conjunto CERRADO y
-# documentado: la técnica declara expectativas acotadas, no un barrido arbitrario.
+# passing roles to services, creating credentials, attaching/writing policies, versioning a
+# managed policy, rewriting a role's trust policy). It is a CLOSED set and
+# documented: the technique declares scoped expectations, not an arbitrary sweep.
 PRIVESC_ACTIONS: tuple[str, ...] = (
     "sts:AssumeRole",
     "iam:PassRole",
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         dest="principal_arn",
         help="ARN del principal IAM a simular (PolicySourceArn)",
     )
-    parser.add_argument("--out", required=True, help="Fichero donde escribir el JSON único")
+    parser.add_argument("--out", required=True, help="File to write the single JSON to")
     args = parser.parse_args(argv)
 
     session = boto3.session.Session()

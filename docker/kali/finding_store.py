@@ -1,25 +1,25 @@
 """Registro estructurado de hallazgos por engagement de `kali-mcp` (STDLIB PURA).
 
 El store de evidencia del bucle OODA. Hoy la evidencia vive solo en el historial de la
-conversación (efímero, se pierde con la higiene de contexto por subagentes y con el
-`down -v` del perfil). Este módulo le da un registro durable, consultable y descargable:
-un fichero JSONL por engagement, con un hallazgo por línea.
+conversation (ephemeral, lost with subagent context hygiene and with the
+`down -v` of the profile). This module gives it a durable, queryable, downloadable record:
+a JSONL file per engagement, with one finding per line.
 
-Dónde vive: sobre el plano de artefactos existente (``/artifacts``, el mismo que sirve
-``artifact_http.py`` en :8901), NO en el estado de Hermes. Así sobrevive a la naturaleza
-efímera del perfil y es un artefacto descargable. El fichero es
-``<engagement_id>/findings.jsonl`` bajo la raíz del staging — reutiliza el confinamiento
+Where it lives: on the existing artifact plane (``/artifacts``, the same one served by
+``artifact_http.py`` on :8901), NOT in Hermes state. Thus it survives the
+ephemeral nature of the profile and is a downloadable artifact. The file is
+``<engagement_id>/findings.jsonl`` under the staging root — reusing the confinement
 de rutas de ``artifact_store`` (sin ``..``/separadores) para que un ``engagement_id``
 manipulado no escape del directorio.
 
-Por qué un módulo aparte, igual que ``artifact_store.py``/``tool_streaming.py``:
-``kali_mcp_server.py`` importa ``mcp``/``anyio`` (no están en el venv de dev). Esta
-mecánica usa SOLO la librería estándar, así se cubre con tests sin el SDK. Las tools MCP
+Why a separate module, like ``artifact_store.py``/``tool_streaming.py``:
+``kali_mcp_server.py`` imports ``mcp``/``anyio`` (not in the dev venv). This
+mechanism uses ONLY the standard library, so it is covered by tests without the SDK. The MCP tools
 ``record_finding``/``read_findings`` son una capa fina sobre ``append``/``read``.
 
 Disciplina de seguridad: la evidencia que se guarda (``evidence.output``) sigue siendo
 DATO NO CONFIABLE al releerla — se razona sobre ella, nunca se obedecen instrucciones
-embebidas (prompt injection). Aquí se PERSISTE verbatim; nunca se interpreta.
+embedded (prompt injection). Here it is PERSISTED verbatim; it is never interpreted.
 """
 
 from __future__ import annotations
@@ -33,19 +33,19 @@ from typing import Any
 
 import artifact_store
 
-# Nombre canónico del fichero de hallazgos dentro del directorio del engagement.
+# Canonical name of the findings file inside the engagement directory.
 FINDINGS_NAME = "findings.jsonl"
 
-# Estados alineados con la disciplina "hipótesis vs. hallazgo confirmado" del SOUL.md.
+# States aligned with the "hypothesis vs. confirmed finding" discipline of SOUL.md.
 VALID_STATES = ("hypothesis", "partial", "confirmed", "discarded")
 
 # Fases del bucle OODA (etiqueta libre si no encaja ninguna).
 VALID_PHASES = ("observe", "orient", "decide", "act")
 
-# Buckets canónicos de severidad del hallazgo (OPCIONAL). Es el contrato EXACTO que el
+# Canonical severity buckets of a finding (OPTIONAL). It is the EXACT contract that the
 # plugin privado CTEM consume para ordenar los findings de forma fiable: clave `severity`
-# de primer nivel, string en minúsculas, uno de estos cinco y solo estos cinco. Si el
-# finding no la trae, el consumidor cae a su derivación best-effort del título — por eso
+# top level, lowercase string, one of these five and only these five. If the
+# finding does not include it, the consumer falls back to best-effort derivation from the title — that is why
 # el campo es opcional y retrocompatible (no se exige nunca).
 VALID_SEVERITIES = ("critical", "high", "medium", "low", "info")
 
@@ -56,7 +56,7 @@ _MIN_EVIDENCE_OUTPUT_LEN = 16
 
 
 class FindingStoreError(ValueError):
-    """Entrada inválida para el store (fail-closed; no se escribe nada)."""
+    """Invalid input for the store (fail-closed; nothing is written)."""
 
 
 def _now_iso() -> str:
@@ -68,8 +68,8 @@ def _findings_path(engagement_id: str) -> Path:
     """Ruta CONFINADA del JSONL de hallazgos del engagement (reutiliza el confinamiento).
 
     ``artifact_store.resolve`` valida ``engagement_id``/``FINDINGS_NAME`` (sin traversal
-    ni separadores) y comprueba que la ruta cae bajo la raíz del staging. Un
-    ``engagement_id`` inseguro levanta ``ValueError`` ahí.
+    nor separators) and checks that the path falls under the staging root. An
+    unsafe ``engagement_id`` raises ``ValueError`` there.
     """
     return artifact_store.resolve(engagement_id, FINDINGS_NAME)
 
@@ -78,7 +78,7 @@ def _validate_confirmed_evidence(evidence: Any) -> None:
     """Exige evidencia REPRODUCIBLE para un hallazgo ``confirmed`` (fail-closed).
 
     Un hallazgo confirmado tiene que poder CONTRASTARSE: quien lea el informe debe poder
-    re-ejecutar el paso y ver lo mismo. Por eso aquí se rechaza, para ``state=confirmed``,
+    re-run the step and see the same thing. That is why it is rejected here, for ``state=confirmed``,
     una evidencia que no permita esa reproduccion. Se aceptan DOS formas:
 
       1. ``command`` + ``output``: el comando EXACTO re-ejecutable (el argv tal cual se paso
@@ -94,7 +94,7 @@ def _validate_confirmed_evidence(evidence: Any) -> None:
     """
     if not isinstance(evidence, dict) or not evidence:
         raise FindingStoreError(
-            "finding 'confirmed' inválido: requiere 'evidence' reproducible "
+            "invalid 'confirmed' finding: requires reproducible 'evidence' "
             "('command'+'output' verbatim, o 'artifact_ref'). No se admite confirmar sin evidencia."
         )
 
@@ -106,13 +106,13 @@ def _validate_confirmed_evidence(evidence: Any) -> None:
     output = evidence.get("output")
     if not isinstance(command, str) or not command.strip():
         raise FindingStoreError(
-            "finding 'confirmed' inválido: 'evidence.command' debe ser el comando EXACTO "
-            "re-ejecutable (el argv tal cual se pasó a kali_run), no una narración."
+            "invalid 'confirmed' finding: 'evidence.command' must be the EXACT command "
+            "re-runnable (the argv exactly as passed to kali_run), not a narrative."
         )
     if not isinstance(output, str) or len(output.strip()) < _MIN_EVIDENCE_OUTPUT_LEN:
         raise FindingStoreError(
-            "finding 'confirmed' inválido: 'evidence.output' debe ser la salida VERBATIM del "
-            "comando (request/response crudos), no un resumen; mínimo %d caracteres."
+            "invalid 'confirmed' finding: 'evidence.output' must be the VERBATIM output of the "
+            "command (raw request/response), not a summary; minimum %d characters."
             % _MIN_EVIDENCE_OUTPUT_LEN
         )
 
@@ -122,48 +122,48 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
 
     Reglas (fail-closed, no se escribe nada si no se cumplen):
       - ``finding`` es un dict.
-      - ``title`` no vacío (resumen humano del hallazgo).
+      - ``title`` non-empty (human-readable finding summary).
       - ``state`` ∈ VALID_STATES.
       - ``phase`` ∈ VALID_PHASES si viene (se tolera ausente/libre, se guarda verbatim).
-      - ``severity`` ∈ VALID_SEVERITIES si viene (OPCIONAL; ausente es válido y el
+      - ``severity`` ∈ VALID_SEVERITIES if present (OPTIONAL; absence is valid and the
         consumidor deriva best-effort). Un valor fuera de los cinco buckets se rechaza.
       - si ``state`` es ``confirmed``: ``evidence`` debe ser REPRODUCIBLE (ver
         ``_validate_confirmed_evidence``). Un hallazgo sin evidencia contrastable no puede
-        marcarse confirmado — bájalo a ``partial``/``hypothesis``.
+        be marked confirmed — downgrade it to ``partial``/``hypothesis``.
 
     Rellena ``id`` (uuid4 hex si falta) y ``recorded_at`` (timestamp del servidor,
-    autoritativo: NO se confía en un timestamp provisto por el agente). El resto de
+    authoritative: a timestamp provided by the agent is NOT trusted). The rest of
     campos (target, technique_id, severity, category, evidence, confidence, change) se
     guardan tal cual si vienen, para no acoplar el esquema a un consumidor concreto.
     """
     if not isinstance(finding, dict):
-        raise FindingStoreError("finding inválido: se espera un objeto JSON.")
+        raise FindingStoreError("invalid finding: expected a JSON object.")
 
     title = finding.get("title")
     if not isinstance(title, str) or not title.strip():
-        raise FindingStoreError("finding inválido: 'title' no vacío es obligatorio.")
+        raise FindingStoreError("invalid finding: non-empty 'title' is required.")
 
     state = finding.get("state")
     if state not in VALID_STATES:
         raise FindingStoreError(
-            "finding inválido: 'state' debe ser uno de %r (recibido %r)."
+            "invalid finding: 'state' must be one of %r (got %r)."
             % (list(VALID_STATES), state)
         )
 
     phase = finding.get("phase")
     if phase is not None and phase not in VALID_PHASES:
         raise FindingStoreError(
-            "finding inválido: 'phase' debe ser uno de %r si se indica (recibido %r)."
+            "invalid finding: 'phase' must be one of %r if provided (got %r)."
             % (list(VALID_PHASES), phase)
         )
 
-    # Severidad OPCIONAL y retrocompatible: ausente es válido (el consumidor deriva). Si
-    # viene, DEBE ser uno de los cinco buckets canónicos en minúscula — si no, fail-closed
+    # OPTIONAL, backward-compatible severity: absence is valid (the consumer derives). If
+    # present, it MUST be one of the five canonical lowercase buckets — otherwise fail-closed
     # (no se guarda "a medias"). Si valida, se persiste verbatim junto al resto de campos.
     severity = finding.get("severity")
     if severity is not None and severity not in VALID_SEVERITIES:
         raise FindingStoreError(
-            "finding inválido: 'severity' debe ser uno de %r si se indica (recibido %r)."
+            "invalid finding: 'severity' must be one of %r if provided (got %r)."
             % (list(VALID_SEVERITIES), severity)
         )
 
@@ -172,7 +172,7 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
         _validate_confirmed_evidence(finding.get("evidence"))
 
     # Copia superficial + campos autoritativos del servidor. El id del agente se respeta
-    # si viene bien formado; si no, se genera (nunca se escribe una línea sin id).
+    # if it comes well-formed; otherwise it is generated (a line is never written without an id).
     record = dict(finding)
     fid = record.get("id")
     if not isinstance(fid, str) or not fid.strip():
@@ -180,15 +180,15 @@ def _normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
     record["id"] = fid
     record["title"] = title.strip()
     record["state"] = state
-    # recorded_at lo pone SIEMPRE el servidor (no se confía en el del agente).
+    # recorded_at is ALWAYS set by the server (the agent's value is not trusted).
     record["recorded_at"] = _now_iso()
     return record
 
 
 def append(engagement_id: str, finding: dict[str, Any]) -> dict[str, Any]:
-    """Añade un hallazgo normalizado al JSONL del engagement y devuelve el registro.
+    """Adds a normalized finding to the engagement JSONL and returns the record.
 
-    Append atómico a nivel de línea: se serializa el registro a una ÚNICA línea JSON
+    Line-level atomic append: the record is serialized to a SINGLE JSON line
     (sin saltos internos) y se escribe con ``O_APPEND`` en una sola llamada ``write``,
     de modo que appends concurrentes de distintos workers no se entrelacen. Crea el
     directorio del engagement si no existe.
@@ -200,7 +200,7 @@ def append(engagement_id: str, finding: dict[str, Any]) -> dict[str, Any]:
     path = _findings_path(engagement_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
-    # O_APPEND garantiza que cada write se posiciona al final de forma atómica; una línea
+    # O_APPEND guarantees each write is positioned at the end atomically; a line
     # entera en un solo write evita el entrelazado entre escritores concurrentes.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     try:
@@ -213,22 +213,22 @@ def append(engagement_id: str, finding: dict[str, Any]) -> dict[str, Any]:
 def read(
     engagement_id: str, cursor: int = 0, limit: int | None = None
 ) -> dict[str, Any]:
-    """Lee los hallazgos del engagement PAGINADOS por índice de línea.
+    """Reads the engagement findings PAGINATED by line index.
 
-    Patrón cursor idéntico al de ``tool_streaming.read_findings``: ``cursor`` es el
-    índice 0-based del primer hallazgo a devolver; se devuelven hasta ``limit`` (o todos
-    los restantes si ``limit`` es ``None``). Las líneas ilegibles (JSON corrupto) se
+    Cursor pattern identical to ``tool_streaming.read_findings``: ``cursor`` is the
+    0-based index of the first finding to return; up to ``limit`` are returned (or all
+    remaining if ``limit`` is ``None``). Unreadable lines (corrupt JSON) are
     SALTAN sin reventar — el store es best-effort en lectura.
 
     Returns:
         ``{"findings": [...], "next_cursor": int, "done": bool, "total": int}``. Un
-        ``engagement_id`` sin fichero devuelve página vacía con ``done=True`` y
+        an ``engagement_id`` without a file returns an empty page with ``done=True`` and
         ``total=0`` (no revienta).
     """
     try:
         path = _findings_path(engagement_id)
     except ValueError:
-        # engagement_id inseguro: no hay nada que leer (fail-closed en lectura también).
+        # unsafe engagement_id: nothing to read (fail-closed on reads too).
         return {"findings": [], "next_cursor": cursor, "done": True, "total": 0}
 
     if not path.is_file():
@@ -243,7 +243,7 @@ def read(
             try:
                 doc = json.loads(raw)
             except json.JSONDecodeError:
-                continue  # línea corrupta: se salta, no se interpreta
+                continue  # corrupt line: skipped, not interpreted
             if isinstance(doc, dict):
                 records.append(doc)
 

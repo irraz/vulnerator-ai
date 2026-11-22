@@ -1,20 +1,20 @@
 """Primitivas de *streaming* de salida de tools para `kali-mcp` (STDLIB PURA).
 
-Por qué un módulo separado (testeabilidad):
-  `docker/kali/kali_mcp_server.py` importa `mcp`/`anyio` en el top del módulo y
-  esas dependencias NO están en el venv de desarrollo. Para poder cubrir la lógica
-  de streaming con tests unitarios SIN el SDK, toda la mecánica vive aquí usando
-  SOLO la librería estándar (sin `mcp`, sin `anyio`).
+Why a separate module (testability):
+  `docker/kali/kali_mcp_server.py` imports `mcp`/`anyio` at module top and
+  those dependencies are NOT in the dev venv. To cover the logic
+  of streaming with unit tests WITHOUT the SDK, all mechanics live here using
+  ONLY the standard library (no `mcp`, no `anyio`).
 
-Qué provee:
-  - Un *ring buffer* por `execution_id` (thread-safe) que acumula líneas de salida
+What it provides:
+  - A *ring buffer* per `execution_id` (thread-safe) that accumulates output lines
     con un `seq` creciente, para lectura incremental por cursor.
   - `run_tool_streaming(cmd, execution_id, timeout, ...)`: lanza un subproceso,
-    vuelca su stdout/stderr línea a línea al ring en vivo, aplica un timeout y, al
-    expirar, mata el GRUPO de procesos completo (sin huérfanos).
+    dumps its stdout/stderr line by line to the live ring, applies a timeout, and on
+    expiry, kills the ENTIRE process GROUP (no orphans).
 
-Disciplina de seguridad: la salida de la tool es DATO NO CONFIABLE. Aquí se TRANSPORTA
-verbatim (se trocea en líneas y se guarda tal cual); NUNCA se interpreta ni se ejecuta
+Security discipline: tool output is UNTRUSTED DATA. Here it is TRANSPORTED
+verbatim (split into lines and stored as-is); it is NEVER interpreted or executed
 nada derivado de ella.
 """
 
@@ -30,8 +30,8 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-# Tamaño máximo del ring por ejecución. Acota la memoria: un escaneo largo con
-# mucho verbose no crece sin límite; sólo se retienen las últimas N líneas.
+# Maximum ring size per execution. Bounds memory: a long scan with
+# much verbosity does not grow without limit; only the last N lines are retained.
 RING_MAXLEN = 2000
 
 
@@ -41,7 +41,7 @@ def _now_iso() -> str:
 
 
 class _Execution:
-    """Estado de una ejecución: buffer circular de líneas + contador de seq.
+    """State of an execution: circular buffer of lines + seq counter.
 
     Thread-safe: un lock protege el deque, el contador `_seq` y la bandera `done`,
     porque el/los hilo(s) lector(es) del subproceso escriben mientras el event loop
@@ -55,9 +55,9 @@ class _Execution:
         self._seq = 0
         self._done = False
         self._lock = threading.Lock()
-        # Sink OPCIONAL de salida COMPLETA (auditoría): un file handle de texto en modo
-        # append. El ring está capado a RING_MAXLEN (protección de contexto del LLM); el
-        # sink NO está capado, así captura el stdout/stderr ÍNTEGRO. None = sin sink
+        # OPTIONAL COMPLETE-output sink (audit): a text file handle in append
+        # mode. The ring is capped at RING_MAXLEN (LLM context protection); the
+        # sink is NOT capped, so it captures FULL stdout/stderr. None = no sink
         # (comportamiento de siempre). Protegido por el MISMO lock que el ring para que
         # stdout/stderr de ambos pumps se serialicen en el mismo orden que en el ring.
         self._sink: Any = None
@@ -85,9 +85,9 @@ class _Execution:
                     "text": text,
                 }
             )
-            # Vuelca la MISMA línea al sink de salida completa (si hay), bajo el lock para
+            # Dumps the SAME line to the complete-output sink (if any), under the lock so as not to affect
             # preservar el orden. Best-effort: un fallo de escritura del sink NUNCA rompe
-            # la captura al ring ni la ejecución del comando.
+            # ring capture or command execution.
             if self._sink is not None:
                 try:
                     self._sink.write("[%s] %s\n" % (stream, text))
@@ -99,10 +99,10 @@ class _Execution:
             self._done = True
 
     def read(self, cursor: int) -> tuple[list[dict[str, Any]], int, bool]:
-        """Devuelve (líneas con seq > cursor, next_cursor, done).
+        """Returns (lines with seq > cursor, next_cursor, done).
 
         `next_cursor` es el mayor `seq` entregado; si no hay nada nuevo, se
-        devuelve el mismo `cursor` (página vacía, cursor sin cambios).
+        returns the same `cursor` (empty page, cursor unchanged).
         """
         with self._lock:
             page = [line for line in self._lines if line["seq"] > cursor]
@@ -110,15 +110,15 @@ class _Execution:
             return page, next_cursor, self._done
 
 
-# Registro global de ejecuciones. Un lock protege la creación/lookup del dict.
+# Global registry of executions. A lock protects dict creation/lookup.
 _executions: dict[str, _Execution] = {}
 _registry_lock = threading.Lock()
 
-# --- Registro de cancelación por execution_id -------------------------------
+# --- Cancellation registry by execution_id -------------------------------
 # Para cancelar un escaneo EN CURSO desde fuera (tool `cancel_scan`), hace falta (a) una
-# señal cooperativa y (b) una referencia al proceso vivo para matar su grupo. Separado del
-# ring (salida) y del estado: aquí sólo viven el Popen vivo y un Event de cancelación por
-# ejecución. Reutiliza el kill de grupo que ya existe (`_kill_process_group`), NO duplica
+# cooperative signal and (b) a reference to the live process to kill its group. Separate from the
+# ring (output) and the status: only the live Popen and a per-execution cancellation Event live here
+# execution. It reuses the existing group kill (`_kill_process_group`), NO duplication
 # el mecanismo.
 _procs: dict[str, "subprocess.Popen"] = {}
 _cancels: dict[str, threading.Event] = {}
@@ -126,7 +126,7 @@ _procs_lock = threading.Lock()
 
 
 def _cancel_event(execution_id: str) -> threading.Event:
-    """Devuelve (creándolo si hace falta) el Event de cancelación de la ejecución."""
+    """Returns (creating it if needed) the execution's cancellation Event."""
     with _procs_lock:
         event = _cancels.get(execution_id)
         if event is None:
@@ -136,12 +136,12 @@ def _cancel_event(execution_id: str) -> threading.Event:
 
 
 def request_cancel(execution_id: str) -> bool:
-    """Solicita cancelar una ejecución: marca el Event y mata su grupo de proceso.
+    """Requests cancellation of an execution: sets the Event and kills its process group.
 
-    Idempotente y None-safe: si la ejecución no existe o ya terminó, marca el Event
-    igualmente (por si el proceso aún no se registró) y devuelve ``False`` (no había
+    Idempotent and None-safe: if the execution does not exist or already ended, it sets the Event
+    anyway (in case the process is not registered yet) and returns ``False`` (there was no
     proceso vivo que matar). Reutiliza :func:`_kill_process_group` (SIGTERM->SIGKILL
-    sobre el grupo, sin huérfanos). Devuelve ``True`` si mató un proceso vivo.
+    on the group, no orphans). Returns ``True`` if it killed a live process.
     """
     with _procs_lock:
         event = _cancels.get(execution_id)
@@ -166,16 +166,16 @@ def _get_execution(execution_id: str) -> _Execution:
 
 
 def append(execution_id: str, stream: str, text: str) -> None:
-    """Añade una línea de salida (`stream`='stdout'|'stderr') al ring de la ejecución."""
+    """Adds an output line (`stream`='stdout'|'stderr') to the execution's ring."""
     _get_execution(execution_id).append(stream, text)
 
 
 def read(execution_id: str, cursor: int = 0) -> dict[str, Any]:
-    """Lee incrementalmente la salida de una ejecución a partir de `cursor`.
+    """Incrementally reads an execution's output starting at `cursor`.
 
     Returns:
         {"lines": [{seq, ts, stream, text}, ...], "next_cursor": int, "done": bool}
-        Para un `execution_id` desconocido devuelve página vacía y done=False.
+        For an unknown `execution_id` it returns an empty page and done=False.
     """
     with _registry_lock:
         execution = _executions.get(execution_id)
@@ -185,21 +185,21 @@ def read(execution_id: str, cursor: int = 0) -> dict[str, Any]:
     return {"lines": lines, "next_cursor": next_cursor, "done": done}
 
 
-# --- Sink de salida COMPLETA (auditoría durable) -----------------------------
-# El ring buffer está capado a RING_MAXLEN líneas (protección de contexto del LLM). Para
-# auditoría/reproducción hace falta el stdout/stderr ÍNTEGRO: estas dos funciones adjuntan
-# un fichero sink a la ejecución ANTES de arrancar el subproceso y lo cierran al terminar.
-# `_Execution.append` escribe cada línea al sink EN PARALELO al ring (mismo lock). Otros
+# --- COMPLETE output sink (durable audit) -----------------------------
+# The ring buffer is capped at RING_MAXLEN lines (LLM context protection). For
+# audit/reproduction, FULL stdout/stderr is needed: these two functions attach
+# a sink file to the execution BEFORE starting the subprocess and close it on completion.
+# `_Execution.append` writes each line to the sink IN PARALLEL with the ring (same lock). Other
 # llamadores de `run_tool_streaming` que no usen esto no cambian en absoluto (sink = None).
 
 
 def open_raw_sink(execution_id: str, path: str) -> Any:
-    """Adjunta un fichero sink de salida COMPLETA a la ejecución (best-effort).
+    """Attaches a COMPLETE-output sink file to the execution (best-effort).
 
     Abre ``path`` en modo append de texto y lo adjunta al ``_Execution`` del
-    ``execution_id`` (creándolo si no existe). A partir de aquí cada línea volcada al ring
-    se escribe TAMBIÉN al sink, sin el tope ``RING_MAXLEN``. Devuelve el handle, o ``None``
-    si no se pudo abrir (fail-open: la ejecución sigue, solo sin auditoría de salida).
+    ``execution_id`` (creating it if absent). From here on, each line dumped to the ring
+    is ALSO written to the sink, without the ``RING_MAXLEN`` cap. Returns the handle, or ``None``
+    if it could not be opened (fail-open: execution continues, just without output audit).
     """
     execution = _get_execution(execution_id)
     try:
@@ -211,7 +211,7 @@ def open_raw_sink(execution_id: str, path: str) -> Any:
 
 
 def close_raw_sink(execution_id: str) -> None:
-    """Separa y cierra (flush incluido) el sink de la ejecución. No-op si no había sink."""
+    """Detaches and closes (flush included) the execution's sink. No-op if there was none."""
     with _registry_lock:
         execution = _executions.get(execution_id)
     if execution is None:
@@ -225,9 +225,9 @@ def close_raw_sink(execution_id: str) -> None:
             pass
 
 
-# --- Estado de ejecución en segundo plano (por execution_id) -----------------
-# Registro thread-safe del ESTADO (no de la salida) de una ejecución lanzada en
-# background. Separado del ring buffer de líneas: el ring transporta la salida
+# --- Background execution status (by execution_id) -----------------
+# Thread-safe registry of the STATUS (not the output) of an execution launched in
+# the background. Separate from the line ring buffer: the ring carries output
 # verbatim (dato NO confiable), mientras que esto guarda el veredicto estructurado
 # del worker ({'status': running|done|failed, ...}) para que el cliente lo sondee.
 _status: dict[str, dict[str, Any]] = {}
@@ -247,27 +247,27 @@ def get_status(execution_id: str) -> dict[str, Any]:
         return dict(status) if status is not None else {"status": "unknown"}
 
 
-# --- Almacén + paginador de findings por execution_id ------------------------
-# Igual que el ring de líneas y el registro de estado, los findings de un escaneo
+# --- Findings store + paginator by execution_id ------------------------
+# Like the line ring and the status registry, a scan's findings
 # TERMINADO se guardan en memoria indexados por execution_id. A diferencia del
 # ring (que crece en vivo y se lee por `seq`), la lista de findings es ESTABLE y
-# COMPLETA cuando el worker termina; por eso se pagina por ÍNDICE (0-based), no
+# COMPLETE when the worker finishes; hence pagination by INDEX (0-based), not
 # por `seq`.
 #
-# Motivación (fix del límite SSE de 1 MiB): entregar TODOS los findings inline en
-# un único evento del transporte MCP streamable-http revienta cuando el payload
-# real (datos AWS reales iam+s3) supera 1 048 576 B. Se trocea en páginas MUY por
-# debajo de ese límite, igual que el patrón de lectura por cursor de los logs.
+# Motivation (fix for the 1 MiB SSE limit): delivering ALL findings inline in
+# a single event of the streamable-http MCP transport breaks when the payload
+# real (actual AWS iam+s3 data) exceeds 1,048,576 B. It is split into pages WELL
+# below that limit, like the cursor-reading pattern of logs.
 
-# Doble presupuesto por página: tope de BYTES (manda: robustez independiente del
-# tamaño) y tope de CONTEO. Se elige el menor. 256 KiB deja holgura ~2x frente a
-# 1 MiB aun con la doble serialización de FastMCP (bloque de texto JSON +
-# `structuredContent` en el mismo evento SSE). Si el envoltorio pesara más de lo
-# estimado, basta bajar FINDINGS_PAGE_MAX_BYTES (único punto de ajuste).
+# Double per-page budget: BYTE cap (governs: robustness independent of
+# size) and COUNT cap. The smaller is chosen. 256 KiB leaves ~2x headroom vs
+# 1 MiB even with FastMCP's double serialization (JSON text block +
+# `structuredContent` in the same SSE event). If the envelope weighed more than
+# estimated, just lower FINDINGS_PAGE_MAX_BYTES (the single tuning point).
 FINDINGS_PAGE_MAX_BYTES = 262144
 FINDINGS_PAGE_DEFAULT_LIMIT = 100
 
-# Registro global de findings por ejecución (lista COMPLETA y estable del escaneo
+# Global findings registry per execution (COMPLETE, stable scan list
 # terminado). Un lock protege el acceso al dict.
 _findings: dict[str, list[dict[str, Any]]] = {}
 _findings_lock = threading.Lock()
@@ -277,7 +277,7 @@ def set_findings(execution_id: str, findings: list[dict[str, Any]]) -> None:
     """Guarda (reemplaza) la lista COMPLETA de findings de `execution_id`.
 
     La llama el worker al terminar el escaneo, ANTES de publicar el estado `done`,
-    para garantizar que cuando el cliente vea `done` los findings ya estén
+    to guarantee that when the client sees `done`, the findings are already
     disponibles para paginar con `read_findings`.
     """
     with _findings_lock:
@@ -287,22 +287,22 @@ def set_findings(execution_id: str, findings: list[dict[str, Any]]) -> None:
 def read_findings(
     execution_id: str, cursor: int = 0, limit: int | None = None
 ) -> dict[str, Any]:
-    """Pagina los findings guardados de una ejecución a partir del índice `cursor`.
+    """Pages the stored findings of an execution starting at index `cursor`.
 
     Entrega findings consecutivos desde `cursor` hasta agotar el MENOR de: `limit`
     (o FINDINGS_PAGE_DEFAULT_LIMIT) findings, o FINDINGS_PAGE_MAX_BYTES bytes
-    (medidos con `json.dumps` acumulado). Garantía anti-inanición: si un solo
-    finding supera el presupuesto de bytes, se devuelve igualmente esa página de 1
-    (un finding OCSF individual está muy lejos de 1 MiB; lo que explota es la SUMA).
+    (measured with cumulative `json.dumps`). Anti-starvation guarantee: if a single
+    finding exceeds the byte budget, that page of 1 is returned anyway
+    (a single OCSF finding is far below 1 MiB; it is the SUM that blows up).
 
     Args:
-        execution_id: id de la ejecución (el devuelto por `prowler_scan`).
-        cursor: índice 0-based del primer finding a devolver; 0 desde el principio.
-        limit: tope de findings por página; None usa FINDINGS_PAGE_DEFAULT_LIMIT.
+        execution_id: execution id (the one returned by `prowler_scan`).
+        cursor: 0-based index of the first finding to return; 0 from the beginning.
+        limit: cap of findings per page; None uses FINDINGS_PAGE_DEFAULT_LIMIT.
 
     Returns:
-        {"findings": [...página...], "next_cursor": int, "done": bool}.
-        `execution_id` desconocido o `cursor` en/más allá del final -> página vacía
+        {"findings": [...page...], "next_cursor": int, "done": bool}.
+        unknown `execution_id` or `cursor` at/past the end -> empty page
         con done=True (no revienta).
     """
     with _findings_lock:
@@ -327,9 +327,9 @@ def read_findings(
     while index < total and len(page) < max_count:
         finding = items[index]
         encoded = len(json.dumps(finding).encode("utf-8"))
-        # El presupuesto de bytes manda: si añadir este finding desbordara el tope
-        # y la página ya tiene al menos uno, se cierra la página aquí. Si la página
-        # está vacía se añade igualmente (anti-inanición).
+        # The byte budget governs: if adding this finding exceeded the cap
+        # and the page already has at least one, the page is closed here. If the page
+        # is empty, it is added anyway (anti-starvation).
         if page and size + encoded > FINDINGS_PAGE_MAX_BYTES:
             break
         page.append(finding)
@@ -344,7 +344,7 @@ def start_background(
 ) -> threading.Thread:
     """Lanza `worker()` en un hilo demonio y registra su estado por `execution_id`.
 
-    Marca el estado inicial {'status':'running'} ANTES de arrancar el hilo (así un
+    Sets the initial state {'status':'running'} BEFORE starting the thread (so a
     sondeo inmediato ve 'running', nunca 'unknown'), corre `worker()` (callable sin
     args que devuelve el dict de estado final) y, al terminar, guarda ese dict como
     estado final. Si `worker` lanza, guarda {'status':'failed','error':str(exc)}.
@@ -365,7 +365,7 @@ def start_background(
 
 
 def _pump(pipe: Any, execution: _Execution, stream: str) -> None:
-    """Hilo lector: vuelca `pipe` línea a línea al ring hasta EOF."""
+    """Reader thread: dumps `pipe` line by line to the ring until EOF."""
     try:
         for raw in iter(pipe.readline, ""):
             if raw == "":
@@ -381,8 +381,8 @@ def _pump(pipe: Any, execution: _Execution, stream: str) -> None:
 def _kill_process_group(proc: subprocess.Popen) -> None:
     """Mata el GRUPO de procesos del subproceso (SIGTERM, luego SIGKILL).
 
-    El subproceso se lanza con `start_new_session=True`, así que es líder de su
-    propio grupo; matar el grupo entero evita huérfanos aunque Prowler lance hijos.
+    The subprocess is launched with `start_new_session=True`, so it is leader of its
+    own group; killing the whole group avoids orphans even if Prowler spawns children.
     """
     try:
         pgid = os.getpgid(proc.pid)
@@ -410,21 +410,21 @@ def run_tool_streaming(
     """Ejecuta `cmd` volcando su salida en vivo al ring de `execution_id`.
 
     stdout y stderr se leen por separado (cada uno en su hilo) y se etiquetan como
-    'stdout'/'stderr' en el ring. Al terminar (o al expirar el timeout) la ejecución
+    'stdout'/'stderr' in the ring. On completion (or timeout expiry) the execution
     se marca `done`.
 
     Args:
         cmd: comando y argumentos (lista; sin shell).
-        execution_id: identificador de la ejecución (clave del ring buffer).
-        timeout: segundos máximos antes de matar el grupo de procesos.
+        execution_id: execution identifier (key of the ring buffer).
+        timeout: maximum seconds before killing the process group.
         env: entorno del subproceso (None = heredar el del proceso actual).
         cwd: directorio de trabajo del subproceso.
 
     Returns:
         (returncode, timed_out, cancelled). En timeout `timed_out=True`; en
-        cancelación externa (`request_cancel`) `cancelled=True`. `returncode` es el del
-        proceso tras matar el grupo (puede ser negativo = señal). `cancelled` tiene
-        prioridad semántica sobre `timed_out` para el caller.
+        external cancellation (`request_cancel`) gives `cancelled=True`. `returncode` is that of the
+        process after killing the group (may be negative = signal). `cancelled` has
+        semantic priority over `timed_out` for the caller.
     """
     execution = _get_execution(execution_id)
     cancel_event = _cancel_event(execution_id)  # asegura el Event antes del Popen
@@ -436,7 +436,7 @@ def run_tool_streaming(
         bufsize=1,  # line-buffered: la salida llega al ring a medida que ocurre
         env=env,
         cwd=cwd,
-        start_new_session=True,  # grupo propio -> killpg sin huérfanos
+        start_new_session=True,  # own group -> killpg without orphans
     )
     # Registra el proceso vivo para que `request_cancel` pueda matar su grupo.
     with _procs_lock:
@@ -454,7 +454,7 @@ def run_tool_streaming(
     deadline = time.monotonic() + timeout
     try:
         while True:
-            # Cancelación externa: mata el grupo y sale (prioridad sobre el timeout).
+            # External cancellation: kills the group and exits (priority over timeout).
             if cancel_event.is_set():
                 _kill_process_group(proc)
                 break
@@ -475,9 +475,9 @@ def run_tool_streaming(
         for reader in readers:
             reader.join(timeout=5)
         execution.mark_done()
-        # `request_cancel` pudo matar el proceso directamente (proc.wait() retornó por
+        # `request_cancel` may have killed the process directly (proc.wait() returned due to
         # el kill, no por el Event): consultar el Event es la fuente de verdad de la
-        # cancelación, independientemente de qué rama cerró el bucle.
+        # cancellation, regardless of which branch closed the loop.
         cancelled = cancel_event.is_set()
         with _procs_lock:
             _procs.pop(execution_id, None)

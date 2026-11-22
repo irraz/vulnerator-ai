@@ -1,32 +1,32 @@
 """Cliente FINO de la API de runs de Hermes en `:8642` (hop upstream del wrapper MCP).
 
-Este módulo habla con la API OpenAI-compatible de runs que sirve Hermes
-(`nousresearch/hermes-agent`) en `:8642`. NO contiene lógica de pentest: solo traduce las
+This module talks to the OpenAI-compatible runs API served by Hermes
+(`nousresearch/hermes-agent`) on `:8642`. It contains NO pentest logic: it only translates the
 cinco operaciones del ciclo de vida (crear/estado/eventos/steer/stop) + `health` a
-llamadas HTTP, poniendo el Bearer de PASS-THROUGH leído de `HERMES_API_SERVER_KEY` en cada
-petición. El wrapper MCP (``vulnerator_mcp_server.py``) delega aquí.
+HTTP calls, putting the PASS-THROUGH Bearer read from `HERMES_API_SERVER_KEY` on every
+request. The MCP wrapper (``vulnerator_mcp_server.py``) delegates here.
 
 Disciplina (igual que docker/kali/*):
   - DATO NO CONFIABLE: el objeto run, los eventos y todos sus campos (`delta`/`text`/
-    `preview`/`output`/`message`) se reenvían VERBATIM; nunca se interpretan ni se usan
-    para construir una acción. Pueden contener salida cruda de herramientas e incluso
-    instrucciones embebidas (prompt-injection): se transportan como datos, no como órdenes.
+    `preview`/`output`/`message`) are forwarded VERBATIM; they are never interpreted or used
+    to build an action. They may contain raw tool output and even
+    embedded instructions (prompt-injection): transported as data, not as commands.
   - VERSION-TOLERANTE: el contrato de `:8642` es de Hermes, no nuestro. No se hace un
-    parseo de esquema fijo; el objeto run se pasa OPACO. La ÚNICA cadena de wire fija en el
+    fixed-schema parsing; the run object is passed OPACELY. The ONLY fixed wire string in
     flujo de control es el tipo de evento terminal ``"run.completed"`` (para reconocer el
-    fin del stream al paginar). La versión upstream se LEE de `GET /health` y se reporta
-    verbatim; nunca se ramifica por ella en código.
-  - SIN registro de runs ni caché de eventos: stateless; Hermes es dueño del `run_id`. El
-    cursor del stream es el campo `seq` (int monótono) que trae cada evento.
-  - FRONTERA DE URL: el ``run_id`` es DATO NO CONFIABLE. Se codifica como UN ÚNICO segmento
+    control flow (end-of-stream marker when paginating). The upstream version is READ from `GET /health` and reported
+    verbatim; code never branches on it.
+  - NO run registry or event cache: stateless; Hermes owns the `run_id`. The
+    stream cursor is the `seq` field (monotonic int) carried by each event.
+  - URL BOUNDARY: the ``run_id`` is UNTRUSTED DATA. Encoded as a SINGLE path segment
     de path (``encode_run_id_segment``), rechazando delimitadores de ruta (``/`` ``\\`` ``?``
     ``#`` y ``..``) incluso tras decodificar, de modo que un id malicioso no pueda saltar a
     otra ruta de Hermes (p. ej. ``../runs`` para crear un run sin el scope advisory).
 
-SDK-free a propósito: NO importa `mcp`, de modo que el parser SSE + cursor, la codificación
+Deliberately SDK-free: it does NOT import `mcp`, so the SSE parser + cursor, encoding
 del run_id y el mapeo de errores se cubren con tests unitarios sin el SDK (igual que
 `tool_streaming`/`scope_guard` viven aparte de `kali_mcp_server`). Dependencias no-stdlib:
-``httpx`` (stream SSE del hop a :8642, cliente ASYNC con deadline) y ``anyio`` (cancelación
+  ``httpx`` (SSE stream of the hop to :8642, ASYNC client with deadline) and ``anyio`` (cancellation
 por deadline del stream; ver requirements.txt).
 """
 
@@ -40,41 +40,41 @@ from urllib.parse import quote, unquote
 import anyio
 import httpx
 
-# Tipo del evento terminal del ciclo de vida (único string de wire fijo en control de
-# flujo; version-tolerancia, ver docstring del módulo).
+# Type of the lifecycle's terminal event (the only fixed wire string in control
+# flow; for version tolerance see the module docstring).
 TERMINAL_EVENT = "run.completed"
 
-# Topes del batch de `stream_run_events` (ver design §4.1). Se definen aquí porque el
+# Caps of the `stream_run_events` batch (see design §4.1). Defined here because the
 # parser SSE los aplica; el servidor MCP reutiliza estos defaults.
 DEFAULT_MAX_EVENTS = 200
-# Presupuesto de bytes por batch: muy por debajo del tope de 1 MiB de un único evento SSE
+# Byte budget per batch: well below the 1 MiB cap of a single SSE event
 # del transporte streamable-http (mismo motivo por el que existe read_scan_findings en
 # Kali). 256 KiB deja margen amplio tras el overhead del sobre MCP.
 DEFAULT_BYTE_BUDGET = 256 * 1024
-# Techo ABSOLUTO del tamaño serializado de UN único evento (fija review Finding "single SSE
+# ABSOLUTE ceiling on the serialized size of ONE event (pins review Finding "single SSE
 # event has no absolute size limit"). El presupuesto de batch (DEFAULT_BYTE_BUDGET) solo
-# retiene el evento siguiente cuando la página YA no está vacía; un ÚNICO evento sobre una
-# página vacía se admitía por anti-starvation sin tope superior, de modo que un
-# `tool.completed.preview`/`text` no confiable podía exceder el límite ~1 MiB de un mensaje
+# held on to the next event when the page was ALREADY non-empty; a SINGLE event on an
+# empty page was admitted for anti-starvation with no upper cap, so an
+# untrusted `tool.completed.preview`/`text` could exceed the ~1 MiB message limit
 # del transporte streamable-http. Este techo acota ese caso: un evento cuyo JSON supere
 # MAX_SINGLE_EVENT_BYTES NO se emite (ni verbatim ni como placeholder dentro de `events`).
 #
-# CONTRATO FAIL-LOUD (fija los blocking Findings de la revisión 4 — "oversized event
+# FAIL-LOUD CONTRACT (pins the blocking Findings of review 4 — "oversized event
 # placeholder breaks opaque verbatim pass-through" y "oversized terminal run.completed can
 # return done:false"): un placeholder DENTRO de `events` violaba dos invariantes a la vez:
 #   (a) descartaba el payload no confiable (`preview`/`text`/`delta`/`output` y cualquier
 #       campo futuro) AVANZANDO el cursor, dejando el `seq` original irrecuperable — rompe el
 #       pass-through opaco/verbatim/version-tolerante; y
 #   (b) si el evento sobredimensionado era `run.completed`, el placeholder conservaba ese
-#       `event` mientras la página cerraba con STOP_CAP (`done=false`), devolviendo un
-#       marcador terminal con semántica no terminal.
+#       `event` while the page closed with STOP_CAP (`done=false`), returning a
+#       terminal marker with non-terminal semantics.
 # En su lugar, el batcher NO emite nada dentro de `events` para un evento sobredimensionado,
-# NO avanza el cursor (el `seq` queda recuperable) y señala STOP_OVERSIZE con los metadatos
-# del evento (seq/tipo/tamaño/límite). El servidor los traduce a un sobre de error DESNUDO
-# fuera de `events` —fail-loud y terminal para la paginación, igual que un pre-evento
-# run_not_found— sin fingir ser un evento Hermes ni consumir el cursor. Los eventos que SÍ
-# caben bajo el techo se entregan COMPLETOS antes (si la página ya tenía eventos, se cierra
-# primero y el sobredimensionado se reprocesa en la siguiente página vacía).
+# It does NOT advance the cursor (the `seq` stays recoverable) and signals STOP_OVERSIZE with the metadata
+# of the event (seq/type/size/limit). The server translates those into a BARE error envelope
+# outside `events` —fail-loud and terminal for pagination, like a pre-event
+# run_not_found— without faking a Hermes event or consuming the cursor. Events that DO
+# fit under the ceiling are delivered COMPLETE first (if the page already had events, it closes
+# first and the oversized one is reprocessed on the next empty page).
 # 512 KiB deja margen holgado bajo 1 MiB tras el overhead del sobre MCP.
 MAX_SINGLE_EVENT_BYTES = 512 * 1024
 # Presupuesto wall-clock por batch: una llamada a la tool nunca cuelga al cliente esperando
@@ -82,27 +82,27 @@ MAX_SINGLE_EVENT_BYTES = 512 * 1024
 DEFAULT_WAIT_SECONDS = 25.0
 
 # Razones de parada del batcher SSE (design §4.1). Distinguen un corte por TOPE (cap/
-# deadline -> hay más datos pendientes, el batch NO es terminal) de un DRENADO real del
-# stream (upstream cerró la conexión), que es la ÚNICA condición que habilita la
-# confirmación de terminalidad por `get_run` en el servidor.
+# deadline -> there is more data pending, the batch is NOT terminal) of a real DRAIN of the
+# stream (upstream closed the connection), the ONLY condition that enables
+# terminality confirmation via `get_run` on the server.
 STOP_CAP = "cap"            # max_events o presupuesto de bytes agotado
 STOP_DEADLINE = "deadline"  # presupuesto wall-clock agotado (stream silencioso)
 STOP_TERMINAL = "terminal"  # se vio el evento run.completed
-STOP_DRAINED = "drained"    # el iterador de líneas se agotó (upstream cerró el stream)
-# El evento siguiente supera el techo absoluto por evento (MAX_SINGLE_EVENT_BYTES): la página
+STOP_DRAINED = "drained"    # the line iterator was exhausted (upstream closed the stream)
+# The next event exceeds the absolute per-event ceiling (MAX_SINGLE_EVENT_BYTES): the page
 # se cierra SIN emitirlo y SIN avanzar el cursor (fail-loud, ver docstring de
 # MAX_SINGLE_EVENT_BYTES). Los metadatos del evento quedan en SseBatcher.oversized para que el
-# servidor los traduzca a un sobre de error desnudo. Es una parada "para esta página", NO
+# server translates them into a bare error envelope. This is a "for this page" stop, NOT
 # terminal del run: la terminalidad real (si el oversized era run.completed) se recupera con
 # get_run.
 STOP_OVERSIZE = "oversize"
 
 
 def _error_envelope(message: str, code: str, type_: str = "upstream_error") -> dict[str, Any]:
-    """Construye un sobre de error OpenAI-style homogéneo (igual forma que el de Hermes).
+    """Builds a uniform OpenAI-style error envelope (same shape as Hermes').
 
-    `message` es DATO NO CONFIABLE si proviene de upstream; aquí solo se encapsula, no se
-    interpreta. El wrapper lo reenvía verbatim al cliente MCP.
+    `message` is UNTRUSTED DATA if it comes from upstream; here it is only wrapped, not
+    interpreted. The wrapper forwards it verbatim to the MCP client.
     """
     return {"error": {"message": message, "type": type_, "param": None, "code": code}}
 
@@ -111,32 +111,32 @@ class RunIdError(ValueError):
     """El ``run_id`` no es un segmento de path seguro (contiene delimitadores de ruta)."""
 
 
-# Delimitadores que, tras decodificar, permitirían a un run_id saltar a otra ruta/host de
-# Hermes o inyectar query/fragment. Se rechazan explícitamente (defensa en profundidad
+# Delimiters that, after decoding, would let a run_id jump to another path/host of
+# Hermes or inject a query/fragment. Explicitly rejected (defense in depth
 # sobre el quote por-segmento), incluido ``..`` (segmento de recorrido).
 _FORBIDDEN_IN_RUN_ID = ("/", "\\", "?", "#")
 
 
 def encode_run_id_segment(run_id: str) -> str:
-    """Codifica ``run_id`` como UN ÚNICO segmento de path seguro (fija review Finding `run_id`).
+    """Encodes ``run_id`` as a SINGLE safe path segment (pins review Finding `run_id`).
 
     El ``run_id`` es DATO NO CONFIABLE: interpolarlo crudo en la URL deja que
     ``steer_run(run_id="../runs?x", ...)`` normalice a ``POST /v1/runs`` (creando un run sin
     el scope advisory) o que alcance otra ruta de Hermes. Para evitarlo:
 
       1. Se DECODIFICA el valor (``unquote``) y se comprueba que NI el crudo NI el decodificado
-         contienen un delimitador de ruta (``/`` ``\\`` ``?`` ``#``) ni ``..`` ni NUL. Así se
-         rechaza también la variante percent-encoded (``%2F`` -> ``/`` tras decodificar).
-      2. Se ``quote`` con ``safe=""`` para que el resultado sea un único segmento (cualquier
-         carácter especial queda percent-encoded y NO cambia de ruta).
+         contain a path delimiter (``/`` ``\\`` ``?`` ``#``) nor ``..`` nor NUL. Thus
+         the percent-encoded variant is also rejected (``%2F`` -> ``/`` after decoding).
+      2. ``quote`` with ``safe=""`` so the result is a single segment (any
+         special character is percent-encoded and does NOT change the path).
 
-    No valida el formato ``run_`` (Hermes es dueño del espacio de ids; version-tolerancia):
+    It does not validate the ``run_`` format (Hermes owns the id space; version tolerance):
     solo garantiza que el valor no es sintaxis de URL que cambie de ruta. Lanza
     ``RunIdError`` si el id no es un segmento seguro.
     """
     if not isinstance(run_id, str) or not run_id:
-        raise RunIdError("run_id vacío o no-string")
-    # Se mira tanto el crudo como el decodificado: un cliente podría enviar ya el separador
+        raise RunIdError("empty or non-string run_id")
+    # Both raw and decoded forms are checked: a client might send the separator already
     # literal o su forma percent-encoded.
     decoded = unquote(run_id)
     for candidate in (run_id, decoded):
@@ -147,61 +147,61 @@ def encode_run_id_segment(run_id: str) -> str:
         for bad in _FORBIDDEN_IN_RUN_ID:
             if bad in candidate:
                 raise RunIdError("run_id contiene delimitador de ruta prohibido: %r" % bad)
-    # safe="": todo lo demás se percent-encodea; el resultado es un único segmento de path.
+    # safe="": everything else is percent-encoded; the result is a single path segment.
     return quote(run_id, safe="")
 
 
 class SseBatcher:
-    """Batcher SSE PURO e INCREMENTAL (sin socket): acumula UNA página de eventos.
+    """PURE, INCREMENTAL SSE batcher (no socket): accumulates ONE page of events.
 
-    Se le alimentan líneas de wire UNA A UNA con :meth:`feed`; cada ``feed`` devuelve una
-    razón de parada (``STOP_CAP``/``STOP_TERMINAL``) en cuanto la página debe cerrarse, o
-    ``None`` si puede seguir aceptando líneas. Es la pieza de mayor valor de test unitario:
-    se le dan líneas crudas (incluido el comentario ``: open``, ``data:`` multilínea y un
+    Wire lines are fed ONE BY ONE via :meth:`feed`; each ``feed`` returns a
+    stop reason (``STOP_CAP``/``STOP_TERMINAL``) as soon as the page must close, or
+    ``None`` if it can keep accepting lines. It is the highest-value unit-test piece:
+    it is given raw lines (including the `` : open`` comment, multiline ``data:`` and a
     evento malformado) y expone ``events``/``next_cursor`` ya filtrados por cursor. NO abre
-    red: ``iter_events`` le pasa las líneas que lee de la red y puede PARAR en cuanto el
-    batcher señala un tope (sin bufferizar el stream entero en memoria).
+    network: ``iter_events`` passes the lines it reads from the network and can STOP as soon as the
+    batcher signals a cap (without buffering the whole stream in memory).
 
-    El servidor usa la razón de parada para decidir ``done`` (design §4.1): SOLO
-    ``STOP_TERMINAL`` o ``STOP_DRAINED`` (iterador agotado) terminan la paginación;
-    ``STOP_CAP``/``STOP_DEADLINE`` significan "hay más datos, sigue paginando" -> ``done=false``.
+    The server uses the stop reason to decide ``done`` (design §4.1): ONLY
+    ``STOP_TERMINAL`` or ``STOP_DRAINED`` (iterator exhausted) end pagination;
+    ``STOP_CAP``/``STOP_DEADLINE`` mean "more data, keep paging" -> ``done=false``.
 
-    Protocolo de wire observado (hermes-agent 0.22.0, investigación §10.4):
+    Wire protocol observed (hermes-agent 0.22.0, research §10.4):
       - El campo SSE ``event:`` NO se usa; el tipo vive dentro del JSON (campo ``event``).
       - Cada mensaje es ``id: <n>`` + ``data: <json>``; el stream abre con ``: open``.
       - Cada evento JSON trae ``event`` (tipo), ``run_id``, ``timestamp`` (float), ``seq``
-        (int monótono). ``seq`` ES EL CURSOR.
+        (monotonic int). ``seq`` IS THE CURSOR.
 
     Reglas:
-      - Se ignoran comentarios (``:`` al inicio, p. ej. ``: open``) y la línea ``id:`` (se
-        usa el ``seq`` del JSON, autoritativo). La línea en blanco es frontera de evento.
-      - Se acumulan las líneas ``data:`` del evento actual (SSE permite ``data:`` multilínea).
+      - Comments (``:`` at line start, e.g. ``: open``) and the ``id:`` line are ignored (the
+        JSON's ``seq`` is authoritative). A blank line is the event boundary.
+      - The current event's ``data:`` lines are accumulated (SSE allows multiline ``data:``).
       - En la frontera de evento se hace ``json.loads``. Si falla el parseo o falta/!int el
-        ``seq`` -> SE OMITE ese evento (best-effort, como read_findings salta líneas
+        ``seq`` -> that event is SKIPPED (best-effort, like read_findings skips
         corruptas); nunca se rompe el stream por un payload malformado/oversized.
-      - ``seq <= after_seq`` -> se omite (ya entregado): dedup entre páginas.
+      - ``seq <= after_seq`` -> skipped (already delivered): dedup across pages.
 
-    Presupuesto de bytes (fija review Finding "byte budget overshoots"): el tamaño del evento
-    se mide ANTES de añadirlo. Si al añadirlo la página YA NO VACÍA cruzaría ``byte_budget``,
-    se cierra la página SIN incluirlo (``STOP_CAP``) y queda para la siguiente (no se pierde:
-    su ``seq`` no avanza). Un ÚNICO evento mayor que ``byte_budget`` con la página vacía SÍ se
-    incluye (anti-starvation deliberada) y cierra la página tras él, de modo que un batch
+    Byte budget (pins review Finding "byte budget overshoots"): the event's size
+    is measured BEFORE adding it. If adding it to an ALREADY NON-EMPTY page would cross ``byte_budget``,
+    the page is closed WITHOUT it (``STOP_CAP``) and it is kept for the next one (nothing is lost:
+    its ``seq`` does not advance). A SINGLE event larger than ``byte_budget`` on an empty page IS
+    included (deliberate anti-starvation) and closes the page after it, so a batch
     devuelva como mucho UN evento por encima del presupuesto, nunca dos. 256 KiB deja margen
-    bajo el 1 MiB del transporte incluso para ese único evento + overhead del sobre MCP.
+    stays under the transport's 1 MiB even for that single event + MCP envelope overhead.
 
     Techo ABSOLUTO por evento (fija review Finding "single SSE event has no absolute size
-    limit" y los blocking de la revisión 4): la anti-starvation anterior no acotaba el tamaño
-    de ESE único evento, así que un evento no confiable (p. ej. ``tool.completed.preview``/
-    ``text``) podía superar el límite ~1 MiB del transporte. Si el JSON de un evento supera
+    limit" and review 4's blocking findings): the earlier anti-starvation did not bound the size
+    of THAT single event, so an untrusted event (e.g. ``tool.completed.preview``/
+    ``text``) could exceed the transport's ~1 MiB limit. If an event's JSON exceeds
     ``max_single_event_bytes`` se aplica el contrato FAIL-LOUD (ver docstring de
-    ``MAX_SINGLE_EVENT_BYTES``): NO se emite (ni verbatim —truncar un evento opaco violaría el
-    pass-through— ni como placeholder dentro de ``events``, que descartaría el payload y
-    avanzaría el cursor), NO se avanza ``next_cursor`` (el ``seq`` queda recuperable) y se
-    señala ``STOP_OVERSIZE`` guardando los metadatos del evento en :attr:`oversized`
-    (``event``/``run_id``/``timestamp``/``seq`` + tamaño/límite, SIN el payload). El servidor
-    traduce eso a un sobre de error DESNUDO fuera de ``events``. Si la página YA tiene eventos
+    ``MAX_SINGLE_EVENT_BYTES``): it is NOT emitted (neither verbatim —truncating an opaque event would violate the
+    pass-through— nor as a placeholder inside ``events``, which would discard the payload and
+    advance the cursor), ``next_cursor`` is NOT advanced (the ``seq`` stays recoverable) and
+    ``STOP_OVERSIZE`` is signalled, storing the event's metadata in :attr:`oversized`
+    (``event``/``run_id``/``timestamp``/``seq`` + size/limit, WITHOUT the payload). The server
+    translates that into a BARE error envelope outside ``events``. If the page ALREADY has events
     normales, se cierra ANTES con ``STOP_CAP`` (se entregan completos) y el sobredimensionado
-    se reprocesa en la siguiente página vacía.
+    it is reprocessed on the next empty page.
     """
 
     def __init__(
@@ -218,8 +218,8 @@ class SseBatcher:
         self._max_single = max_single_event_bytes
         self.events: list[dict[str, Any]] = []
         self.next_cursor = after_seq
-        # Metadatos del evento que gatilló STOP_OVERSIZE (None salvo que un evento supere el
-        # techo absoluto y la página esté vacía). NO contiene el payload no confiable: solo
+        # Metadata of the event that triggered STOP_OVERSIZE (None unless an event exceeds the
+        # absolute ceiling and the page is empty). It does NOT contain the untrusted payload: only
         # ``event``/``run_id``/``timestamp``/``seq`` + ``serialized_bytes``/``limit_bytes``.
         self.oversized: Optional[dict[str, Any]] = None
         self._bytes_seen = 0
@@ -241,18 +241,18 @@ class SseBatcher:
         if not isinstance(seq, int) or isinstance(seq, bool):
             return None  # sin cursor usable -> se omite
         if seq <= self._after_seq:
-            return None  # ya entregado (dedup entre páginas)
+            return None  # already delivered (dedup across pages)
         return event
 
     @staticmethod
     def _oversized_metadata(event: dict[str, Any], size: int, limit: int) -> dict[str, Any]:
         """Metadatos (SIN payload) del evento que supera el techo absoluto por evento.
 
-        NO reenvía el contenido no confiable (``preview``/``text``/``delta``/``output`` ni
+        It does NOT forward untrusted content (``preview``/``text``/``delta``/``output`` nor
         campos futuros): solo los metadatos de wire (``event``/``run_id``/``timestamp``/
-        ``seq``) y el tamaño/límite. El servidor los pone en un sobre de error DESNUDO fuera de
+        ``seq``) and the size/limit. The server puts them in a BARE error envelope outside
         ``events``. El ``seq`` NO avanza el cursor del batch: el evento queda recuperable (el
-        operador puede inspeccionarlo o avanzar manualmente el cursor por encima de él).
+        the operator can inspect it or manually advance the cursor past it).
         """
         meta: dict[str, Any] = {
             "serialized_bytes": size,
@@ -264,34 +264,34 @@ class SseBatcher:
         return meta
 
     def _emit(self, event: dict[str, Any]) -> Optional[str]:
-        """Intenta añadir ``event`` a la página. Devuelve una razón de parada o None.
+        """Tries to add ``event`` to the page. Returns a stop reason or None.
 
-        Mide el tamaño ANTES de añadir (fija el overshoot): si la página no vacía cruzaría el
-        presupuesto, NO lo añade y devuelve ``STOP_CAP`` (el evento queda para el próximo
-        batch). Un único evento oversized con la página vacía SÍ se añade (anti-starvation),
-        y entonces se cierra la página tras él.
+        Measures size BEFORE adding (pins the overshoot): if a non-empty page would cross the
+        budget, it does NOT add it and returns ``STOP_CAP`` (the event is kept for the next
+        batch). A single oversized event on an empty page IS added (anti-starvation),
+        and then the page is closed after it.
 
         Techo ABSOLUTO — contrato FAIL-LOUD (fija review Finding "single SSE event has no
-        absolute size limit" y los blocking de la revisión 4): si el JSON del evento supera
-        ``max_single_event_bytes`` NO se emite —ni verbatim (truncar un evento opaco violaría
-        el pass-through) ni como placeholder dentro de ``events`` (descartaría el payload y
-        avanzaría el cursor)—. Si la página YA tiene eventos normales se cierra ANTES con
-        ``STOP_CAP`` (se entregan completos y el oversized se reprocesa en la siguiente página
-        vacía). Con la página vacía: NO se añade nada a ``events``, NO se avanza ``next_cursor``
+        absolute size limit" and review 4's blocking findings): if the event's JSON exceeds
+        ``max_single_event_bytes`` it is NOT emitted —neither verbatim (truncating an opaque event would violate
+        the pass-through) nor as a placeholder inside ``events`` (which would discard the payload and
+        advance the cursor)—. If the page ALREADY has normal events, it closes FIRST with
+        ``STOP_CAP`` (they are delivered complete and the oversized one is reprocessed on the next page
+        empty). With an empty page: nothing is added to ``events``, ``next_cursor`` is NOT advanced
         (el ``seq`` queda recuperable), se guardan los metadatos en :attr:`oversized` y se
         devuelve ``STOP_OVERSIZE``. El servidor lo traduce a un sobre de error desnudo fuera de
-        ``events``. Así un único evento no confiable nunca excede el límite del transporte y la
+        ``events``. Thus a single untrusted event never exceeds the transport limit and a
         terminalidad real (si el oversized era ``run.completed``) se recupera con ``get_run``,
-        nunca se devuelve un marcador terminal con semántica no terminal.
+        terminal marker with non-terminal semantics is never returned.
         """
         size = len(json.dumps(event))
         if size > self._max_single:
             # El evento supera el techo absoluto: nunca se emite dentro de `events`. Si la
-            # página YA tiene eventos, se cierra ANTES para entregarlos completos (el oversized
-            # se reprocesa en la siguiente página vacía).
+            # page ALREADY has events, it closes FIRST to deliver them complete (the oversized
+            # one is reprocessed on the next empty page).
             if self.events:
                 return STOP_CAP
-            # Página vacía: fail-loud. Se guardan los metadatos SIN payload y SIN avanzar el
+            # Empty page: fail-loud. Metadata is stored WITHOUT payload and WITHOUT advancing the
             # cursor (el seq queda recuperable); el servidor devuelve un sobre de error desnudo.
             self.oversized = self._oversized_metadata(event, size, self._max_single)
             return STOP_OVERSIZE
@@ -307,13 +307,13 @@ class SseBatcher:
         if self._max is not None and len(self.events) >= self._max:
             return STOP_CAP
         if self._bytes_seen >= self._byte_budget:
-            # Un único evento ya por encima del presupuesto (o justo en el límite): se incluyó
-            # por anti-starvation, pero se cierra la página aquí para no acumular un segundo.
+            # A single event already above the budget (or exactly at the limit): it was included
+            # for anti-starvation, but the page is closed here so a second one is not accumulated.
             return STOP_CAP
         return None
 
     def feed(self, raw_line: str) -> Optional[str]:
-        """Alimenta UNA línea de wire. Devuelve una razón de parada o None (sigue aceptando)."""
+        """Feeds ONE wire line. Returns a stop reason or None (keeps accepting)."""
         line = raw_line.rstrip("\n").rstrip("\r")
         if line == "":
             event = self._parse()
@@ -330,11 +330,11 @@ class SseBatcher:
                 payload = payload[1:]
             self._data_parts.append(payload)
             return None
-        # Cualquier otra línea (p. ej. "event:") se ignora: el tipo vive en el JSON.
+        # Any other line (e.g. "event:") is ignored: the type lives in the JSON.
         return None
 
     def flush(self) -> Optional[str]:
-        """Procesa el último evento SIN frontera en blanco (stream drenado por upstream)."""
+        """Processes the last event WITHOUT a blank boundary (stream drained by upstream)."""
         event = self._parse()
         if event is not None:
             return self._emit(event)
@@ -349,14 +349,14 @@ def batch_sse_events(
     byte_budget: int = DEFAULT_BYTE_BUDGET,
     max_single_event_bytes: int = MAX_SINGLE_EVENT_BYTES,
 ) -> tuple[list[dict[str, Any]], int, str, Optional[dict[str, Any]]]:
-    """Batchea un ITERABLE de líneas en UNA página (helper puro para tests + ruta de error).
+    """Batches an ITERABLE of lines into ONE page (pure helper for tests + error path).
 
-    Envuelve :class:`SseBatcher`: alimenta las líneas hasta que el batcher señala parada
+    Wraps :class:`SseBatcher`: feeds lines until the batcher signals a stop
     (``STOP_CAP``/``STOP_TERMINAL``/``STOP_OVERSIZE``) o se agota el iterable
     (``STOP_DRAINED``). Devuelve ``(events, next_cursor, stop_reason, oversized)`` donde
     ``oversized`` es ``None`` salvo que ``stop_reason`` sea ``STOP_OVERSIZE`` (entonces lleva
     los metadatos SIN payload del evento sobredimensionado). El corte por DEADLINE (stream
-    silencioso) lo gestiona ``iter_events`` con cancelación async, no este helper síncrono.
+    silent stream) is handled by `iter_events` with async cancellation, not this sync helper.
     """
     batcher = SseBatcher(
         after_seq=after_seq,
@@ -377,10 +377,10 @@ def batch_sse_events(
 class HermesApiClient:
     """Cliente FINO de la API de runs de Hermes en `:8642`.
 
-    Construido con la URL base y el Bearer de pass-through. Cada método pone
+    Built with the base URL and the pass-through Bearer. Each method sets
     ``Authorization: Bearer <api_key>`` (+ ``Content-Type: application/json`` en cuerpos).
     Los retornos son el payload UPSTREAM reenviado opaco, o un sobre de error estructurado
-    ``{"error": {...}}`` (ver mapeo en cada método). Version-tolerante: no parsea esquema
+    ``{"error": {...}}`` (see mapping in each method). Version-tolerant: no schema parsing
     fijo; la terminalidad se deriva de los booleanos del objeto run, nunca del string
     ``status``.
     """
@@ -409,7 +409,7 @@ class HermesApiClient:
         except RunIdError as exc:
             self._warn("run_id rechazado como segmento de path: %s" % exc)
             return _error_envelope(
-                "'run_id' no es un identificador válido", code="invalid_request",
+                "'run_id' is not a valid identifier", code="invalid_request",
                 type_="invalid_request_error",
             )
         return "/v1/runs/%s%s" % (seg, suffix)
@@ -462,7 +462,7 @@ class HermesApiClient:
 
     @staticmethod
     def _warn(message: str) -> None:
-        """Log a stderr de una línea; nunca interpola payloads grandes no confiables."""
+        """Logs a single line to stderr; never interpolates large untrusted payloads."""
         sys.stderr.write("[vulnerator-mcp] %s\n" % message)
 
     def _request(self, method: str, path: str, *, json_body: Any = None,
@@ -482,10 +482,10 @@ class HermesApiClient:
     # ------------------------------------------------------------------ API
 
     def health(self) -> dict[str, Any]:
-        """GET /health -> {status, platform, version} (investigación §10.1).
+        """GET /health -> {status, platform, version} (research §10.1).
 
-        ``version`` se reporta al cliente VERBATIM y NUNCA se usa para ramificar en código
-        (version-tolerancia). Es el único sitio donde se expone una versión upstream.
+        ``version`` is reported to the client VERBATIM and NEVER used to branch in code
+        (version tolerance). This is the only place an upstream version is exposed.
         """
         return self._request("GET", "/health")
 
@@ -498,11 +498,11 @@ class HermesApiClient:
         previous_response_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """POST /v1/runs -> {run_id, status, replayed} (investigación §10.3).
+        """POST /v1/runs -> {run_id, status, replayed} (research §10.3).
 
-        Envía ``Idempotency-Key`` como CABECERA (no en el cuerpo) solo cuando se pasa no
-        vacía. Los opcionales vacíos/None se OMITEN del cuerpo JSON.
-        ``conversation_history`` se OMITE a propósito del wrapper (design §3): la
+        Sends ``Idempotency-Key`` as a HEADER (not in the body) only when a non-
+        empty one is passed. Empty/None optionals are OMITTED from the JSON body.
+        ``conversation_history`` is deliberately OMITTED by the wrapper (design §3): the
         continuidad se expresa con ``previous_response_id``/``session_id``.
         """
         body: dict[str, Any] = {"input": input}
@@ -527,7 +527,7 @@ class HermesApiClient:
         return self._request("GET", path)
 
     def steer_run(self, run_id: str, input: str) -> dict[str, Any]:
-        """POST /v1/runs/{run_id}/steer. El 409 run_not_accepting_steer se reenvía verbatim (§10.6)."""
+        """POST /v1/runs/{run_id}/steer. 409 run_not_accepting_steer is forwarded verbatim (§10.6)."""
         path = self._run_path(run_id, "/steer")
         if isinstance(path, dict):
             return path
@@ -548,25 +548,25 @@ class HermesApiClient:
         max_events: Optional[int] = None,
         wait_seconds: Optional[float] = None,
     ) -> tuple[list[dict[str, Any]], int, Optional[dict[str, Any]], str]:
-        """GET /v1/runs/{run_id}/events (SSE). Devuelve UNA página batcheada (ASYNC).
+        """GET /v1/runs/{run_id}/events (SSE). Returns ONE batched page (ASYNC).
 
         Es ASYNC y con deadline propio (fija review Finding "quiet SSE wait"): abre
-        ``httpx.AsyncClient.stream`` y lee líneas de forma asíncrona bajo un
-        ``anyio.move_on_after(wait_seconds)``. Así un stream SILENCIOSO (antes O después de
+        ``httpx.AsyncClient.stream`` and reads lines asynchronously under an
+        ``anyio.move_on_after(wait_seconds)``. Thus a SILENT stream (before or after
         ``: open``) se corta en el presupuesto wall-clock (frontera de batch NORMAL,
         ``done=false``), SIN esperar al read-timeout de httpx y SIN bloquear el event loop de
-        streamable-HTTP. El deadline envuelve TAMBIÉN la ADQUISICIÓN de la respuesta
+        streamable-HTTP. The deadline also wraps RESPONSE ACQUISITION
         (``client.stream(...)`` espera status+cabeceras) y el drenaje del cuerpo de error de
         un non-2xx (fija review Finding "SSE pre-header wait escapes the deadline"): un
-        upstream que acepta la conexión pero retiene cabeceras/cuerpo queda acotado por
+        an upstream that accepts the connection but withholds headers/body is bounded by
         ``wait_seconds``, no solo por el connect timeout.
 
-        Un corte por deadline es DISTINTO de un fallo de conexión/HTTP:
+        A deadline cut is DIFFERENT from a connection/HTTP failure:
           - deadline/cap -> ``stop_reason`` ``STOP_DEADLINE``/``STOP_CAP`` y ``error=None``
             (el cliente sigue paginando).
-          - non-2xx o excepción de conexión -> ``error`` es el sobre ``{"error": {...}}``
+          - non-2xx or connection exception -> ``error`` is the ``{"error": {...}}`` envelope
             COMPLETO (fija review Finding "streaming errors lose the envelope"): se preserva
-            la MISMA forma que request/response, no un ``_error`` sintético.
+            the SAME shape as request/response, not a synthetic ``_error``.
 
         Returns:
             ``(events, next_cursor, error, stop_reason)``. Si ``error`` no es None, es el
@@ -574,7 +574,7 @@ class HermesApiClient:
         """
         path = self._run_path(run_id, "/events")
         if isinstance(path, dict):
-            return [], after_seq, path, "error"  # run_id inválido: sobre invalid_request
+            return [], after_seq, path, "error"  # invalid run_id: invalid_request envelope
 
         url = "%s%s" % (self._base_url, path)
         headers = self._headers()
@@ -584,52 +584,52 @@ class HermesApiClient:
         else:
             effective_wait = DEFAULT_WAIT_SECONDS
 
-        # max_single_event_bytes se lee del módulo en tiempo de LLAMADA (no del default del
-        # __init__, que se liga al definir): así el techo es configurable/testeable.
+        # max_single_event_bytes is read from the module at CALL time (not the default bound at
+        # __init__ definition): so the ceiling is configurable/testable.
         batcher = SseBatcher(
             after_seq=after_seq,
             max_events=max_events,
             max_single_event_bytes=MAX_SINGLE_EVENT_BYTES,
         )
-        cap_reason: Optional[str] = None  # STOP_CAP/STOP_TERMINAL si un tope cerró la página
+        cap_reason: Optional[str] = None  # STOP_CAP/STOP_TERMINAL if a cap closed the page
         hit_deadline = False
         http_error: Optional[dict[str, Any]] = None  # sobre {"error":...} de un non-2xx
         # Status de un non-2xx YA observado (cabeceras recibidas) ANTES de drenar su cuerpo. Se
         # guarda aparte para que, si el DRENAJE del cuerpo de error se pasa del deadline (fija
         # review NB "stalled error body downgrades to a deadline page"), se pueda recuperar la
-        # clasificación de error en vez de degradar a una página de deadline vacía.
+        # error classification instead of degrading to an empty deadline page.
         pending_error_status: Optional[int] = None
 
         try:
             # Read-timeout de httpx = None: el corte REAL por tiempo lo hace
             # anyio.move_on_after (deadline wall-clock del batch), no el read-timeout, para no
-            # confundir un stream LENTO/silencioso con un fallo de conexión. El connect timeout
-            # sí es corto (fail-fast si :8642 no está).
+            # confusing a SLOW/silent stream with a connection failure. The connect timeout
+            # is short (fail-fast if :8642 is absent).
             stream_timeout = httpx.Timeout(
                 connect=min(self._timeout, 10.0),
                 read=None, write=self._timeout, pool=self._timeout,
             )
-            # El deadline wall-clock envuelve TODO el ciclo de vida del stream: la adquisición
+            # The wall-clock deadline wraps the ENTIRE stream lifecycle: acquisition
             # de la respuesta (status+cabeceras), el drenaje del cuerpo de error en un non-2xx
-            # y la lectura de líneas del cuerpo 2xx (fija review Finding "pre-header wait
+            # and line reading of the 2xx body (pins review Finding "pre-header wait
             # escapes the deadline"). Si expira ANTES de tener respuesta/cabeceras,
             # cancelled_caught -> hit_deadline (frontera NORMAL, no error): el read-timeout
-            # está deshabilitado, así que sin este scope un upstream que retiene cabeceras
-            # colgaría indefinidamente.
+            # is disabled, so without this scope an upstream withholding headers
+            # would hang indefinitely.
             with anyio.move_on_after(effective_wait) as scope:
                 async with httpx.AsyncClient(timeout=stream_timeout) as client:
                     async with client.stream("GET", url, headers=headers) as resp:
                         if not resp.is_success:
                             # Se registra el status ANTES de drenar: si el drenaje se pasa del
-                            # deadline, se recupera la clasificación de error tras el scope (NB
+                            # deadline, the error classification is recovered after the scope (NB
                             # "stalled error body downgrades to a deadline page").
                             pending_error_status = resp.status_code
                             # Drena el cuerpo de error DENTRO del mismo deadline (un cuerpo que
-                            # no cierra no puede mantener la llamada abierta más allá de él).
+                            # that does not close cannot keep the call open beyond it).
                             await resp.aread()
                             http_error = self._handle_response(resp)
                         else:
-                            # Lectura asíncrona de líneas. Se para en cuanto el batcher señala
+                            # Async line reading. Stops as soon as the batcher signals
                             # un tope, SIN bufferizar el resto del stream.
                             async for line in resp.aiter_lines():
                                 cap_reason = batcher.feed(line)
@@ -638,8 +638,8 @@ class HermesApiClient:
             if scope.cancelled_caught:
                 hit_deadline = True
         except httpx.HTTPError as exc:
-            # Fallo de conexión/HTTP: sobre {"error": {...}} COMPLETO (misma forma que el
-            # resto del cliente), nunca un dict sintético {"_error": ...}. Los eventos
+            # Connection/HTTP failure: COMPLETE {"error": {...}} envelope (same shape as the
+            # rest of the client), never a synthetic {"_error": ...} dict. Events
             # parciales ya acumulados en el batcher se devuelven igualmente (no se pierden).
             error = self._unreachable(exc)
             return batcher.events, batcher.next_cursor, error, "error"
@@ -648,15 +648,15 @@ class HermesApiClient:
             # non-2xx con cabeceras ya recibidas dentro del deadline: sobre de error completo.
             return [], after_seq, http_error, "error"
         if pending_error_status is not None:
-            # Se observó un non-2xx (cabeceras recibidas) pero el DRENAJE de su cuerpo se pasó
-            # del deadline (http_error quedó sin asignar y cancelled_caught ganaría). Antes esto
-            # degradaba a una página de deadline vacía (done=false), invitando a un cliente
+            # A non-2xx was observed (headers received) but DRAINING its body went
+            # past the deadline (http_error was unassigned and cancelled_caught would win). Before this
+            # it degraded to an empty deadline page (done=false), inviting a client
             # loop-until-done a reintentar el mismo non-2xx (NB "stalled error body downgrades
-            # to a deadline page"). Se preserva la clasificación de error devolviendo el sobre
-            # DESNUDO a partir del status ya conocido (sin cuerpo, porque el cuerpo se colgó),
-            # terminal para la paginación como cualquier otro non-2xx.
+            # to a deadline page"). Error classification is preserved by returning the envelope
+            # BARE from the already-known status (no body, because the body hung),
+            # terminal for pagination like any other non-2xx.
             self._warn(
-                "cuerpo de error upstream HTTP %s se pasó del deadline en %s; se reporta el "
+                "upstream HTTP error body %s passed the deadline on %s; reporting the "
                 "status sin cuerpo" % (pending_error_status, url)
             )
             error = _error_envelope(
@@ -666,11 +666,11 @@ class HermesApiClient:
             )
             return [], after_seq, error, "error"
         if cap_reason == STOP_OVERSIZE:
-            # Un evento SOBREDIMENSIONADO (sobre página vacía) cerró el batch: contrato
+            # An OVERSIZED event (on an empty page) closed the batch: contract
             # FAIL-LOUD. NO se devuelve el evento (ni placeholder), NO se avanza el cursor
             # (next_cursor sigue en after_seq -> recuperable) y se emite un sobre de error
-            # DESNUDO con los metadatos SIN payload. El servidor lo reenvía desnudo (terminal
-            # para la paginación), igual que un run_not_found pre-evento. La terminalidad real
+            # BARE with metadata WITHOUT payload. The server forwards it bare (terminal
+            # for pagination), like a run_not_found pre-event. Real terminality
             # (si el oversized era run.completed) se recupera con get_run_status.
             meta = batcher.oversized or {}
             seq = meta.get("seq")
@@ -690,14 +690,14 @@ class HermesApiClient:
             error["error"]["oversized_event"] = meta
             return [], after_seq, error, "error"
         if cap_reason is not None:
-            # Un tope (max_events/byte_budget) o el evento terminal cerró la página.
+            # A cap (max_events/byte_budget) or the terminal event closed the page.
             return batcher.events, batcher.next_cursor, None, cap_reason
         if hit_deadline:
-            # El deadline wall-clock cortó un stream aún abierto: frontera de batch NORMAL.
-            # NO es STOP_DRAINED (podría haber más eventos tras el silencio), así que el
+            # The wall-clock deadline cut a still-open stream: NORMAL batch boundary.
+            # It is NOT STOP_DRAINED (there may be more events after the silence), so the
             # servidor NO debe confirmar terminalidad a partir de este batch.
             return batcher.events, batcher.next_cursor, None, STOP_DEADLINE
-        # El aiter se agotó: upstream cerró el stream. Procesa el último evento sin frontera.
+        # The aiter was exhausted: upstream closed the stream. Process the last event without a boundary.
         drain_reason = batcher.flush()
         stop_reason = drain_reason if drain_reason is not None else STOP_DRAINED
         return batcher.events, batcher.next_cursor, None, stop_reason

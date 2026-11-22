@@ -1,24 +1,24 @@
-"""Runner multi-herramienta genérico de `kali-mcp` (STDLIB PURA).
+"""Generic multi-tool runner for `kali-mcp` (PURE STDLIB).
 
-Generaliza el patrón de collection EN VIVO (hasta ahora específico de Prowler) a varias
-tools (Prowler/ScoutSuite/Cloudsplaining) bajo UN contrato único: un **registro** por
+It generalizes the LIVE collection pattern (until now Prowler-specific) to several
+tools (Prowler/ScoutSuite/Cloudsplaining) under ONE single contract: a **registry** per
 fuente aporta (a) el binario a comprobar con ``shutil.which``, (b) el/los comando(s) a
-ejecutar y dónde escriben su salida, (c) cómo localizar el fichero crudo (NO el HTML) y su
-nombre canónico de artefacto, y (d) la finalización (stagear el crudo como artefacto y
+to run and where they write their output, (c) how to locate the raw file (NOT the HTML) and its
+canonical artifact name, and (d) finalization (stage the raw as an artifact and
 construir el ``done`` con la REFERENCIA, nunca la carga). NO es una ruta nueva por
-herramienta: es un worker/finalize genérico + registro.
+tool: it is a generic worker/finalize + registry.
 
-Por qué un módulo aparte (igual que ``tool_streaming``/``artifact_store``/``prowler_artifact``):
-``kali_mcp_server.py`` importa ``mcp``/``anyio`` (no están en el venv de dev). Toda la
-mecánica del runner vive aquí con SOLO la librería estándar, así se cubre con tests sin el
-SDK. Reutiliza ``tool_streaming`` (streaming + kill de grupo + cancelación) y
+Why a separate module (like ``tool_streaming``/``artifact_store``/``prowler_artifact``):
+``kali_mcp_server.py`` imports ``mcp``/``anyio`` (not in the dev venv). All the
+runner mechanics live here with ONLY the standard library, so it is covered by tests without the
+SDK. It reuses ``tool_streaming`` (streaming + group kill + cancellation) and
 ``artifact_store`` (staging del crudo) ya existentes; Prowler delega en ``prowler_artifact``
-(mismo finalize + puente SSE de compat) — cero duplicación.
+(same finalize + compat SSE bridge) — zero duplication.
 
-Separación de planos: el crudo de CUALQUIER tool viaja por el plano de DATOS (artefactos);
-el ``done`` del CONTROL sólo lleva la referencia. Para fuentes no-Prowler NO se popula el
-puente SSE ``set_findings``: su salida es un documento JSON único que se baja por el plano
-de datos. Disciplina arm64: si el binario no está, se reporta (no se finge).
+Plane separation: the raw output of ANY tool travels on the DATA plane (artifacts);
+the CONTROL ``done`` only carries the reference. For non-Prowler sources the
+``set_findings`` SSE bridge is NOT populated: its output is a single JSON document downloaded via the
+data plane. arm64 discipline: if the binary is absent, it is reported (not faked).
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ import tool_streaming
 # Timeout por defecto de una collection (segundos); el server puede pasar el suyo.
 DEFAULT_TIMEOUT = int(os.environ.get("COLLECTION_TIMEOUT", os.environ.get("PROWLER_TIMEOUT", "900")))
 
-# Nombres canónicos del artefacto crudo por fuente.
+# Canonical names of the raw artifact per source.
 PROWLER_ARTIFACT_NAME = prowler_artifact.PROWLER_ARTIFACT_NAME  # "prowler.ocsf.json"
 SCOUTSUITE_ARTIFACT_NAME = "scoutsuite.results.json"
 CLOUDSPLAINING_ARTIFACT_NAME = "cloudsplaining.results.json"
@@ -49,7 +49,7 @@ def _now_iso() -> str:
 
 
 def _ring_tail(execution_id: str, max_lines: int = 20) -> str:
-    """Últimas líneas de salida de una ejecución (dato NO confiable, verbatim)."""
+    """Last lines of a run's output (UNTRUSTED data, verbatim)."""
     page = tool_streaming.read(execution_id, 0)
     lines = page.get("lines", [])
     tail = lines[-max_lines:]
@@ -66,8 +66,8 @@ def _prowler_binary() -> str | None:
 def _build_prowler_cmd(outdir: str) -> list[str]:
     """Args del comando Prowler (sin shell) escribiendo en ``outdir`` (igual que antes).
 
-    Reúne la configuración por entorno del MVP (status/regiones/servicios/verbose). Asume
-    que Prowler está disponible (el runner lo valida con ``shutil.which``).
+    Gathers the MVP's environment configuration (status/regions/services/verbose). It assumes
+    Prowler is available (the runner validates it with ``shutil.which``).
     """
     cmd = [
         _prowler_binary() or "prowler",
@@ -120,12 +120,12 @@ def _cloudsplaining_commands(account_id: str, workdir: str, outdir: str, params:
     1. ``cloudsplaining download --output <dir>`` baja el account-authorization-details. OJO:
        su ``--output`` es un DIRECTORIO EXISTENTE (``click.Path(exists=True)``, default el cwd),
        NO un fichero; escribe ``<profile>.json`` dentro (sin ``--profile`` -> ``default.json``).
-       Las credenciales AWS vienen del entorno (sin ``--profile``), así que el crudo descargado
+       AWS credentials come from the environment (no ``--profile``), so the downloaded raw
        es ``<workdir>/default.json``.
     2. ``cloudsplaining scan --input-file <workdir>/default.json`` lo analiza y escribe el JSON
        de resultados (``iam-results-*.json`` / ``iam-findings-*.json``) en ``outdir``
        (``--skip-open-report`` evita abrir el navegador). El JSON es lo que se stagea; el HTML
-       (presentación) se ignora. ``download`` escribe en ``workdir`` (FUERA de ``outdir``), así
+       (presentation) is ignored. ``download`` writes to ``workdir`` (OUTSIDE ``outdir``), so
        que el localizador ``*.json`` de ``outdir`` solo ve la salida del scan, no el crudo IAM.
     """
     authfile = str(Path(workdir) / "default.json")
@@ -147,7 +147,7 @@ def _cloudsplaining_commands(account_id: str, workdir: str, outdir: str, params:
 
 
 def _locate_newest(outdir: Path, patterns: tuple[str, ...]) -> Path | None:
-    """Fichero más reciente y legible que casa alguno de los ``patterns`` (rglob)."""
+    """Most recent readable file matching any of the ``patterns`` (rglob)."""
     candidates: list[Path] = []
     for pattern in patterns:
         candidates.extend(p for p in outdir.rglob(pattern) if p.is_file())
@@ -167,20 +167,20 @@ def _scoutsuite_locate(outdir: Path) -> Path | None:
 
 def _cloudsplaining_locate(outdir: Path) -> Path | None:
     # El scan de Cloudsplaining escribe DOS JSON en ``outdir`` (ambos serializados desde
-    # ``authorization_details.results`` en la versión pinada 0.9.1): ``iam-results-<name>.json``
-    # y ``iam-findings-<name>.json``. Los dos llevan la forma de secciones de políticas
+    # ``authorization_details.results`` in pinned version 0.9.1): ``iam-results-<name>.json``
+    # and ``iam-findings-<name>.json``. Both carry the shape of policy sections
     # (``customer_managed_policies``/``inline_policies``/``aws_managed_policies``) que el
     # normalizador (``CloudsplainingImportCollector``) sabe parsear. Se fija el prefijo de
     # forma DETERMINISTA —primero ``iam-results-*``, con ``iam-findings-*`` como respaldo— en
-    # vez de "el ``*.json`` más reciente" (que, con dos ficheros, elige por mtime a ciegas y
-    # puede quedarse con el crudo equivocado -> 0 findings). NUNCA el ``*.html`` (presentación)
+    # instead of "the most recent ``*.json``" (which, with two files, picks by mtime blindly and
+    # may keep the wrong raw -> 0 findings). NEVER the ``*.html`` (presentation)
     # ni el ``default.json`` de descarga (input del scan, FUERA de ``outdir``).
     return _locate_newest(outdir, ("iam-results-*.json",)) or _locate_newest(
         outdir, ("iam-findings-*.json",)
     )
 
 
-# --------------------------------------------------------------- finalización por fuente
+# --------------------------------------------------------------- per-source finalization
 
 
 def _finalize_artifact(
@@ -195,9 +195,9 @@ def _finalize_artifact(
 ) -> dict[str, Any] | None:
     """Finaliza una collection NO-Prowler: stagea el crudo y construye el ``done``.
 
-    NO popula el puente SSE ``set_findings`` (la salida es un documento JSON único que se
+Does NOT populate the ``set_findings`` SSE bridge (the output is a single JSON document that is
     baja por el plano de datos). Si no hay salida legible, devuelve ``None`` (el caller
-    publica ``failed`` con diagnóstico).
+published; on failure it reports ``failed`` with a diagnostic).
     """
     path = locate(outdir)
     if path is None:
@@ -301,7 +301,7 @@ def finalize(
 ) -> dict[str, Any] | None:
     """Finaliza una collection ya ejecutada: stagea el crudo y construye el ``done``.
 
-    Punto único reutilizable (lo usan ``run_collection`` y los tests, que stagean un crudo
+    Single reusable point (used by ``run_collection`` and the tests, which stage a raw
     de fixture por fuente). Despacha al ``finalize`` de la fuente.
     """
     spec = REGISTRY.get(source)
@@ -317,13 +317,13 @@ def run_collection(
     params: str = "",
     timeout: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Worker genérico: lanza la tool de ``source`` y devuelve el ``done``/``failed``.
+    """Generic worker: launches the tool for ``source`` and returns ``done``/``failed``.
 
     Corre en el hilo de ``tool_streaming.start_background`` (indexado por ``execution_id``).
     Flujo: valida binario -> ejecuta el/los comando(s) con streaming de logs en vivo y kill
-    de grupo al timeout/cancelación -> localiza el crudo -> stagea como
+    group on timeout/cancellation -> locates the raw -> stages it as
     artefacto -> construye el ``done`` con la REFERENCIA (no la carga). Reporta ``failed`` con
-    diagnóstico si no hay binario o salida legible; ``cancelled`` si el usuario cancela.
+    diagnostic if there is no binary or readable output; ``cancelled`` if the user cancels.
     """
     spec = REGISTRY.get(source)
     if spec is None:
@@ -331,7 +331,7 @@ def run_collection(
     if shutil.which(spec.binary) is None:
         # arm64 u otra arquitectura sin la tool: se reporta, no se finge.
         raise RuntimeError(
-            f"La tool {spec.binary!r} (fuente {source!r}) no está disponible en este "
+            f"tool {spec.binary!r} (source {source!r}) is not available in this "
             f"runtime ({os.uname().machine}); no se finge la collection."
         )
 
@@ -354,8 +354,8 @@ def run_collection(
                     "timed_out": True,
                     "returncode": returncode,
                     "error": (
-                        f"{source} excedió el timeout ({timeout}s). "
-                        f"Últimas líneas: {_ring_tail(execution_id)}"
+                        f"{source} exceeded the timeout ({timeout}s). "
+                        f"Last lines: {_ring_tail(execution_id)}"
                     ),
                 }
 

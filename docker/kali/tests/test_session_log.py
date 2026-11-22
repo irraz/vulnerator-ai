@@ -1,12 +1,12 @@
-"""Tests stdlib-only del log de auditoría por engagement (`docker/kali/session_log.py`).
+"""Stdlib-only tests of the per-engagement audit log (`docker/kali/session_log.py`).
 
-No importan `mcp`/`anyio`: sólo librería estándar + pytest. Verifican:
-  - ``record`` persiste un registro como una ÚNICA línea JSON (aunque el output tenga
-    miles de líneas: los saltos se escapan dentro del string JSON);
-  - ``read`` pagina por cursor y salta líneas corruptas;
-  - ``safe_engagement`` cae a ``_unscoped`` con id vacío/no-string/con traversal, y el
-    fichero NO escapa de la raíz del staging;
-  - appends CONCURRENTES (O_APPEND) no se entrelazan: N líneas, todas JSON válido.
+They do not import `mcp`/`anyio`: only standard library + pytest. They verify:
+  - ``record`` persists a record as a SINGLE JSON line (even if the output has
+    thousands of lines: newlines are escaped inside the JSON string);
+  - ``read`` paginates by cursor and skips corrupt lines;
+  - ``safe_engagement`` falls back to ``_unscoped`` for empty/non-string/traversal ids, and the
+    file does NOT escape the staging root;
+  - CONCURRENT appends (O_APPEND) do not interleave: N lines, all valid JSON.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-# El módulo bajo prueba vive en docker/kali/ (junto al servidor MCP, que NO se importa
-# aquí porque arrastra `mcp`/`anyio`). Lo añadimos al path explícitamente.
+# The module under test lives in docker/kali/ (alongside the MCP server, which is NOT imported
+# here because it pulls in `mcp`/`anyio`). We add it to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import session_log  # noqa: E402
@@ -27,7 +27,7 @@ import session_log  # noqa: E402
 
 @pytest.fixture()
 def staging(tmp_path, monkeypatch):
-    """Apunta la raíz del staging a un tmp dir por test (env leído en caliente)."""
+    """Points the staging root to a tmp dir per test (env read at call time)."""
     monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
     return tmp_path
 
@@ -61,15 +61,15 @@ def test_record_writes_single_json_line_under_engagement(staging):
 
 
 def test_record_multiline_output_stays_one_physical_line(staging):
-    # Output con 5000 saltos: json.dumps los escapa -> UNA sola línea física en el fichero.
+    # Output with 5000 newlines: json.dumps escapes them -> ONE physical line in the file.
     big = "\n".join(f"[stdout] line-{i}" for i in range(5000)) + "\n"
     session_log.record("eng-1", _entry(output=big, total_lines=5000))
 
     path = staging / "eng-1" / session_log.SESSION_LOG_NAME
     raw = path.read_text(encoding="utf-8")
-    assert raw.count("\n") == 1  # una única línea JSON terminada en \n
+    assert raw.count("\n") == 1  # a single JSON line terminated by \n
     doc = json.loads(raw)
-    # El output completo se recupera íntegro tras el parseo.
+    # The complete output is retrieved intact after parsing.
     assert doc["output"].count("\n") == 5000
     assert "[stdout] line-4999" in doc["output"]
 
@@ -105,7 +105,7 @@ def test_read_skips_corrupt_lines(staging):
 
     page = session_log.read("eng-1")
     ids = [e["execution_id"] for e in page["executions"]]
-    assert ids == ["good-1", "good-2"]  # la línea corrupta se salta
+    assert ids == ["good-1", "good-2"]  # the corrupt line is skipped
     assert page["total"] == 2
 
 
@@ -118,7 +118,7 @@ def test_unsafe_engagement_falls_back_to_unscoped(staging, bad):
 
 
 def test_record_with_traversal_id_stays_inside_root(staging):
-    # Un engagement_id con traversal NO escapa: cae a _unscoped dentro de la raíz.
+    # A traversal engagement_id does NOT escape: it falls to _unscoped inside the root.
     session_log.record("../escape", _entry(engagement_id="../escape"))
 
     escaped = staging.parent / "escape" / session_log.SESSION_LOG_NAME
@@ -135,7 +135,7 @@ def test_valid_engagement_is_preserved(staging):
 
 
 def test_concurrent_appends_do_not_interleave(staging):
-    # 20 hilos x 25 registros: O_APPEND garantiza líneas enteras sin entrelazado.
+    # 20 threads x 25 records: O_APPEND guarantees whole lines without interleaving.
     def worker(wid: int) -> None:
         for i in range(25):
             session_log.record("eng-1", _entry(execution_id=f"w{wid}-{i}"))
@@ -149,6 +149,6 @@ def test_concurrent_appends_do_not_interleave(staging):
     path = staging / "eng-1" / session_log.SESSION_LOG_NAME
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 500
-    # Cada línea es JSON válido y completo (ninguna partida por el entrelazado).
+    # Each line is valid, complete JSON (none broken by interleaving).
     for line in lines:
         json.loads(line)

@@ -16,7 +16,7 @@ def derive_sev(title: str):
     t = (title or "").upper()
     m = re.search(r"CVSS\s*(\d{1,2}(?:\.\d)?)", t)
     score = float(m.group(1)) if m else None
-    if re.search(r"\bCRIT[IÍ]CA\b|\bCRITICAL\b", t) or (score is not None and score >= 9.0):
+    if re.search(r"\bCRIT[I\u00cd]CA\b|\bCRITICAL\b", t) or (score is not None and score >= 9.0):
         return "critical", score
     if re.search(r"\bHIGH\b|\bALTA\b", t) or (score is not None and score >= 7.0):
         return "high", score

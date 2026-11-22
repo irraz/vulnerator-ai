@@ -1,7 +1,7 @@
-"""Script de enumeración IAM read-only para el runner AWS.
+"""Read-only IAM enumeration script for the AWS runner.
 
-BINARIO determinista que corre en el venv del servidor Kali (boto3 llega vía Prowler). NO
-decide nada: enumera IAM de forma ACOTADA y SOLO-LECTURA y escribe UN único documento JSON
+Deterministic BINARY that runs in the Kali server venv (boto3 comes via Prowler). It does NOT
+decide anything: it enumerates IAM in a SCOPED, READ-ONLY manner and writes ONE single JSON document
 en la ruta de ``--out``. El runner STDLIB (``aws_exec.py``) lo invoca como subproceso con
 ``tool_streaming`` (kill de grupo/timeout, logs al ring).
 
@@ -9,15 +9,15 @@ Disciplina de seguridad:
   - READ-ONLY: SOLO ``list_*``/``get_*``. NUNCA create/put/attach/delete: no cambia el
     estado de la cuenta AWS. Las credenciales read-only vienen del entorno del contenedor
     (igual que Prowler/ScoutSuite).
-  - ACOTADO: enumera roles/usuarios/grupos/políticas (ámbito ``Local`` = gestionadas por
-    el cliente) con nombres+ARNs y relaciones de adjunción. NO vuelca
+  - SCOPED: enumerates roles/users/groups/policies (``Local`` scope = managed by
+    the customer) with names+ARNs and attachment relationships. It does NOT dump
     ``get-account-authorization-details`` completo (eso es trabajo de Cloudsplaining):
-    aquí se busca el mapa IAM para el bucle OODA, no el dump exhaustivo de documentos.
+    this looks for the IAM map for the OODA loop, not an exhaustive document dump.
 
-THIN a propósito (KISS): sin lógica que pida test unitario; la mecánica testeable
-(construcción del comando, ejecución, lectura de salida, diagnóstico) vive en
+Deliberately THIN (KISS): no logic that would need a unit test; the testable mechanics
+(command construction, execution, output reading, diagnostics) live in
 ``aws_exec.py`` (STDLIB puro). Este fichero solo se valida con ``ast.parse`` (no se
-importa en los tests: boto3 no está en el venv de dev).
+imported in tests: boto3 is not in the dev venv).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ import boto3  # provisto por el venv del servidor (Prowler lo arrastra)
 
 
 def _paginate(client, method_name: str, result_key: str, **kwargs) -> list:
-    """Recorre todas las páginas de un ``list_*`` y acumula ``result_key`` (read-only)."""
+    """Pages through all pages of a ``list_*`` and accumulates ``result_key`` (read-only)."""
     paginator = client.get_paginator(method_name)
     items: list = []
     for page in paginator.paginate(**kwargs):
@@ -44,18 +44,18 @@ def _simplify(entity: dict, keys: tuple[str, ...]) -> dict:
 
 
 def enumerate_iam(client) -> dict:
-    """Enumera IAM ACOTADO y read-only: roles/usuarios/grupos/políticas + adjunciones.
+    """Enumerates IAM SCOPED and read-only: roles/users/groups/policies + attachments.
 
-    SOLO ``list_*``/``get_*``. Para cada principal se listan las políticas gestionadas
-    adjuntas (ARNs) y los nombres de políticas inline; para los usuarios, además su
-    pertenencia a grupos. Las políticas se limitan al ámbito ``Local`` (gestionadas por
-    el cliente) para no arrastrar el catálogo entero de políticas AWS-managed.
+    ONLY ``list_*``/``get_*``. For each principal, the managed policies are listed
+    attached (ARNs) and inline policy names; for users, additionally their
+    group memberships. Policies are limited to the ``Local`` scope (managed by
+    the customer) to avoid dragging in the entire AWS-managed policy catalog.
     """
     roles = _paginate(client, "list_roles", "Roles")
     users = _paginate(client, "list_users", "Users")
     groups = _paginate(client, "list_groups", "Groups")
-    # Scope ``Local`` = políticas gestionadas por el cliente; evita arrastrar el catálogo
-    # entero de políticas AWS-managed (acotación).
+    # Scope ``Local`` = customer-managed policies; avoids dragging in the catalog
+    # of AWS-managed policies (scoping).
     policies = _paginate(client, "list_policies", "Policies", Scope="Local")
 
     roles_out = []
@@ -130,7 +130,7 @@ def enumerate_iam(client) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Enum IAM read-only acotado (JSON a --out)")
     parser.add_argument("--account", required=True, help="ID de la cuenta AWS autorizada")
-    parser.add_argument("--out", required=True, help="Fichero donde escribir el JSON único")
+    parser.add_argument("--out", required=True, help="File to write the single JSON to")
     args = parser.parse_args(argv)
 
     session = boto3.session.Session()

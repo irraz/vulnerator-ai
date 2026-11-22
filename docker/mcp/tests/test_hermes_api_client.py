@@ -1,18 +1,18 @@
 """Tests del cliente :8642 y el batcher SSE (`docker/mcp/hermes_api_client.py`).
 
-NO importan `mcp`/FastMCP: solo el módulo SDK-free `hermes_api_client` + httpx + anyio +
-pytest (mismo patrón que `docker/kali/tests/test_scope_guard.py`). Cubren:
-  - El batcher SSE puro (`batch_sse_events`): wire `: open`/`id:`/`data:` (incl. multilínea),
-    cursor por `seq`, dedup entre páginas, skip best-effort de eventos malformados, y los
-    topes de batch (max_events, presupuesto de bytes SIN overshoot) + razón de parada
+They do not import `mcp`/FastMCP: only the SDK-free `hermes_api_client` module + httpx + anyio +
+pytest (same pattern as `docker/kali/tests/test_scope_guard.py`). They cover:
+  - The pure SSE batcher (`batch_sse_events`): wire `: open`/`id:`/`data:` (incl. multiline),
+    cursor by `seq`, dedup across pages, best-effort skip of malformed events, and the
+    batch caps (max_events, byte budget WITHOUT overshoot) + stop reason
     (STOP_CAP/STOP_TERMINAL/STOP_DRAINED).
   - `encode_run_id_segment`: el run_id (dato no confiable) se codifica como UN segmento y se
     rechaza cualquier intento de recorrido/salto de ruta (fija review Finding "run_id route
     escape"), incluida la variante percent-encoded; y que un run_id de recorrido NO toca red.
   - `iter_events` (async, httpx.AsyncClient + MockTransport): stream/dedup, corte en el
-    evento terminal, y preservación del sobre {"error": {...}} COMPLETO en non-2xx/invalid.
+    terminal event, and preservation of the COMPLETE {"error": {...}} envelope on non-2xx/invalid.
   - HermesApiClient con httpx.MockTransport: Bearer puesto, Idempotency-Key solo cuando se
-    da, el mapeo de cada forma de error (sobre JSON, non-2xx sin sobre, fallo de conexión), y
+    da, the mapping of each error form (JSON envelope, non-2xx without envelope, connection failure), and
     que la ruta construida es el target exacto esperado.
 """
 
@@ -26,7 +26,7 @@ import anyio
 import httpx
 import pytest
 
-# El módulo bajo prueba vive en docker/mcp/ (el servidor MCP NO se importa: arrastra `mcp`).
+# The module under test lives in docker/mcp/ (the MCP server is NOT imported: it pulls in `mcp`).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import hermes_api_client as hac  # noqa: E402
@@ -43,7 +43,7 @@ def _sse_message(seq: int, event: str = "message.delta", **extra) -> str:
 
 
 def _lines(raw: str):
-    """Itera líneas como lo haría httpx.Response.iter_lines (sin el '\\n' final)."""
+    """Iterates lines as httpx.Response.iter_lines would (without the trailing '\\n')."""
     return iter(raw.split("\n"))
 
 
@@ -52,18 +52,18 @@ def test_parser_basic_wire_and_cursor():
     events, next_cursor, reason, _ = hac.batch_sse_events(_lines(raw))
     assert [e["seq"] for e in events] == [1, 2, 3]
     assert next_cursor == 3
-    assert reason == hac.STOP_DRAINED  # el iterador se agotó sin evento terminal
+    assert reason == hac.STOP_DRAINED  # the iterator was exhausted with no terminal event
     # Opaco: el dict de evento se entrega sin tocar.
     assert events[0]["event"] == "message.delta"
     assert events[0]["run_id"] == "run_x"
 
 
 def test_parser_multiline_data():
-    # SSE permite `data:` multilínea: cada línea `data:` se une con '\n'. Se usa un JSON
-    # pretty-printed (los '\n' entre elementos estructurales son JSON válido tras el join).
+    # SSE allows multiline `data:`: each `data:` line is joined with '\n'. A JSON
+    # pretty-printed one is used (the '\n' between structural elements is valid JSON after joining).
     payload = {"event": "message.interim", "run_id": "run_x", "timestamp": 1.0, "seq": 5,
                "text": "a"}
-    dumped = json.dumps(payload, indent=2)  # multilínea, válido
+    dumped = json.dumps(payload, indent=2)  # multiline, valid
     data_lines = "".join("data: %s\n" % ln for ln in dumped.split("\n"))
     raw = "id: 5\n" + data_lines + "\n"
     events, _, _, _ = hac.batch_sse_events(_lines(raw))
@@ -100,12 +100,12 @@ def test_parser_max_events_cap():
     raw = "".join(_sse_message(i) for i in range(1, 11))
     events, next_cursor, reason, _ = hac.batch_sse_events(_lines(raw), max_events=3)
     assert [e["seq"] for e in events] == [1, 2, 3]
-    assert reason == hac.STOP_CAP  # cap -> hay más datos, el servidor NO declara done
+    assert reason == hac.STOP_CAP  # cap -> more data, the server does NOT declare done
     assert next_cursor == 3
 
 
 def test_parser_byte_budget_cap_single_event():
-    # Un presupuesto de bytes diminuto deja pasar UN único evento (anti-starvation) y corta.
+    # A tiny byte budget lets ONE event through (anti-starvation) and then stops.
     raw = "".join(_sse_message(i, text="x" * 50) for i in range(1, 6))
     events, _, reason, _ = hac.batch_sse_events(_lines(raw), byte_budget=10)
     assert len(events) == 1 and events[0]["seq"] == 1
@@ -115,7 +115,7 @@ def test_parser_byte_budget_cap_single_event():
 def test_parser_byte_budget_closes_page_before_overshoot():
     # Fija review Finding "byte budget overshoots by one event": con DOS eventos grandes y un
     # presupuesto que cabe el primero pero no la suma, el segundo NO se incluye (se mide ANTES
-    # de añadir). El batch devuelve solo el primero y el segundo queda para la próxima página.
+    # of adding it). The batch returns only the first; the second is left for the next page.
     big = "y" * 200
     one = _sse_message(1, text=big)
     two = _sse_message(2, text=big)
@@ -125,13 +125,13 @@ def test_parser_byte_budget_closes_page_before_overshoot():
     events, next_cursor, reason, _ = hac.batch_sse_events(
         _lines(one + two), byte_budget=budget
     )
-    assert [e["seq"] for e in events] == [1]  # el segundo NO se incluyó (sin overshoot)
-    assert next_cursor == 1  # el seq del segundo NO avanza: se re-leerá en la próxima página
+    assert [e["seq"] for e in events] == [1]  # the second was NOT included (no overshoot)
+    assert next_cursor == 1  # the second's seq does NOT advance: re-read on the next page
     assert reason == hac.STOP_CAP
 
 
 def test_parser_byte_budget_two_small_events_both_fit():
-    # Control: si ambos caben, los dos salen (no se corta de más).
+    # Control: if both fit, both come out (no premature cut).
     one = _sse_message(1, text="a")
     two = _sse_message(2, text="b")
     events, _, reason, _ = hac.batch_sse_events(_lines(one + two), byte_budget=10_000)
@@ -143,10 +143,10 @@ def test_parser_byte_budget_two_small_events_both_fit():
 
 
 def test_parser_oversized_single_event_fails_loud_without_consuming_cursor():
-    # Fija los blocking Findings de la revisión 4 ("oversized event placeholder breaks opaque
-    # verbatim pass-through"): un ÚNICO evento cuyo JSON supera el techo absoluto NO se emite
-    # —ni verbatim ni como placeholder dentro de `events`—. La página sale VACÍA, el cursor NO
-    # avanza (el seq queda recuperable) y se señala STOP_OVERSIZE con los metadatos SIN payload
+    # Pins review 4's blocking Findings ("oversized event placeholder breaks opaque
+    # verbatim pass-through"): a SINGLE event whose JSON exceeds the absolute ceiling is NOT emitted
+    # —neither verbatim nor as a placeholder inside `events`—. The page comes out EMPTY, the cursor does NOT
+    # advance (the seq stays recoverable) and STOP_OVERSIZE is signalled with metadata WITHOUT payload
     # en batcher.oversized.
     huge = "Z" * 5_000
     raw = _sse_message(7, event="tool.completed", preview=huge)
@@ -164,12 +164,12 @@ def test_parser_oversized_single_event_fails_loud_without_consuming_cursor():
     assert oversized["event"] == "tool.completed"
     assert oversized["serialized_bytes"] > 1_000
     assert oversized["limit_bytes"] == 1_000
-    assert huge not in json.dumps(oversized)  # el payload nunca se reenvía
+    assert huge not in json.dumps(oversized)  # the payload is never forwarded
 
 
 def test_parser_oversized_event_after_normal_closes_page_first():
-    # Si la página YA tiene un evento normal, el oversized NO se mezcla: se cierra la página
-    # ANTES (STOP_CAP) y su seq NO avanza, para reprocesarlo con la página vacía. Así los
+    # If the page ALREADY has a normal event, the oversized one is NOT mixed in: the page is closed
+    # FIRST (STOP_CAP) and its seq does NOT advance, so it is reprocessed with an empty page. Thus the
     # eventos sub-techo se entregan COMPLETOS antes de fallar en el oversized.
     small = _sse_message(1, text="ok")
     huge = _sse_message(2, event="tool.completed", preview="Q" * 5_000)
@@ -178,10 +178,10 @@ def test_parser_oversized_event_after_normal_closes_page_first():
     )
     assert [e["seq"] for e in events] == [1]  # solo el normal, COMPLETO
     assert events[0]["text"] == "ok"  # el evento sub-techo no se recorta
-    assert next_cursor == 1  # el oversized queda pendiente (se reprocesa la próxima página)
+    assert next_cursor == 1  # the oversized event remains pending (reprocessed next page)
     assert reason == hac.STOP_CAP
-    assert oversized is None  # aún no se gatilló el fallo-loud (página no vacía)
-    # Página siguiente (empezando tras el seq 1): el oversized falla loud con STOP_OVERSIZE.
+    assert oversized is None  # fail-loud has not triggered yet (page not empty)
+    # Next page (starting after seq 1): the oversized event fails loud with STOP_OVERSIZE.
     events2, next_cursor2, reason2, oversized2 = hac.batch_sse_events(
         _lines(huge), after_seq=1, max_single_event_bytes=1_000
     )
@@ -192,10 +192,10 @@ def test_parser_oversized_event_after_normal_closes_page_first():
 
 
 def test_parser_oversized_terminal_run_completed_does_not_consume_cursor():
-    # Fija el segundo blocking de la revisión 4 ("oversized terminal run.completed can return
+    # Pins review 4's second blocking finding ("oversized terminal run.completed can return
     # done:false"): si el evento sobredimensionado ES run.completed, NO se devuelve como un
-    # marcador terminal dentro de events (que combinado con STOP_OVERSIZE daría done:false).
-    # Sale VACÍO, STOP_OVERSIZE, cursor sin avanzar; la terminalidad real se recupera luego con
+    # a terminal marker inside events (which combined with STOP_OVERSIZE would give done:false).
+    # It comes out EMPTY, STOP_OVERSIZE, cursor not advanced; real terminality is recovered later with
     # get_run (ver test_iter_events_oversized_* y el server).
     huge_terminal = _sse_message(9, event=hac.TERMINAL_EVENT, output="X" * 5_000)
     events, next_cursor, reason, oversized = hac.batch_sse_events(
@@ -216,7 +216,7 @@ def _client_with(handler):
     """HermesApiClient cuyo httpx usa un MockTransport con `handler`.
 
     Se parchea httpx.request / httpx.stream para inyectar el transporte mock, ya que el
-    cliente usa las funciones de módulo de httpx (no una instancia inyectada).
+    the client uses httpx's module functions (not an injected instance).
     """
     transport = httpx.MockTransport(handler)
     return transport
@@ -224,7 +224,7 @@ def _client_with(handler):
 
 @pytest.fixture()
 def patch_httpx(monkeypatch):
-    """Devuelve una función que instala un handler mock sobre httpx.request/stream."""
+    """Returns a function that installs a mock handler on httpx.request/stream."""
     def _install(handler):
         transport = httpx.MockTransport(handler)
 
@@ -288,7 +288,7 @@ def test_create_run_omits_empty_optionals(patch_httpx):
     assert body["input"] == "hola"
     assert body["previous_response_id"] == "prev"
     assert "session_id" not in body and "instructions" not in body
-    # conversation_history NUNCA se envía (omisión deliberada del wrapper).
+    # conversation_history is NEVER sent (deliberate omission by the wrapper).
     assert "conversation_history" not in body
 
 
@@ -354,7 +354,7 @@ def test_encode_run_id_segment_percent_encodes_specials():
 
 
 @pytest.mark.parametrize("evil", [
-    "../runs?ignored",       # el PoC del review: saltaría a POST /v1/runs
+    "../runs?ignored",       # the review's PoC: would jump to POST /v1/runs
     "../runs",
     "a/b",                   # slash crudo
     "a\\b",                  # backslash
@@ -371,7 +371,7 @@ def test_encode_run_id_segment_rejects_route_escape(evil):
 
 def test_run_id_route_escape_is_blocked_before_network(patch_httpx):
     # Fija el blocking Finding "run_id route escape": un run_id de recorrido NO debe tocar la
-    # red; debe devolver invalid_request SIN hacer la petición (no crear un run via steer).
+    # network; it must return invalid_request WITHOUT making the request (no creating a run via steer).
     called = {"n": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -382,7 +382,7 @@ def test_run_id_route_escape_is_blocked_before_network(patch_httpx):
     client = hac.HermesApiClient("http://up:8642", "K")
     out = client.steer_run("../runs?ignored", "please create a run")
     assert out["error"]["code"] == "invalid_request"
-    assert called["n"] == 0  # NUNCA se llamó a upstream
+    assert called["n"] == 0  # upstream was NEVER called
 
 
 def test_run_id_safe_hits_exact_target(patch_httpx):
@@ -473,11 +473,11 @@ def test_iter_events_terminal_event_stops(monkeypatch):
 
 def test_iter_events_deadline_covers_pre_header_stall(monkeypatch):
     # Fija el blocking Finding "SSE pre-header wait escapes the deadline": si el upstream
-    # ACEPTA la conexión pero RETIENE las cabeceras más allá de wait_seconds, iter_events debe
+    # ACCEPTS the connection but WITHHOLDS headers past wait_seconds; iter_events must
     # cortar por el deadline wall-clock (STOP_DEADLINE, frontera NORMAL sin error), NO colgar.
-    # El handler async duerme más que wait_seconds ANTES de devolver la respuesta/cabeceras.
+    # The async handler sleeps longer than wait_seconds BEFORE returning the response/headers.
     async def handler(request: httpx.Request) -> httpx.Response:
-        await anyio.sleep(5.0)  # retiene cabeceras (read-timeout está deshabilitado)
+        await anyio.sleep(5.0)  # withholds headers (read-timeout is disabled)
         return httpx.Response(200, text=_sse_message(1),
                               headers={"content-type": "text/event-stream"})
 
@@ -486,7 +486,7 @@ def test_iter_events_deadline_covers_pre_header_stall(monkeypatch):
     events, next_cursor, error, reason = anyio.run(
         lambda: client.iter_events("run_x", after_seq=0, wait_seconds=0.2)
     )
-    # Cortó por el deadline durante la adquisición de cabeceras: sin eventos, SIN error.
+    # Cut by the deadline during header acquisition: no events, NO error.
     assert events == []
     assert error is None
     assert reason == hac.STOP_DEADLINE
@@ -511,7 +511,7 @@ def test_iter_events_invalid_run_id_no_network(monkeypatch):
 
 
 def test_iter_events_oversized_single_event_bare_error(monkeypatch):
-    # iter_events con un ÚNICO evento sobredimensionado sobre página vacía: aquí se fuerza el
+    # iter_events with a SINGLE oversized event on an empty page: here the
     # techo bajo monkeypatcheando MAX_SINGLE_EVENT_BYTES (iter_events no lo expone por firma).
     monkeypatch.setattr(hac, "MAX_SINGLE_EVENT_BYTES", 1_000)
     huge = _sse_message(5, event=hac.TERMINAL_EVENT, output="Q" * 5_000)
@@ -538,21 +538,21 @@ def test_iter_events_oversized_single_event_bare_error(monkeypatch):
 class _StallingAsyncStream(httpx.AsyncByteStream):
     """Cuerpo de respuesta async que ENTREGA las cabeceras pero cuelga el cuerpo.
 
-    Permite simular un non-2xx cuyo CUERPO no cierra: `__aiter__` duerme más que el deadline
+    Allows simulating a non-2xx whose BODY never closes: `__aiter__` sleeps past the deadline
     antes de producir nada, de modo que `resp.aread()` se cuelga y el deadline wall-clock lo
     corta (fija el NB "stalled error body downgrades to a deadline page").
     """
 
     async def __aiter__(self):
-        await anyio.sleep(5.0)  # el cuerpo se cuelga más allá del deadline
+        await anyio.sleep(5.0)  # the body hangs past the deadline
         yield b"{}"
 
 
 def test_iter_events_stalled_error_body_preserves_status(monkeypatch):
     # Fija el NB "stalled error body downgrades to a deadline page": un non-2xx cuyas CABECERAS
-    # llegan pero cuyo CUERPO se cuelga más allá del deadline debe reportarse como un sobre de
-    # error (status conocido), NO como una página de deadline vacía (done:false) que un cliente
-    # loop-until-done reintentaría.
+    # arrive but whose BODY hangs past the deadline must be reported as an envelope of
+    # error (known status), NOT as an empty deadline page (done:false) that a client
+    # with loop-until-done would retry.
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, stream=_StallingAsyncStream(),
                               headers={"content-type": "application/json"})

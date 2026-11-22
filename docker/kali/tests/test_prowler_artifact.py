@@ -1,9 +1,9 @@
-"""Tests stdlib-only de la finalización del escaneo (`docker/kali/prowler_artifact.py`).
+"""Stdlib-only tests of scan finalization (`docker/kali/prowler_artifact.py`).
 
 Ejercitan el camino post-escaneo del worker SIN `mcp`/`prowler`: con un OCSF de
 fixture, el `done` trae la REFERENCIA `artifact` (sha256/size correctos) y NO los
-findings inline; el puente `read_scan_findings` (vía tool_streaming) sigue sirviendo
-las páginas; una salida ilegible produce `None` (el caller publica failed).
+inline findings; the `read_scan_findings` bridge (via tool_streaming) keeps serving
+pages; unreadable output yields `None` (the caller publishes failed).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-# Módulos bajo prueba en docker/kali/ (stdlib puro; no importan `mcp`/`anyio`).
+# Modules under test in docker/kali/ (pure stdlib; no `mcp`/`anyio` import).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import artifact_store  # noqa: E402
@@ -53,14 +53,14 @@ def test_finalize_scan_stages_artifact_and_done_has_ref_not_inline(staging):
     assert done["findings_count"] == 5
     # Clave de la oleada: NADA de findings inline en el canal de control.
     assert "findings" not in done
-    # La referencia pequeña del plano de datos, con sha256/size del CRUDO.
+    # The small data-plane reference, with sha256/size of the RAW output.
     artifact = done["artifact"]
     assert artifact["execution_id"] == "exec-1"
     assert artifact["name"] == prowler_artifact.PROWLER_ARTIFACT_NAME
     assert artifact["size"] == len(raw)
     assert artifact["sha256"] == hashlib.sha256(raw).hexdigest()
 
-    # El artefacto crudo quedó staged idéntico (lo servirá el HTTP al cliente).
+    # The raw artifact was staged identically (HTTP will serve it to the client).
     staged = artifact_store.resolve("exec-1", prowler_artifact.PROWLER_ARTIFACT_NAME)
     assert staged.read_bytes() == raw
 
@@ -78,7 +78,7 @@ def test_finalize_scan_keeps_read_scan_findings_bridge(staging):
 
 
 def test_finalize_scan_unreadable_output_returns_none(staging):
-    """Sin salida JSON legible -> None (el worker publica failed con diagnóstico)."""
+    """No readable JSON output -> None (the worker publishes failed with a diagnostic)."""
     outdir = staging / "empty"
     outdir.mkdir(parents=True, exist_ok=True)
     assert prowler_artifact.finalize_scan("exec-3", outdir, 1, {}) is None

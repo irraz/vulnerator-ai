@@ -1,12 +1,12 @@
 """Tests stdlib-only del runner AWS del enum (`aws_exec.py`).
 
-Ejercitan la LÓGICA del runner SIN boto3 ni el script real (``aws_iam_enum.py`` no se
-importa: boto3 no está en el venv de dev). Fijan que:
+They exercise the runner's LOGIC without boto3 or the real script (``aws_iam_enum.py`` is not
+imported: boto3 is not in the dev venv). They assert that:
   - ``build_iam_enum_cmd`` produce el argv esperado (sin shell) y RECHAZA fail-closed un
     ``account_id`` mal formado;
   - ``run_iam_enum`` con un ``run_tool_streaming`` de FIXTURE (escribe un JSON en outfile)
     devuelve ``done`` con ``output`` legible (el JSON crudo);
-  - sin salida legible -> ``failed`` con diagnóstico; account_id inválido -> ``failed`` sin
+  - no readable output -> ``failed`` with diagnostic; invalid account_id -> ``failed`` without
     ejecutar nada; timeout -> ``failed``.
 """
 
@@ -54,7 +54,7 @@ def test_build_iam_enum_cmd_trims_account():
 
 
 def _fake_runner(write_output):
-    """Fake de ``run_tool_streaming``: escribe la salida de fixture y devuelve éxito."""
+    """Fake of ``run_tool_streaming``: writes fixture output and returns success."""
 
     def _run(cmd, execution_id, timeout=0, env=None, cwd=None):
         write_output(cmd)
@@ -77,7 +77,7 @@ def test_run_iam_enum_done_with_readable_output(monkeypatch):
     result = aws_exec.run_iam_enum("123456789012", "", "exec-ok")
     assert result["status"] == "done"
     assert result["returncode"] == 0
-    # El 'output' es el JSON crudo verbatim (viaja inline, no se stagea aquí).
+    # The 'output' is the raw JSON verbatim (travels inline, not staged here).
     assert json.loads(result["output"]) == document
 
 
@@ -103,8 +103,8 @@ def test_run_iam_enum_rejects_bad_account_without_running(monkeypatch):
     monkeypatch.setattr(aws_exec.tool_streaming, "run_tool_streaming", _should_not_run)
     result = aws_exec.run_iam_enum("not-an-account", "", "exec-bad")
     assert result["status"] == "failed"
-    assert called["ran"] is False  # fail-closed: no se ejecutó el subproceso
-    assert "account_id inválido" in result["error"]
+    assert called["ran"] is False  # fail-closed: no subprocess was run
+    assert "invalid account_id" in result["error"]
 
 
 def test_run_iam_enum_timeout_reports_failed(monkeypatch):

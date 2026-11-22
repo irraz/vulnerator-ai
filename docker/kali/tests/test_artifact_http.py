@@ -1,7 +1,7 @@
 """Tests stdlib-only del servidor HTTP de artefactos (`docker/kali/artifact_http.py`).
 
-Arranca el server en un puerto efímero en un hilo y lo ejercita con `urllib.request`
-(stdlib). Verifica: GET con token -> 200 + bytes idénticos (incl. un blob > 1 MiB por
+Starts the server on an ephemeral port in a thread and exercises it with `urllib.request`
+(stdlib). Verifies: GET with token -> 200 + identical bytes (incl. a blob > 1 MiB via
 el stream chunked), 403 sin token, 400 ante traversal, 404 si no existe, y fail-closed
 si se intenta arrancar sin token.
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-# Los módulos bajo prueba viven en docker/kali/ (no importan `mcp`/`anyio`).
+# The modules under test live in docker/kali/ (they do not import `mcp`/`anyio`).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import artifact_http  # noqa: E402
@@ -27,7 +27,7 @@ _TOKEN = "test-shared-token"
 
 @pytest.fixture()
 def server(tmp_path, monkeypatch):
-    """Staging en tmp + servidor HTTP en puerto efímero; se cierra al terminar."""
+    """Staging in tmp + HTTP server on ephemeral port; closed on completion."""
     monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
     srv, _thread = artifact_http.serve_in_thread("127.0.0.1", 0, _TOKEN)
     yield srv
@@ -67,9 +67,9 @@ def test_get_with_token_returns_bytes(server):
 
 
 def test_get_large_blob_over_1mib_streams_chunked(server):
-    """Un blob > 1 MiB se sirve por stream chunked, idéntico byte a byte.
+    """A blob > 1 MiB is served via chunked stream, byte-for-byte identical.
 
-    Es justo lo que el evento SSE único (tope 1 048 576 B) no podía entregar.
+    This is exactly what the single SSE event (1,048,576 B cap) could not deliver.
     """
     size = 3 * 1024 * 1024  # 3 MiB, muy por encima del viejo tope SSE
     payload = (b"B" * size)

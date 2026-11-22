@@ -1,19 +1,19 @@
 """Servidor HTTP de artefactos de `kali-mcp` — el canal del plano de DATOS.
 
 STDLIB PURA (``http.server``), independiente de ``mcp``/``anyio`` (vive en su propio
-módulo, testeable sin el SDK). Sirve el resultado CRUDO staged por ``artifact_store``
+module, testable without the SDK). It serves the RAW result staged by ``artifact_store``
 al cliente, que lo baja por STREAM. Es el transporte que sustituye al evento SSE de
-1 MiB: el blob grande viaja por AQUÍ (HTTP chunked por referencia), NUNCA por el canal
+1 MiB: the large blob travels HERE (HTTP chunked by reference), NEVER through the channel
 de control (MCP).
 
 Frontera de seguridad:
   - Exige la cabecera ``X-Artifact-Token`` == ``KALI_ARTIFACTS_TOKEN`` (403 sin ella o
-    si no coincide; comparación en tiempo constante). Fail-closed: ``make_server`` NO
+    if it does not match; constant-time comparison). Fail-closed: ``make_server`` does NOT
     arranca sin token.
-  - Confina rutas vía ``artifact_store.resolve`` (``..``/separadores -> 400).
+  - Confines paths via ``artifact_store.resolve`` (``..``/separators -> 400).
   - 404 si el artefacto no existe. El crudo es DATO NO CONFIABLE: se transporta
     verbatim, no se interpreta ni se loguea su contenido.
-  - NO se publica al host (sólo red interna docker); lo decide la orquestación.
+  - NOT exposed to the host (docker internal network only); orchestration decides this.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import artifact_store
 # Prefijo de ruta del endpoint de datos. Espejo del que el cliente compone al bajar.
 _PREFIX = "/artifacts/"
 
-# Tamaño de chunk al servir (64 KiB): stream, no "todo de golpe".
+# Chunk size when serving (64 KiB): stream, not "all at once".
 _CHUNK_SIZE = 65536
 
 # Cabecera del token compartido entre servidor y cliente.
@@ -41,7 +41,7 @@ class _ArtifactHandler(BaseHTTPRequestHandler):
     server_version = "kali-artifacts/1.0"
 
     # Silencia el log por defecto: la ruta puede contener dato no confiable y no se
-    # loguea verbatim. Si hiciera falta trazar, se haría por un canal propio.
+    # logs verbatim. If tracing were needed, it would go through its own channel.
     def log_message(self, *args, **kwargs) -> None:  # noqa: D401, ANN002, ANN003
         return
 
@@ -59,7 +59,7 @@ class _ArtifactHandler(BaseHTTPRequestHandler):
         provided = self.headers.get(_TOKEN_HEADER, "") or ""
         if not provided:
             return False
-        # Comparación en tiempo constante (evita oráculo por temporización).
+        # Constant-time comparison (avoids a timing oracle).
         return hmac.compare_digest(provided, expected)
 
     def do_GET(self) -> None:  # noqa: N802 - firma de BaseHTTPRequestHandler
@@ -70,7 +70,7 @@ class _ArtifactHandler(BaseHTTPRequestHandler):
             self._deny(403, "forbidden: missing or invalid artifact token")
             return
 
-        # 2) Sólo el endpoint de artefactos.
+        # 2) Only the artifacts endpoint.
         if not path.startswith(_PREFIX):
             self._deny(404, "not found")
             return
@@ -97,7 +97,7 @@ class _ArtifactHandler(BaseHTTPRequestHandler):
             self._deny(404, "not found")
             return
 
-        # 6) Stream del fichero con Content-Length + sha256 (de la meta si está).
+        # 6) Stream the file with Content-Length + sha256 (from meta if present).
         entry = artifact_store.stat(execution_id, name)
         size = entry["size"] if entry and "size" in entry else target.stat().st_size
         self.send_response(200)
@@ -117,17 +117,17 @@ class _ArtifactHandler(BaseHTTPRequestHandler):
 def make_server(host: str, port: int, token: str) -> ThreadingHTTPServer:
     """Crea (sin arrancar) el servidor HTTP de artefactos ligado a ``token``.
 
-    Fail-closed: levanta ``ValueError`` si ``token`` es vacío — un endpoint de datos sin
-    token sería un canal abierto a dato potencialmente sensible. ``port=0``
-    elige un puerto efímero (útil en tests; el real se lee de ``server.server_address``).
+    Fail-closed: raises ``ValueError`` if ``token`` is empty — a data endpoint without
+    a token would be an open channel to potentially sensitive data. ``port=0``
+    picks an ephemeral port (useful in tests; the real one is read from ``server.server_address``).
     """
     if not token:
         raise ValueError(
-            "KALI_ARTIFACTS_TOKEN vacío: el servidor de artefactos no arranca sin "
+            "KALI_ARTIFACTS_TOKEN empty: the artifacts server does not start without "
             "token (fail-closed)."
         )
     server = ThreadingHTTPServer((host, port), _ArtifactHandler)
-    # El handler lee el token del servidor (no de una global): un único punto de verdad.
+    # The handler reads the token from the server (not a global): a single source of truth.
     server.artifact_token = token  # type: ignore[attr-defined]
     return server
 

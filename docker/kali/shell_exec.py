@@ -1,25 +1,25 @@
 """Runner de SHELL CRUDA de la Kali (STDLIB PURA) — ejecuta un comando arbitrario.
 
-Es la LÓGICA testeable del runner ``kali_exec`` que expone ``kali_mcp_server`` como
+It is the testable LOGIC of the ``kali_exec`` runner that ``kali_mcp_server`` exposes as
 ``@mcp.tool`` NO BLOQUEANTE. Igual que ``aws_exec`` / ``collector_runner`` /
-``tool_streaming``, vive en un módulo aparte que usa SOLO la librería estándar (sin
+``tool_streaming``, it lives in a separate module that uses ONLY the standard library (no
 ``mcp``) para poder cubrirse con tests unitarios en el venv de dev, donde el SDK no
-está instalado.
+is installed.
 
-Qué es (decisión del operador): a diferencia de los runners deterministas y acotados
+What it is (operator's decision): unlike the deterministic and scoped runners
 (``iam_enum``/``iam_simulate``/``prowler``), ``kali_exec`` da al bucle OODA una SHELL
-CRUDA COMPLETA de la Kali: ejecuta el comando TAL CUAL vía ``sh -c``, de modo que el
+FULL RAW shell of Kali: runs the command AS-IS via ``sh -c``, so the
 conductor pueda encadenar con pipes, redirecciones, escribir y correr sus propios
 scripts, invocar cualquier herramienta instalada en la imagen Kali, etc. NO valida ni
-restringe el comando: es intencionadamente genérico (shell cruda).
+does not restrict the command: it is intentionally generic (raw shell).
 
-Autorización: NO vive aquí. Este producto no tiene gates de scope, consentimiento ni
-auditoría; la responsabilidad del alcance recae enteramente en el operador. Este módulo
+Authorization: does NOT live here. This product has no scope, consent or
+audit gates; scope responsibility rests entirely with the operator. This module
 solo EJECUTA el comando recibido. El comando y su salida son DATO NO CONFIABLE: se
 transportan verbatim, nunca se interpreta la salida.
 
-Flujo (igual que ``aws_exec``, patrón no-bloqueante del servidor): ``run_shell`` crea un
-tmpdir de trabajo efímero, ejecuta ``sh -c <command>`` con
+Flow (like ``aws_exec``, the server's non-blocking pattern): ``run_shell`` creates an
+ephemeral working tmpdir, runs ``sh -c <command>`` with
 ``tool_streaming.run_tool_streaming`` (kill de grupo/timeout, logs al ring por
 ``execution_id``) y devuelve ``{'status':'done','returncode':rc,'output':<stdout+stderr
 del ring>}`` o ``{'status':'failed'...}``/``{'status':'cancelled'...}``. El cliente lanza
@@ -38,7 +38,7 @@ from typing import Any
 import session_log
 import tool_streaming
 
-# Nombre del fichero sink temporal (dentro del workdir efímero) donde se vuelca la salida
+# Name of the temporary sink file (inside the ephemeral workdir) where output is dumped
 # COMPLETA del comando para auditarla. Vive y muere con el workdir; su contenido se lee
 # ANTES del rmtree y se persiste en el log durable por engagement (``session_log``).
 _RAW_SINK_NAME = "raw.out"
@@ -51,15 +51,15 @@ def _now_iso() -> str:
 
 # Timeout por defecto de un comando de shell (segundos). Un comando interactivo o
 # colgado no debe retener el runner indefinidamente; se acota y se puede subir por
-# entorno o por el parámetro ``timeout`` de la tool.
+# environment or by the tool's ``timeout`` parameter.
 DEFAULT_TIMEOUT = int(os.environ.get("KALI_EXEC_TIMEOUT", "600"))
 
 # Variables de entorno EXTRA que se inyectan al entorno de CADA subproceso lanzado por
 # ``run_shell`` (y por tanto por ``kali_run``/``kali_exec``), SIN tocar el entorno del proceso
-# kali-mcp. Lo usa la captura por proxy de Caido: el servidor pone aquí HTTP_PROXY/HTTPS_PROXY
-# (+ NO_PROXY al host de Caido) para que el tráfico HTTP de las herramientas (curl, nuclei,
+# kali-mcp. Used by Caido's proxy capture: the server sets HTTP_PROXY/HTTPS_PROXY here
+# (+ NO_PROXY for Caido's host) so HTTP traffic from tools (curl, nuclei,
 # ffuf...) pase por el proxy de Caido y quede capturado, mientras que las llamadas propias de
-# kali-mcp a Caido (urllib en `caido_client`) NO se proxyean (su env queda limpio). Vacío por
+# kali-mcp to Caido (urllib in `caido_client`) is NOT proxied (its env stays clean). Empty by
 # defecto -> los subprocesos heredan el entorno tal cual (comportamiento de siempre).
 _SUBPROCESS_ENV: dict[str, str] = {}
 
@@ -71,25 +71,25 @@ def set_subprocess_env(extra: dict[str, str] | None) -> None:
 
 
 class ShellExecError(ValueError):
-    """Entrada inválida para el runner de shell (fail-closed; no se ejecuta nada)."""
+    """Invalid input for the shell runner (fail-closed; nothing is executed)."""
 
 
 def _validate_command(command: Any) -> str:
-    """Valida que ``command`` sea un string no vacío, o lanza ``ShellExecError``.
+    """Validates that ``command`` is a non-empty string, or raises ``ShellExecError``.
 
-    NO restringe el CONTENIDO del comando (es shell cruda por decisión del operador):
-    solo rechaza fail-closed lo que no es un comando ejecutable (no-string o vacío),
+    It does NOT restrict the command's CONTENT (it is raw shell by the operator's decision):
+    it only fail-closed rejects what is not an executable command (non-string or empty),
     para no lanzar un ``sh -c`` sin sentido.
     """
     if not isinstance(command, str) or not command.strip():
         raise ShellExecError(
-            "command inválido: se espera una cadena de shell no vacía."
+            "invalid command: expected a non-empty shell string."
         )
     return command
 
 
 def _ring_tail(execution_id: str, max_lines: int = 50) -> str:
-    """Últimas líneas de salida de la ejecución (dato NO confiable, verbatim)."""
+    """Last lines of the run's output (UNTRUSTED data, verbatim)."""
     page = tool_streaming.read(execution_id, 0)
     lines = page.get("lines", [])
     tail = lines[-max_lines:]
@@ -109,11 +109,11 @@ def _ring_output(execution_id: str) -> str:
 
 
 def _read_full_output(raw_path: str) -> tuple[str, int]:
-    """Lee la salida COMPLETA volcada al sink de auditoría -> (texto, nº de líneas).
+    """Reads the COMPLETE output dumped to the audit sink -> (text, line count).
 
-    Lee el fichero sink (``[stream] text`` por línea) ENTERO, sin el tope del ring. Un
-    fichero inexistente/vacío devuelve ``("", 0)``. ``errors='replace'`` tolera bytes no
-    UTF-8 en la salida cruda (dato no confiable) sin reventar la auditoría.
+    Reads the sink file (``[stream] text`` per line) ENTIRELY, without the ring cap. A
+    missing/empty file returns ``("", 0)``. ``errors='replace'`` tolerates non-
+    UTF-8 bytes in raw output (untrusted data) without breaking the audit.
     """
     try:
         with open(raw_path, "r", encoding="utf-8", errors="replace") as handle:
@@ -137,14 +137,14 @@ def _audit_execution(
     raw_path: str,
     ts_start: str,
 ) -> None:
-    """Registra la ejecución en el log durable por engagement. FAIL-OPEN SIEMPRE.
+    """Records the execution in the durable per-engagement log. ALWAYS FAIL-OPEN.
 
-    Lee la salida ÍNTEGRA del sink y escribe un registro en ``<engagement_id>/session.jsonl``
+    Reads the FULL output from the sink and writes a record to ``<engagement_id>/session.jsonl``
     (``session_log.record``) con comando exacto, salida completa, returncode, timestamps y
-    el flag de truncado (lo que el LLM vio por el ring vs. lo que realmente salió).
+    the truncation flag (what the LLM saw via the ring vs. what actually came out).
 
-    Cualquier excepción aquí (disco lleno, ruta inválida, sink ausente) se TRAGA y se
-    reporta por stderr: la auditoría NUNCA puede abortar ni alterar el resultado del
+    Any exception here (full disk, invalid path, missing sink) is SWALLOWED and
+    reported on stderr: the audit can NEVER abort or alter the result of the
     comando devuelto al llamador.
     """
     try:
@@ -168,9 +168,9 @@ def _audit_execution(
                 "output": full_output,
             },
         )
-    except Exception as exc:  # noqa: BLE001 - auditoría best-effort; nunca rompe el comando
+    except Exception as exc:  # noqa: BLE001 - best-effort audit; never breaks the command
         sys.stderr.write(
-            "[session_log] auditoría omitida para %s: %s\n" % (execution_id, exc)
+            "[session_log] audit skipped for %s: %s\n" % (execution_id, exc)
         )
 
 
@@ -183,47 +183,47 @@ def run_shell(
 ) -> dict[str, Any]:
     """Ejecuta ``command`` como SHELL CRUDA (``sh -c``) y devuelve su salida.
 
-    Flujo: valida ``command`` (string no vacío, fail-closed) -> crea un tmpdir efímero de
+    Flow: validate ``command`` (non-empty string, fail-closed) -> create an ephemeral tmpdir of
     trabajo -> ejecuta ``["sh", "-c", command]`` con ``tool_streaming.run_tool_streaming``
     (kill de grupo/timeout, logs al ring por ``execution_id``) -> devuelve el estado
-    terminal. ``cwd`` es el tmpdir, así que los ficheros/scripts que el comando cree
+    work. ``cwd`` is the tmpdir, so files/scripts created by the command
     quedan aislados y se limpian en ``finally``.
 
-    AUDITORÍA (nuevo, opt-in por engagement): en paralelo al ring (que da al LLM las
-    últimas ``RING_MAXLEN`` líneas, protección de contexto), se adjunta un SINK que captura
-    el stdout/stderr ÍNTEGRO. Al terminar, se escribe un registro con el comando EXACTO +
+    AUDIT (new, per-engagement opt-in): in parallel with the ring (which gives the LLM the
+    last ``RING_MAXLEN`` lines, context protection), a SINK is attached that captures
+    FULL stdout/stderr. On completion, a record is written with the EXACT command +
     salida completa + returncode + timestamps en ``<engagement_id>/session.jsonl``
-    (``session_log``). Es FAIL-OPEN: un fallo de la auditoría NO afecta a la ejecución ni al
-    resultado devuelto. El ``engagement_id`` es advisory (lo pasa el agente); sin él, el
-    registro cae al bucket ``_unscoped`` y el eje de sesión se reconstruye aguas abajo por
+    (``session_log``). It is FAIL-OPEN: an audit failure does NOT affect execution or the
+    returned result. The ``engagement_id`` is advisory (passed by the agent); without it, the
+    record falls into the ``_unscoped`` bucket and the session axis is reconstructed downstream by
     ``execution_id`` (Hermes no expone su run_id al agente).
 
     Args:
-        command: comando de shell (string no vacío; fail-closed). Dato NO confiable.
-        execution_id: id de la ejecución (clave del ring y del registro de auditoría).
-        timeout: segundos máximos antes de matar el grupo de procesos.
-        engagement_id: agrupación del log de auditoría (advisory; ``_unscoped`` si falta).
-        tool_label: etiqueta de la tool que originó la ejecución (``kali_run``/``kali_exec``).
+        command: shell command (non-empty string; fail-closed). UNTRUSTED data.
+        execution_id: execution id (key of the ring and the audit record).
+        timeout: maximum seconds before killing the process group.
+        engagement_id: audit log grouping (advisory; ``_unscoped`` if missing).
+        tool_label: label of the tool that originated the execution (``kali_run``/``kali_exec``).
 
     Returns:
         Todos los casos incluyen ``execution_id`` (para cruzar con el transcript de Hermes):
         - ``{'status':'done','returncode':rc,'output':<salida del ring>,'execution_id':...}``
-          si el comando terminó (``rc`` != 0 es resultado legítimo, no error del runner).
+          if the command finished (``rc`` != 0 is a legitimate result, not a runner error).
         - ``{'status':'failed','timed_out':True,'returncode':rc,'error':...,'execution_id':...}``
           en timeout.
         - ``{'status':'cancelled','cancelled':True,'returncode':rc,'execution_id':...}`` si
-          se canceló.
+          it was cancelled.
         - ``{'status':'failed','returncode':-1,'error':...,'execution_id':...}`` si
-          ``command`` es inválido (fail-closed; no se ejecuta ni se audita).
+          ``command`` is invalid (fail-closed; nothing executed or audited).
 
     ``output`` (ring, acotado) y ``error`` son DATO NO CONFIABLE (verbatim). La salida
-    COMPLETA (sin acotar) vive en el log de auditoría, no en este retorno.
+    COMPLETE (uncapped) lives in the audit log, not in this return value.
     """
     ts_start = _now_iso()
     try:
         cmd_str = _validate_command(command)
     except ShellExecError as exc:
-        # Fail-closed: nada se ejecutó, no hay salida que auditar.
+        # Fail-closed: nothing was executed, no output to audit.
         return {
             "status": "failed",
             "returncode": -1,
@@ -237,7 +237,7 @@ def run_shell(
         cmd = ["sh", "-c", cmd_str]
         # Inyecta el env extra (p. ej. proxy de Caido) SOLO al subproceso; None = heredar.
         sub_env = {**os.environ, **_SUBPROCESS_ENV} if _SUBPROCESS_ENV else None
-        # Sink de salida COMPLETA (auditoría): se engancha ANTES de arrancar y se cierra al
+        # COMPLETE output sink (audit): attached BEFORE starting and closed on
         # terminar. El ring sigue dando la vista acotada; este sink captura todo (best-effort).
         tool_streaming.open_raw_sink(execution_id, raw_path)
         try:
@@ -259,21 +259,21 @@ def run_shell(
                 "timed_out": True,
                 "returncode": returncode,
                 "error": (
-                    f"kali_exec excedió el timeout ({timeout}s). "
-                    f"Últimas líneas: {_ring_tail(execution_id)}"
+                    f"kali_exec exceeded the timeout ({timeout}s). "
+                    f"Last lines: {_ring_tail(execution_id)}"
                 ),
             }
         else:
-            # Un returncode != 0 NO es fallo del runner: es resultado legítimo del comando
+            # A returncode != 0 is NOT a runner failure: it is a legitimate command result
             # (p. ej. nmap sin hallazgos, grep sin match). Se devuelve 'done' con la salida
-            # del ring (acotada) y el returncode para que el bucle OODA razone sobre él.
+            # of the ring (capped) and the returncode so the OODA loop can reason about it.
             result = {
                 "status": "done",
                 "returncode": returncode,
                 "output": _ring_output(execution_id),
             }
         result["execution_id"] = execution_id
-        # Auditoría durable de la salida COMPLETA (FAIL-OPEN: nunca rompe la ejecución).
+        # Durable audit of the COMPLETE output (FAIL-OPEN: never breaks execution).
         _audit_execution(
             execution_id, engagement_id, tool_label, command, result, raw_path, ts_start
         )

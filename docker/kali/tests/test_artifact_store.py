@@ -1,6 +1,6 @@
 """Tests stdlib-only del staging de artefactos de kali (`docker/kali/artifact_store.py`).
 
-No importan `mcp`/`anyio`: sólo librería estándar + pytest. Verifican put (bytes/
+They do not import `mcp`/`anyio`: only standard library + pytest. Verify put (bytes/
 fichero) con sha256/size correctos, lectura de meta, confinamiento de rutas
 (traversal/absoluta rechazadas) y tolerancia a ids/nombres desconocidos.
 """
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-# El módulo bajo prueba vive en docker/kali/ (junto al servidor MCP, que NO se
-# importa aquí porque arrastra `mcp`/`anyio`). Lo añadimos al path explícitamente.
+# The module under test lives in docker/kali/ (alongside the MCP server, which is NOT
+# imported here because it pulls in `mcp`/`anyio`). We add it to the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import artifact_store  # noqa: E402
@@ -22,7 +22,7 @@ import artifact_store  # noqa: E402
 
 @pytest.fixture()
 def staging(tmp_path, monkeypatch):
-    """Apunta la raíz del staging a un tmp dir por test (env leído en caliente)."""
+    """Points the staging root to a tmp dir per test (env read at call time)."""
     monkeypatch.setenv("KALI_ARTIFACTS_DIR", str(tmp_path))
     return tmp_path
 
@@ -39,7 +39,7 @@ def test_put_bytes_stages_file_with_sha256_and_size(staging):
     assert entry["name"] == "prowler.ocsf.json"
     assert entry["meta"]["tool"] == "prowler"
 
-    # El fichero quedó staged con el contenido verbatim.
+    # The file was staged with verbatim content.
     staged = artifact_store.resolve("exec-1", "prowler.ocsf.json")
     assert staged.read_bytes() == data
 
@@ -63,7 +63,7 @@ def test_put_file_copies_source_with_correct_digest(staging, tmp_path):
 
 
 def test_put_file_survives_source_cleanup(staging, tmp_path):
-    """El artefacto staged sobrevive aunque el fichero fuente se borre después.
+    """The staged artifact survives even if the source file is deleted afterwards.
 
     Es el caso real: Prowler escribe en un TemporaryDirectory que se limpia al salir
     del worker; el staging debe tener ya una COPIA independiente.
@@ -131,6 +131,6 @@ def test_resolve_rejects_traversal_and_separators(staging, execution_id, name):
 
 
 def test_resolve_confines_under_root(staging):
-    """Un nombre válido resuelve bajo la raíz del staging."""
+    """A valid name resolves under the staging root."""
     path = artifact_store.resolve("exec-1", "prowler.ocsf.json")
     assert str(path).startswith(str(Path(staging).resolve()))

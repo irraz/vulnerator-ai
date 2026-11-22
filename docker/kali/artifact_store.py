@@ -1,19 +1,19 @@
-"""Staging EFÍMERO de artefactos de `kali-mcp` (STDLIB PURA).
+"""EPHEMERAL staging of `kali-mcp` artifacts (PURE STDLIB).
 
 El plano de DATOS en el lado del runner. Cuando una tool termina, su resultado CRUDO se
-**stagea** aquí indexado por ``execution_id`` y se SIRVE por HTTP (ver
-``artifact_http.py``); el cliente lo baja por stream a su almacén persistente. Este
-staging es efímero (vive en el contenedor Kali): no es la fuente de verdad, sólo el
+**staged** here indexed by ``execution_id`` and SERVED over HTTP (see
+``artifact_http.py``); the client downloads it by stream to its persistent store. This
+staging is ephemeral (lives in the Kali container): it is not the source of truth, only the
 punto de entrega del dato grande SIN que viaje por el canal de control (MCP), evitando
-el límite de 1 MiB de un único evento SSE.
+the 1 MiB limit of a single SSE event.
 
-Por qué un módulo aparte, igual que ``tool_streaming.py`` (testeabilidad):
-``kali_mcp_server.py`` importa ``mcp``/``anyio`` (no están en el venv de dev). Esta
-mecánica usa SOLO la librería estándar, así se cubre con tests sin el SDK.
+Why a separate module, like ``tool_streaming.py`` (testability):
+``kali_mcp_server.py`` imports ``mcp``/``anyio`` (not in the dev venv). This
+mechanism uses ONLY the standard library, so it is covered by tests without the SDK.
 
 Disciplina de seguridad: el blob es DATO NO CONFIABLE (salida verbatim de una tool
-contra un target real). Aquí se TRANSPORTA y PERSISTE verbatim; nunca se interpreta.
-Las rutas se CONFINAN bajo la raíz (sin ``..``/separadores) para que un
+against a real target). Here it is TRANSPORTED and PERSISTED verbatim; it is never interpreted.
+Paths are CONFINED under the root (no ``..``/separators) so that a
 ``execution_id``/``name`` manipulado no escape del directorio de staging.
 """
 
@@ -27,13 +27,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-# Raíz del staging. Configurable por entorno; default `/artifacts` (dir del contenedor
-# Kali, efímero). El cliente lee por HTTP, no por FS compartido.
+# Staging root. Configurable via environment; default `/artifacts` (container dir of
+# Kali, ephemeral). The client reads over HTTP, not via shared FS.
 _DEFAULT_ROOT = "/artifacts"
 
 _META_NAME = "meta.json"
 
-# Tamaño de chunk para copiar/leer sin cargar el fichero entero en RAM.
+# Chunk size for copying/reading without loading the whole file into RAM.
 _CHUNK_SIZE = 65536
 
 
@@ -43,7 +43,7 @@ def _now_iso() -> str:
 
 
 def root_dir() -> Path:
-    """Directorio raíz del staging (``KALI_ARTIFACTS_DIR`` o ``/artifacts``)."""
+    """Staging root directory (``KALI_ARTIFACTS_DIR`` or ``/artifacts``)."""
     return Path(os.environ.get("KALI_ARTIFACTS_DIR", _DEFAULT_ROOT))
 
 
@@ -54,7 +54,7 @@ def _safe_segment(value: str) -> str:
     tocar el filesystem. Devuelve el propio valor si es seguro; si no, ``ValueError``.
     """
     if not value or not isinstance(value, str):
-        raise ValueError("segmento de artefacto vacío o no-string")
+        raise ValueError("empty or non-string artifact segment")
     if value in (".", "..") or "/" in value or "\\" in value or "\x00" in value:
         raise ValueError("segmento de artefacto inseguro: %r" % (value,))
     return value
@@ -65,10 +65,10 @@ def _execution_dir(execution_id: str) -> Path:
 
 
 def resolve(execution_id: str, name: str) -> Path:
-    """Resuelve la ruta de un artefacto staged CONFINADA bajo la raíz.
+    """Resolves the path of a staged artifact CONFINED under the root.
 
     Valida ``execution_id``/``name`` (sin traversal ni separadores) y verifica que la
-    ruta resuelta cae bajo la raíz del staging. Levanta ``ValueError`` si algo intenta
+    resolved path falls under the staging root. Raises ``ValueError`` if anything tries to
     escapar. NO comprueba existencia (eso es cosa del caller: 404 si no existe).
     """
     safe_exec = _safe_segment(execution_id)
@@ -76,11 +76,11 @@ def resolve(execution_id: str, name: str) -> Path:
     root = root_dir().resolve()
     candidate = (root / safe_exec / safe_name).resolve()
     if candidate != root and root not in candidate.parents:
-        raise ValueError("ruta de artefacto fuera de la raíz de staging")
+        raise ValueError("artifact path outside the staging root")
     return candidate
 
 
-# --- metadatos por ejecución (meta.json) -------------------------------------
+# --- per-execution metadata (meta.json) -------------------------------------
 
 
 def _meta_path(execution_id: str) -> Path:
@@ -88,7 +88,7 @@ def _meta_path(execution_id: str) -> Path:
 
 
 def read_meta(execution_id: str) -> dict[str, Any]:
-    """Devuelve el índice de artefactos staged de una ejecución (``{}`` si no hay).
+    """Returns the index of staged artifacts for an execution (``{}`` if none).
 
     Estructura: ``{"execution_id": str, "artifacts": {name: {size, sha256, staged_at,
     meta}}}``. Un ``execution_id`` desconocido o un meta ilegible devuelven ``{}``
@@ -104,7 +104,7 @@ def read_meta(execution_id: str) -> dict[str, Any]:
 
 
 def _write_meta(execution_id: str, index: dict[str, Any]) -> None:
-    """Escribe el índice de meta de la ejecución de forma atómica (tmp+replace)."""
+    """Writes the execution meta index atomically (tmp+replace)."""
     exec_dir = _execution_dir(execution_id)
     exec_dir.mkdir(parents=True, exist_ok=True)
     path = _meta_path(execution_id)
@@ -124,7 +124,7 @@ def _write_meta(execution_id: str, index: dict[str, Any]) -> None:
 def _record_meta(
     execution_id: str, name: str, size: int, sha256: str, meta: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Añade/actualiza la entrada de un artefacto en el meta.json de la ejecución."""
+    """Adds/updates an artifact entry in the execution's meta.json."""
     index = read_meta(execution_id)
     if not index:
         index = {"execution_id": execution_id, "artifacts": {}}
@@ -141,7 +141,7 @@ def _record_meta(
     return entry
 
 
-# --- staging (atómico, por stream) -------------------------------------------
+# --- staging (atomic, streamed) -------------------------------------------
 
 
 def _stage_stream(
@@ -149,7 +149,7 @@ def _stage_stream(
 ) -> tuple[int, str]:
     """Escribe un stream de chunks al destino confinado (tmp+replace) -> (size, sha256).
 
-    Calcula tamaño + sha256 sobre la marcha, sin materializar el artefacto entero en
+    Computes size + sha256 on the fly, without materializing the entire artifact in
     RAM (clave para resultados grandes).
     """
     dest = resolve(execution_id, name)
@@ -182,7 +182,7 @@ def put_bytes(
     data: bytes,
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Stagea ``data`` como artefacto ``name`` de la ejecución y registra su meta.
+    """Stages ``data`` as artifact ``name`` of the execution and records its meta.
 
     Devuelve la entrada de meta ``{name, size, sha256, staged_at, meta}``.
     """
@@ -196,7 +196,7 @@ def put_file(
     src_path: str | os.PathLike[str],
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Stagea el fichero ``src_path`` como artefacto ``name`` (copiándolo por chunks).
+    """Stages the file ``src_path`` as artifact ``name`` (copying it in chunks).
 
     Copia el contenido de ``src_path`` al destino confinado por stream (no carga el
     fichero entero en RAM) ANTES de que el caller limpie su directorio temporal.

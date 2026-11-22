@@ -1,29 +1,29 @@
 """Cliente de la API de DNSDumpster (STDLIB PURA) — recon DNS + superficie de ataque.
 
-Es la LÓGICA testeable del runner ``dns_recon`` que ``kali_mcp_server`` expone como
+It is the testable LOGIC of the ``dns_recon`` runner that ``kali_mcp_server`` exposes as
 ``@mcp.tool``. Igual que ``shell_exec`` / ``finding_store`` / ``scope_guard``, vive en un
-módulo aparte que usa SOLO la librería estándar (``urllib``, sin ``mcp`` ni ``requests``)
-para poder cubrirse con tests unitarios en el venv de dev, donde el SDK no está instalado.
+separate module that uses ONLY the standard library (``urllib``, no ``mcp`` or ``requests``)
+so it can be covered by unit tests in the dev venv, where the SDK is not installed.
 
-Qué resuelve: DNSDumpster publica una API de pago que, dado un dominio, devuelve su
+What it solves: DNSDumpster offers a paid API that, given a domain, returns its
 superficie de ataque (registros A/CNAME/MX/NS con sus IPs, ASN, PTR y banners HTTP/HTTPS,
-más TXT). El bucle OODA la usa para, de un solo tiro, enumerar hosts e IPs del objetivo y
-los servicios que exponen, sin lanzar DNS bruto. Este módulo encapsula el contrato REAL de
+plus TXT). The OODA loop uses it to enumerate target hosts and IPs in one shot, and
+the services they expose, without running raw DNS. This module encapsulates the REAL contract of
 la API (aprendido de la doc oficial, ver ``docs/``):
 
   - Endpoint dominio:   ``GET https://api.dnsdumpster.com/domain/{domain}``
-  - Endpoint banners:   ``GET https://api.dnsdumpster.com/banners/{CIDR}`` (máx. /24 = 254 hosts)
+  - Banners endpoint:   ``GET https://api.dnsdumpster.com/banners/{CIDR}`` (max /24 = 254 hosts)
   - Auth:               header ``X-API-Key: <key>`` (la key vive en el dashboard de la cuenta)
-  - Paginación:         ``?page=N`` (>200 registros requiere membresía Plus)
+  - Pagination:         ``?page=N`` (>200 records requires a Plus membership)
   - Mapa:               ``?map=1`` (Plus; base64 muy pesado — NO se pide por defecto)
-  - Límites de cuenta:  free 50 registros, Plus 200
+  - Account limits:  free 50 records, Plus 200
   - Rate limit:         1 request / 2s -> HTTP 429 ``{"error":"Rate limit exceeded"}``
 
-Disciplina de rate limit: la API es estricta (1 req/2s). Este módulo SERIALIZA sus llamadas
-con un throttle a nivel de módulo (reloj monotónico) de modo que ``recon_domain`` pueda
-abanicar varias páginas/CIDRs sin que el llamante tenga que dormir a mano, y además
+Rate-limit discipline: the API is strict (1 req/2s). This module SERIALIZES its calls
+with a module-level throttle (monotonic clock) so that ``recon_domain`` can
+fan out over several pages/CIDRs without the caller having to sleep manually, and also
 reintenta una vez ante un 429. Dato NO confiable: la respuesta de la API se transporta
-verbatim; aquí sólo se normaliza su forma, nunca se interpreta su contenido.
+verbatim; here only its shape is normalized, its content is never interpreted.
 """
 
 from __future__ import annotations
@@ -43,21 +43,21 @@ API_KEY_HEADER = "X-API-Key"  # pragma: allowlist secret
 API_KEY_ENV = "DNSDUMPSTER_API_KEY"  # pragma: allowlist secret
 
 # Rate limit oficial: 1 request / 2s. Se respeta con margen para no comernos un 429 en
-# ráfagas (abanico de páginas o de CIDRs). Overridable por si la cuenta cambia de plan.
+# bursts (fan-out of pages or CIDRs). Overridable in case the account changes plan.
 MIN_INTERVAL_S = float(os.environ.get("DNSDUMPSTER_MIN_INTERVAL", "2.1"))
 DEFAULT_TIMEOUT_S = int(os.environ.get("DNSDUMPSTER_TIMEOUT", "30"))
 
-# Tipos de registro que la respuesta agrupa por sección; se normalizan en el mismo esquema.
+# Record types that the response groups by section; normalized into the same schema.
 _RECORD_SECTIONS = ("a", "cname", "mx", "ns")
 
-# Reloj del último request (monotónico, a nivel de módulo). El throttle es best-effort y
-# NO es thread-safe por diseño: el servidor MCP corre estos runners en background de forma
-# serializada por ejecución; no se comparte entre procesos.
+# Clock of the last request (monotonic, module-level). The throttle is best-effort and
+# is NOT thread-safe by design: the MCP server runs these runners in the background in a
+# serialized manner per execution; it is not shared across processes.
 _last_request_ts = 0.0
 
 
 class DnsDumpsterError(ValueError):
-    """Entrada inválida para el cliente (fail-closed; no se hace ninguna request)."""
+    """Invalid input for the client (fail-closed; no request is made)."""
 
 
 def _throttle() -> None:
@@ -71,28 +71,28 @@ def _throttle() -> None:
 
 
 def _validate_domain(domain: Any) -> str:
-    """Valida que ``domain`` sea un string no vacío y sin esquema/espacios.
+    """Validates that ``domain`` is a non-empty string with no scheme/spaces.
 
-    NO resuelve ni comprueba que exista: sólo rechaza fail-closed lo que no sirve como
-    path de la API (no-string, vacío, con ``/`` o espacios) para no construir una URL rota.
+    It does not resolve or check existence: it only fail-closed rejects what is unusable as a
+    API path (non-string, empty, with ``/`` or spaces) to avoid building a broken URL.
     """
     if not isinstance(domain, str) or not domain.strip():
-        raise DnsDumpsterError("domain inválido: se espera un dominio no vacío.")
+        raise DnsDumpsterError("invalid domain: expected a non-empty domain.")
     d = domain.strip().lower()
     if d.startswith(("http://", "https://")):
         d = d.split("://", 1)[1]
     d = d.strip("/")
     if "/" in d or " " in d or not d:
-        raise DnsDumpsterError(f"domain inválido: {domain!r}")
+        raise DnsDumpsterError(f"invalid domain: {domain!r}")
     return d
 
 
 def _resolve_key(api_key: str | None) -> str:
-    """Devuelve la API key explícita o la del entorno, o lanza fail-closed."""
+    """Returns the explicit API key or the environment one, or fails closed."""
     key = (api_key or os.environ.get(API_KEY_ENV, "")).strip()
     if not key:
         raise DnsDumpsterError(
-            f"Falta la API key de DNSDumpster: pásala o exporta {API_KEY_ENV}."
+            f"Missing DNSDumpster API key: pass it or export {API_KEY_ENV}."
         )
     return key
 
@@ -104,7 +104,7 @@ def _get(path: str, api_key: str, timeout: int) -> dict[str, Any]:
     ``status='failed'``):
       - ``{'status':'ok','data':<json>}``
       - ``{'status':'rate_limited','error':...}``       (HTTP 429)
-      - ``{'status':'unauthorized','error':...}``        (HTTP 401/403 — key inválida/plan)
+      - ``{'status':'unauthorized','error':...}``        (HTTP 401/403 — invalid key/plan)
       - ``{'status':'failed','error':...,'http_status':n}`` (otros)
     """
     url = f"{API_BASE}{path}"
@@ -112,7 +112,7 @@ def _get(path: str, api_key: str, timeout: int) -> dict[str, Any]:
     _throttle()
     try:
         # nosec B310: el esquema es https FIJO (API_BASE) y el dominio se valida
-        # (sin esquema propio ni '/'), así que no hay apertura de file:// ni esquemas raros.
+        # (no own scheme or '/'), so there is no file:// opening or exotic schemes.
         with urllib.request.urlopen(
             req, timeout=timeout
         ) as resp:  # noqa: S310 - https fijo
@@ -130,7 +130,7 @@ def _get(path: str, api_key: str, timeout: int) -> dict[str, Any]:
             return {
                 "status": "unauthorized",
                 "error": body
-                or f"HTTP {exc.code}: API key inválida o plan insuficiente.",
+                or f"HTTP {exc.code}: invalid API key or insufficient plan.",
             }
         return {"status": "failed", "http_status": exc.code, "error": body or str(exc)}
     except urllib.error.URLError as exc:
@@ -146,10 +146,10 @@ def query_domain(
     include_map: bool = False,
     timeout: int = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Consulta ``/domain/{domain}`` (una página) y devuelve el JSON crudo de la API.
+    """Queries ``/domain/{domain}`` (one page) and returns the raw API JSON.
 
-    ``page`` mapea al parámetro ``?page=N`` (Plus para >200 registros); ``include_map``
-    añade ``?map=1`` (Plus, base64 pesado). Reintenta UNA vez ante un 429 (respetando el
+    ``page`` maps to parameter ``?page=N`` (Plus for >200 records); ``include_map``
+    adds ``?map=1`` (Plus, heavy base64). Retries ONCE on a 429 (respecting the
     rate limit). Dato NO confiable: ``data`` se devuelve verbatim.
     """
     d = _validate_domain(domain)
@@ -164,8 +164,8 @@ def query_domain(
 
     result = _get(path, key, timeout)
     if result["status"] == "rate_limited":
-        # Un único reintento tras esperar el intervalo completo (el throttle del _get ya
-        # separa, pero el 429 puede venir de una ráfaga previa del propio plan).
+        # A single retry after waiting the full interval (the _get throttle already
+        # separates them, but the 429 may come from an earlier burst of the plan itself).
         time.sleep(MIN_INTERVAL_S)
         result = _get(path, key, timeout)
     return result
@@ -176,26 +176,26 @@ def query_banners(
     api_key: str | None = None,
     timeout: int = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Consulta ``/banners/{CIDR}`` (banners de red; máx. /24 = 254 hosts).
+    """Queries ``/banners/{CIDR}`` (network banners; max /24 = 254 hosts).
 
-    No valida el CIDR salvo que sea string no vacío (la API lo rechaza si es inválido):
+    It does not validate the CIDR beyond being a non-empty string (the API rejects invalid ones):
     se transporta tal cual. Mismo dict de estado que ``query_domain``.
     """
     if not isinstance(cidr, str) or not cidr.strip():
         raise DnsDumpsterError(
-            "cidr inválido: se espera un CIDR no vacío (p. ej. 1.2.3.0/24)."
+            "invalid cidr: expected a non-empty CIDR (e.g. 1.2.3.0/24)."
         )
     key = _resolve_key(api_key)
     return _get(f"/banners/{cidr.strip()}", key, timeout)
 
 
-# --------------------------------------------------------------- normalización de salida
+# --------------------------------------------------------------- output normalization
 
 
 def _iter_ip_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Aplana A/CNAME/MX/NS en una lista de registros {record_type, host, ip, ...}.
 
-    La respuesta agrupa por sección y cada host lleva una lista ``ips``; aquí se desdobla
+    The response groups by section and each host has an ``ips`` list; here it is flattened
     a una fila por IP, conservando el tipo de registro y los campos de banner si existen.
     Robusto a secciones ausentes o con forma inesperada (dato NO confiable).
     """
@@ -263,7 +263,7 @@ def extract_surface(data: dict[str, Any]) -> dict[str, Any]:
       - ``ips``    : lista DEDUPLICADA de IPs vistas (para abanicar escaneos aguas abajo).
       - ``cidrs``  : lista DEDUPLICADA de ``asn_range`` (para el endpoint de banners).
       - ``txt``    : registros TXT verbatim (SPF/verificaciones).
-      - ``counts`` : conteos rápidos (hosts, ips, por tipo de registro).
+      - ``counts`` : quick counts (hosts, ips, by record type).
     """
     if not isinstance(data, dict):
         return {"hosts": [], "ips": [], "cidrs": [], "txt": [], "counts": {}}
@@ -302,16 +302,16 @@ def recon_domain(
     """Recon de alto nivel: pagina ``/domain``, normaliza y (opcional) abanica banners.
 
     Flujo:
-      1) Consulta ``/domain`` hasta ``max_pages`` (parando cuando una página no aporta
-         hosts nuevos; respeta el rate limit vía el throttle de ``_get``).
-      2) Normaliza con ``extract_surface`` (hosts, IPs únicas, CIDRs, TXT).
+      1) Query ``/domain`` up to ``max_pages`` (stopping when a page brings no
+         new hosts; respects the rate limit via ``_get``'s throttle).
+      2) Normalizes with ``extract_surface`` (hosts, unique IPs, CIDRs, TXT).
       3) Si ``with_banners`` y la cuenta lo permite, consulta ``/banners/{CIDR}`` por cada
-         CIDR único hallado y adjunta la salida cruda (dato NO confiable, verbatim).
+         single CIDR found and attaches the raw output (UNTRUSTED data, verbatim).
 
     Returns ``{'status':'done', 'domain':..., 'surface':..., 'pages':n, 'banners':[...]}``
     o un dict de error de ``query_domain`` (``unauthorized``/``rate_limited``/``failed``)
-    si la PRIMERA página falla. Las páginas/banners posteriores que fallen se anotan en
-    ``warnings`` sin abortar (lo ya recolectado sigue siendo útil para el bucle OODA).
+    if the FIRST page fails. Later pages/banners that fail are noted in
+    ``warnings`` without aborting (what was already collected remains useful for the OODA loop).
     """
     d = _validate_domain(domain)
     key = _resolve_key(api_key)
@@ -333,14 +333,14 @@ def recon_domain(
         if page == 1:
             merged = data
         else:
-            # Concatena las secciones de registro de las páginas siguientes.
+            # Concatenate the record sections of the following pages.
             for section in _RECORD_SECTIONS:
                 if isinstance(data.get(section), list):
                     merged.setdefault(section, [])
                     merged[section].extend(data[section])
         surface_so_far = extract_surface(merged)
         if surface_so_far["counts"]["hosts"] == prev_host_count:
-            break  # la página no aportó hosts nuevos: no seguimos paginando
+            break  # the page brought no new hosts: do not keep paginating
         prev_host_count = surface_so_far["counts"]["hosts"]
 
     surface = extract_surface(merged)

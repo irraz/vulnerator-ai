@@ -1,11 +1,11 @@
-"""Tests de la lógica PURA del wrapper MCP (`docker/mcp/mcp_tool_logic.py`).
+"""Tests of the PURE logic of the MCP wrapper (`docker/mcp/mcp_tool_logic.py`).
 
-NO importan `mcp`/FastMCP: solo el módulo SDK-free `mcp_tool_logic` + pytest. Cubren el
-formato de scope-folding, la validación de entrada (empty input/scope, clamp de cursor,
-normalización de opcionales), la terminalidad por booleanos LITERALES (`is_terminal_run`,
+They do not import `mcp`/FastMCP: only the SDK-free `mcp_tool_logic` module + pytest. They cover the
+scope-folding format, input validation (empty input/scope, cursor clamp,
+optional normalization), terminality by LITERAL booleans (`is_terminal_run`,
 fija review Finding "truthy terminal") y el contrato de `done` de `stream_run_events`
 (`decide_stream_done`, fija los Findings "done on cap-truncated batches" + "done untested"),
-todo lógica pura testeable sin la API viva ni el SDK.
+all pure logic testable without the live API or the SDK.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def test_fold_scope_prefix_and_order():
     out = mtl.fold_scope_into_input("escanea el host", "solo juice-shop:3000")
     assert out.startswith(mtl.SCOPE_PREFIX)
     assert "solo juice-shop:3000" in out
-    # El input original va DESPUÉS del scope, separado por una línea en blanco.
+    # The original input comes AFTER the scope, separated by a blank line.
     assert out.endswith("escanea el host")
     assert "\n\n" in out
 
@@ -37,7 +37,7 @@ def test_fold_scope_preserves_input_verbatim():
     assert tricky in out
 
 
-# ------------------------------------------------------------------ validación
+# ------------------------------------------------------------------ validation
 
 
 def test_validate_start_pentest_ok():
@@ -76,7 +76,7 @@ def test_clamp_cursor():
     assert mtl.clamp_cursor(0) == 0
     assert mtl.clamp_cursor(-3) == 0
     assert mtl.clamp_cursor("x") == 0
-    assert mtl.clamp_cursor(True) == 0  # bool no es un cursor válido
+    assert mtl.clamp_cursor(True) == 0  # bool is not a valid cursor
 
 
 def test_normalize_optional_positive():
@@ -131,7 +131,7 @@ def test_done_false_on_cap_without_confirm():
     # (no drenado) NUNCA es done, SIN confirmar get_run (hay cola pendiente tras next_cursor).
     done, needs_err = mtl.decide_stream_done(
         saw_terminal_event=False, stream_drained=False,
-        confirm_run={"completed": True},  # aunque el run YA esté terminal upstream...
+        confirm_run={"completed": True},  # even if the run is ALREADY terminal upstream...
         confirm_is_error=False,
     )
     assert done is False and needs_err is False  # ...el cap manda: seguir paginando

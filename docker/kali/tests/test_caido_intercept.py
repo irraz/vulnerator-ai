@@ -1,12 +1,12 @@
-"""Tests stdlib-only de la interceptación de Caido (`docker/kali/caido_intercept.py`).
+"""Stdlib-only tests of Caido interception (`docker/kali/caido_intercept.py`).
 
 No importan `mcp`/`anyio` ni salen a la red: cubren las funciones PURAS (builder del
 `InterceptOptionsInput`, aplanado de la cola, acotado de `limit`) y los orquestadores con
 `graphql`/`ensure_session` SIMULADOS (monkeypatch sobre `caido_intercept.*`), nunca contra
-un Caido real. El patrón calca `tests/test_caido_client.py`.
+a real Caido. The pattern mirrors `tests/test_caido_client.py`.
 
-El flujo end-to-end contra un Caido real se valida APARTE, en vivo; aquí NO se finge
-verificación en vivo: sólo se comprueba que los documentos se construyen/envían como se
+The end-to-end flow against a real Caido is validated SEPARATELY, live; here nothing is faked
+live verification: only that documents are built/sent as
 espera y que cualquier etapa fallida se propaga sin lanzar.
 """
 
@@ -18,22 +18,22 @@ from pathlib import Path
 
 import pytest
 
-# El módulo bajo prueba vive en docker/kali/ (el servidor MCP NO se importa: arrastra
-# `mcp`/`anyio`). Se añade el padre al path explícitamente, igual que test_caido_client.
+# The module under test lives in docker/kali/ (the MCP server is NOT imported: it pulls in
+# `mcp`/`anyio`). The parent is added to the path explicitly, like test_caido_client.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import caido_intercept  # noqa: E402
 
-# --- utilidades de simulación (sin red) -------------------------------------------------
+# --- mocking utilities (no network) -------------------------------------------------
 
 
 def _ok_session(**kw):
-    """`ensure_session` falso: sesión lista con token 't'."""
+    """Fake `ensure_session`: ready session with token 't'."""
     return {"status": "ok", "token": "t", "project_id": "p"}
 
 
 def _fake_graphql(responses):
-    """Sustituto de `graphql` que responde según un substring del documento enviado.
+    """Stand-in for `graphql` that responds based on a substring of the sent document.
 
     Registra cada llamada como ``(query, variables, token)`` en ``fake.calls``.
     """
@@ -184,7 +184,7 @@ def test_set_intercept_sin_sesion_no_llama_graphql(monkeypatch):
     )
 
     def boom(*a, **k):
-        raise AssertionError("no debe llamar a graphql sin sesión")
+        raise AssertionError("must not call graphql without a session")
 
     monkeypatch.setattr(caido_intercept, "graphql", boom)
     out = caido_intercept.set_intercept()
@@ -275,7 +275,7 @@ def test_list_queue_sin_sesion_devuelve_error(monkeypatch):
     monkeypatch.setattr(
         caido_intercept,
         "ensure_session",
-        lambda **kw: {"status": "unreachable", "error": "caído"},
+        lambda **kw: {"status": "unreachable", "error": "down"},
     )
     assert caido_intercept.list_queue()["status"] == "unreachable"
 
@@ -333,11 +333,11 @@ def test_forward_raw_none_busca_el_raw_actual_y_lo_reenvia(monkeypatch):
     monkeypatch.setattr(caido_intercept, "graphql", fake)
     out = caido_intercept.forward("42")
     assert out == {"status": "done", "forwarded": "42", "edited": False}
-    # Primero relee la entrada, luego reenvía.
+    # It first re-reads the entry, then forwards it.
     assert "interceptEntry(" in fake.calls[0][0]
     fwd_query, fwd_vars, _ = fake.calls[1]
     assert "forwardInterceptMessage" in fwd_query
-    # Reenvía EXACTAMENTE el raw actual (re-codificado a base64) en el lado request.
+    # Forwards EXACTLY the current raw (re-encoded to base64) on the request side.
     assert fwd_vars == {
         "id": "42",
         "input": {
@@ -390,7 +390,7 @@ def test_forward_texto_no_codificable_devuelve_failed_sin_lanzar(monkeypatch):
     monkeypatch.setattr(caido_intercept, "ensure_session", _ok_session)
 
     def boom(*a, **k):
-        raise AssertionError("no debe llamar a graphql con texto inválido")
+        raise AssertionError("must not call graphql with invalid text")
 
     monkeypatch.setattr(caido_intercept, "graphql", boom)
     out = caido_intercept.forward("1", raw="\ud800")  # surrogate suelto
@@ -411,7 +411,7 @@ def test_forward_propaga_error_de_la_relectura(monkeypatch):
     monkeypatch.setattr(caido_intercept, "graphql", fake)
     out = caido_intercept.forward("404")
     assert out["status"] == "graphql_error"
-    # Nunca se llegó a enviar el forward.
+    # The forward was never sent.
     assert all("forwardInterceptMessage" not in c[0] for c in fake.calls)
 
 
@@ -465,7 +465,7 @@ def test_drop_sin_sesion_propaga_error(monkeypatch):
     )
 
     def boom(*a, **k):
-        raise AssertionError("no debe llamar a graphql sin sesión")
+        raise AssertionError("must not call graphql without a session")
 
     monkeypatch.setattr(caido_intercept, "graphql", boom)
     assert caido_intercept.drop("1")["status"] == "unauthenticated"
