@@ -112,10 +112,37 @@ def baseline_path(root: Path, override: str | None) -> Path:
     return root / BASELINE_NAME
 
 
+class BaselineError(ValueError):
+    """The baseline file is missing, unreadable, or not the expected JSON shape."""
+
+
 def load_baseline(path: Path) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not isinstance(data.get("entries"), dict):
-        raise ValueError(f"malformed baseline: {path}")
+    """Loads the sealed baseline, raising BaselineError instead of leaking a traceback."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise BaselineError(
+            f"cannot read baseline {path}: {exc.__class__.__name__}"
+        ) from exc
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise BaselineError(
+            f"invalid baseline JSON in {path}: "
+            f"line {exc.lineno} column {exc.colno}: {exc.msg}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise BaselineError(f"malformed baseline {path}: expected a JSON object")
+    entries = data.get("entries")
+    if not isinstance(entries, dict):
+        raise BaselineError(f"malformed baseline {path}: 'entries' must be an object")
+    for digest, meta in entries.items():
+        count = meta.get("count") if isinstance(meta, dict) else None
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise BaselineError(
+                f"malformed baseline {path}: entry {digest!r} must be an object "
+                f"with an integer 'count'"
+            )
     return data
 
 
@@ -206,7 +233,11 @@ def main(argv: list[str] | None = None) -> int:
     if not baseline_file.exists():
         print(f"error: baseline not found: {baseline_file}", file=sys.stderr)
         return 2
-    baseline = load_baseline(baseline_file)
+    try:
+        baseline = load_baseline(baseline_file)
+    except BaselineError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     if not baseline_metadata_matches(baseline):
         print(

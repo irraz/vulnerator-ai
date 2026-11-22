@@ -147,6 +147,133 @@ def load_yaml_file(rep: Report, section: str, path: Path) -> dict | None:
     return data
 
 
+# --------------------------------------------------------------------------- type safety
+#
+# Every value read from config.yaml / docker-compose.yml is untrusted input: a
+# syntactically valid YAML file can still carry a list where a mapping is
+# expected, or an int where a list belongs. These helpers are the single
+# deterministic gate: they check the type BEFORE .keys()/.get()/len()/items()/
+# iteration and report a ❌ with the file, the field and the expected/received
+# type. A wrong type yields None, so the caller skips the dependent checks
+# instead of dumping a traceback.
+
+
+def type_label(value: object) -> str:
+    """Deterministic JSON-ish type name used in the failure messages."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, dict):
+        return "map"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    return type(value).__name__
+
+
+def require_mapping(
+    rep: Report, section: str, where: str, field: str, value: object
+) -> dict | None:
+    """Returns `value` when it is a mapping, else reports and returns None."""
+    if isinstance(value, dict):
+        return value
+    rep.bad(section, f"{where}: {field} must be a mapping, got {type_label(value)}")
+    return None
+
+
+def require_sequence(
+    rep: Report, section: str, where: str, field: str, value: object
+) -> list | None:
+    """Returns `value` when it is a sequence, else reports and returns None."""
+    if isinstance(value, list):
+        return value
+    rep.bad(section, f"{where}: {field} must be a sequence, got {type_label(value)}")
+    return None
+
+
+def field_mapping(
+    rep: Report, section: str, where: str, parent: object, field: str
+) -> dict | None:
+    """Returns `parent[field]` as a mapping ({} when the field is absent).
+
+    None means the parent is missing or the field has the wrong type: the
+    failure is reported and the caller must skip the dependent checks.
+    """
+    if parent is None:
+        return None
+    if not isinstance(parent, dict):
+        rep.bad(
+            section,
+            f"{where}: {field} parent must be a mapping, got {type_label(parent)}",
+        )
+        return None
+    value = parent.get(field)
+    if value is None:
+        return {}
+    return require_mapping(rep, section, where, field, value)
+
+
+def mapping_names(
+    rep: Report, section: str, where: str, field: str, mapping: dict
+) -> list[str]:
+    """Sorted string keys of a name mapping; non-string keys are reported."""
+    names: list[str] = []
+    bad: list[str] = []
+    for key in mapping:
+        if isinstance(key, str):
+            names.append(key)
+        else:
+            bad.append(f"{key!r} ({type_label(key)})")
+    if bad:
+        rep.bad(
+            section,
+            f"{where}: {field} keys must be strings, got {', '.join(sorted(bad))}",
+        )
+    return sorted(names)
+
+
+def require_line(
+    rep: Report, section: str, where: str, lines: list[str], lineno: int
+) -> str | None:
+    """Returns the 1-based line of a file, reporting an out-of-range index."""
+    if 1 <= lineno <= len(lines):
+        return lines[lineno - 1]
+    rep.bad(
+        section,
+        f"{where}: cited line {lineno} is out of range (file has {len(lines)} lines)",
+    )
+    return None
+
+
+def annex_cited_lines(
+    rep: Report,
+    section: str,
+    where: str,
+    lines: list[str],
+    rows: list[tuple[str, str, int]],
+) -> tuple[dict[str, str], bool]:
+    """Maps annex key -> cited line text, reporting out-of-range indexes.
+
+    `complete` is False when at least one cited line does not exist, so the
+    caller never prints a green summary over an already-reported failure.
+    """
+    hits: dict[str, str] = {}
+    complete = True
+    for key, _path, lineno in rows:
+        text = require_line(rep, section, f"{where}:{key}", lines, lineno)
+        if text is None:
+            complete = False
+        else:
+            hits[key] = text
+    return hits, complete
+
+
 # --------------------------------------------------------------------------- utils
 
 
@@ -277,55 +404,77 @@ def check_contracts(rep: Report) -> None:
         return
 
     # --- config.yaml: the only two MCPs and their URLs -------------------------
-    servers = list((cfg.get("mcp_servers") or {}).keys())
-    if servers == EXPECTED_MCP_SERVERS:
-        rep.ok(section, f"config.yaml mcp_servers = {servers}")
-    else:
-        rep.bad(
-            section,
-            f"config.yaml mcp_servers = {servers} (expected {EXPECTED_MCP_SERVERS})",
-        )
+    servers = require_mapping(
+        rep, section, "config.yaml", "mcp_servers", cfg.get("mcp_servers")
+    )
+    if servers is not None:
+        names = list(servers.keys())
+        if names == EXPECTED_MCP_SERVERS:
+            rep.ok(section, f"config.yaml mcp_servers = {names}")
+        else:
+            rep.bad(
+                section,
+                f"config.yaml mcp_servers = {names} (expected {EXPECTED_MCP_SERVERS})",
+            )
 
-    kali_cfg = (cfg.get("mcp_servers") or {}).get("kali") or {}
-    if kali_cfg.get("url") == "http://kali:8900":
-        rep.ok(section, "config.yaml kali.url = http://kali:8900")
-    else:
-        rep.bad(section, f"config.yaml kali.url = {kali_cfg.get('url')!r}")
+        kali_cfg = field_mapping(rep, section, "config.yaml", servers, "kali")
+        if kali_cfg is not None:
+            if kali_cfg.get("url") == "http://kali:8900":
+                rep.ok(section, "config.yaml kali.url = http://kali:8900")
+            else:
+                rep.bad(section, f"config.yaml kali.url = {kali_cfg.get('url')!r}")
 
-    pw_cfg = (cfg.get("mcp_servers") or {}).get("playwright") or {}
-    if pw_cfg.get("url") == "http://playwright-mcp:8931/mcp":
-        rep.ok(section, "config.yaml playwright.url = http://playwright-mcp:8931/mcp")
-    else:
-        rep.bad(section, f"config.yaml playwright.url = {pw_cfg.get('url')!r}")
+            # No tools.include: the server is the source of truth.
+            kali_tools_cfg = field_mapping(
+                rep, section, "config.yaml", kali_cfg, "tools"
+            )
+            if kali_tools_cfg is not None:
+                if "include" not in kali_tools_cfg:
+                    rep.ok(
+                        section,
+                        "config.yaml kali.tools has no 'include' "
+                        "(no whitelist: the server wins)",
+                    )
+                else:
+                    rep.bad(
+                        section,
+                        "config.yaml kali.tools.include present (it must be absent)",
+                    )
 
-    # No tools.include: the server is the source of truth.
-    kali_tools_cfg = kali_cfg.get("tools") or {}
-    if "include" not in kali_tools_cfg:
-        rep.ok(
-            section,
-            "config.yaml kali.tools has no 'include' (no whitelist: the server wins)",
-        )
-    else:
-        rep.bad(section, "config.yaml kali.tools.include present (it must be absent)")
+        pw_cfg = field_mapping(rep, section, "config.yaml", servers, "playwright")
+        if pw_cfg is not None:
+            if pw_cfg.get("url") == "http://playwright-mcp:8931/mcp":
+                rep.ok(
+                    section, "config.yaml playwright.url = http://playwright-mcp:8931/mcp"
+                )
+            else:
+                rep.bad(section, f"config.yaml playwright.url = {pw_cfg.get('url')!r}")
 
-    if cfg.get("toolsets") == EXPECTED_TOOLSETS:
-        rep.ok(section, f"config.yaml toolsets = {EXPECTED_TOOLSETS}")
-    else:
-        rep.bad(section, f"config.yaml toolsets = {cfg.get('toolsets')!r}")
+    toolsets = require_sequence(
+        rep, section, "config.yaml", "toolsets", cfg.get("toolsets")
+    )
+    if toolsets is not None:
+        if toolsets == EXPECTED_TOOLSETS:
+            rep.ok(section, f"config.yaml toolsets = {EXPECTED_TOOLSETS}")
+        else:
+            rep.bad(section, f"config.yaml toolsets = {toolsets!r}")
 
-    api = (cfg.get("platforms") or {}).get("api_server") or {}
-    if api.get("enabled") is True and api.get("port") == 8642:
-        rep.ok(section, "config.yaml platforms.api_server enabled=True port=8642")
-    else:
-        rep.bad(section, f"config.yaml platforms.api_server = {api!r}")
+    platforms = require_mapping(
+        rep, section, "config.yaml", "platforms", cfg.get("platforms")
+    )
+    api = field_mapping(rep, section, "config.yaml", platforms, "api_server")
+    if api is not None:
+        if api.get("enabled") is True and api.get("port") == 8642:
+            rep.ok(section, "config.yaml platforms.api_server enabled=True port=8642")
+        else:
+            rep.bad(section, f"config.yaml platforms.api_server = {api!r}")
 
-    if (cfg.get("model") or {}).get("default") == "mistralai/mistral-large-4-0":
-        rep.ok(section, "config.yaml model.default = mistralai/mistral-large-4-0")
-    else:
-        rep.bad(
-            section,
-            f"config.yaml model.default = {(cfg.get('model') or {}).get('default')!r}",
-        )
+    model = require_mapping(rep, section, "config.yaml", "model", cfg.get("model"))
+    if model is not None:
+        if model.get("default") == "mistralai/mistral-large-4-0":
+            rep.ok(section, "config.yaml model.default = mistralai/mistral-large-4-0")
+        else:
+            rep.bad(section, f"config.yaml model.default = {model.get('default')!r}")
 
     config_raw = read_text_file(rep, section, CONFIG)
     if config_raw is None:
@@ -336,52 +485,124 @@ def check_contracts(rep: Report) -> None:
         rep.bad(section, "config.yaml contains '--yolo' (forbidden)")
 
     # --- docker-compose.yml: 9 services, 4 volumes, profiles, depends ---
-    services = compose.get("services") or {}
-    volumes = list((compose.get("volumes") or {}).keys())
-
-    if len(services) == 9 and sorted(services) == sorted(EXPECTED_COMPOSE_SERVICES):
-        rep.ok(section, f"compose services = 9 ({', '.join(sorted(services))})")
-    else:
-        rep.bad(section, f"compose services = {sorted(services)}")
-
-    if sorted(volumes) == sorted(EXPECTED_VOLUMES):
-        rep.ok(section, f"compose volumes = {sorted(volumes)}")
-    else:
-        rep.bad(section, f"compose volumes = {volumes}")
-
-    web_profile = sorted(
-        name for name, svc in services.items() if "web" in (svc.get("profiles") or [])
+    services = require_mapping(
+        rep, section, "docker-compose.yml", "services", compose.get("services")
     )
-    if web_profile == sorted(EXPECTED_WEB_PROFILE):
-        rep.ok(section, f"compose profile 'web' = {sorted(EXPECTED_WEB_PROFILE)}")
-    else:
-        rep.bad(section, f"compose profile 'web' = {web_profile}")
+    volumes = require_mapping(
+        rep, section, "docker-compose.yml", "volumes", compose.get("volumes")
+    )
 
-    ooda = services.get("ooda-agent") or {}
-    depends = ooda.get("depends_on") or {}
-    if (
-        isinstance(depends, dict)
-        and depends.get("kali", {}).get("condition") == "service_healthy"
-        and depends.get("playwright-mcp", {}).get("condition") == "service_healthy"
-    ):
-        rep.ok(
-            section,
-            "compose ooda-agent depends_on kali+playwright-mcp (service_healthy)",
+    if services is not None:
+        service_names = mapping_names(
+            rep, section, "docker-compose.yml", "services", services
         )
-    else:
-        rep.bad(section, f"compose ooda-agent depends_on = {depends!r}")
+        if len(services) == 9 and service_names == sorted(EXPECTED_COMPOSE_SERVICES):
+            rep.ok(
+                section, f"compose services = 9 ({', '.join(service_names)})"
+            )
+        else:
+            rep.bad(section, f"compose services = {service_names}")
 
-    pw_svc = services.get("playwright-mcp") or {}
-    if "ports" not in pw_svc:
-        rep.ok(section, "compose playwright-mcp has no ports (internal network)")
-    else:
-        rep.bad(section, "compose playwright-mcp publishes ports")
+    if volumes is not None:
+        volume_names = mapping_names(
+            rep, section, "docker-compose.yml", "volumes", volumes
+        )
+        if volume_names == sorted(EXPECTED_VOLUMES):
+            rep.ok(section, f"compose volumes = {volume_names}")
+        else:
+            rep.bad(section, f"compose volumes = {volume_names}")
 
-    ooda_ports = [str(p) for p in (ooda.get("ports") or [])]
-    if any("8642" in p for p in ooda_ports):
-        rep.ok(section, f"compose ooda-agent publishes 8642 ({ooda_ports})")
-    else:
-        rep.bad(section, f"compose ooda-agent does not publish 8642 ({ooda_ports})")
+    if services is not None:
+        web_profile: list[str] = []
+        for name, svc_value in services.items():
+            if not isinstance(name, str):
+                # Already reported by mapping_names: never mix key types.
+                continue
+            svc = require_mapping(
+                rep, section, "docker-compose.yml", f"services.{name}", svc_value
+            )
+            if svc is None:
+                continue
+            raw_profiles = svc.get("profiles")
+            if raw_profiles is None:
+                continue
+            profiles = require_sequence(
+                rep,
+                section,
+                "docker-compose.yml",
+                f"services.{name}.profiles",
+                raw_profiles,
+            )
+            if profiles is not None and "web" in profiles:
+                web_profile.append(name)
+        web_profile.sort()
+        if web_profile == sorted(EXPECTED_WEB_PROFILE):
+            rep.ok(section, f"compose profile 'web' = {sorted(EXPECTED_WEB_PROFILE)}")
+        else:
+            rep.bad(section, f"compose profile 'web' = {web_profile}")
+
+    ooda = field_mapping(rep, section, "docker-compose.yml", services, "ooda-agent")
+    if ooda is not None:
+        depends = require_mapping(
+            rep,
+            section,
+            "docker-compose.yml",
+            "services.ooda-agent.depends_on",
+            ooda.get("depends_on"),
+        )
+        if depends is not None:
+            kali_dep = field_mapping(
+                rep, section, "docker-compose.yml", depends, "kali"
+            )
+            pw_dep = field_mapping(
+                rep, section, "docker-compose.yml", depends, "playwright-mcp"
+            )
+            if (
+                kali_dep is not None
+                and pw_dep is not None
+                and kali_dep.get("condition") == "service_healthy"
+                and pw_dep.get("condition") == "service_healthy"
+            ):
+                rep.ok(
+                    section,
+                    "compose ooda-agent depends_on kali+playwright-mcp "
+                    "(service_healthy)",
+                )
+            elif kali_dep is not None and pw_dep is not None:
+                rep.bad(section, f"compose ooda-agent depends_on = {depends!r}")
+
+        raw_ports = ooda.get("ports")
+        if raw_ports is None:
+            rep.bad(section, "compose ooda-agent does not publish 8642 ([])")
+        else:
+            ports = require_sequence(
+                rep,
+                section,
+                "docker-compose.yml",
+                "services.ooda-agent.ports",
+                raw_ports,
+            )
+            if ports is not None:
+                ooda_ports = [str(p) for p in ports]
+                if any("8642" in p for p in ooda_ports):
+                    rep.ok(
+                        section,
+                        f"compose ooda-agent publishes 8642 ({ooda_ports})",
+                    )
+                else:
+                    rep.bad(
+                        section,
+                        f"compose ooda-agent does not publish 8642 ({ooda_ports})",
+                    )
+
+    pw_svc = field_mapping(
+        rep, section, "docker-compose.yml", services, "playwright-mcp"
+    )
+    if pw_svc is not None:
+        if "ports" not in pw_svc:
+            rep.ok(section, "compose playwright-mcp has no ports (internal network)")
+        else:
+            rep.bad(section, "compose playwright-mcp publishes ports")
 
     compose_raw = read_text_file(rep, section, COMPOSE)
     if compose_raw is None:
@@ -596,43 +817,69 @@ def check_map(rep: Report) -> None:
     compose_text = read_text_file(rep, section, COMPOSE)
     if compose_text is None:
         return
-    services = compose.get("services") or {}
-    volumes = list((compose.get("volumes") or {}).keys())
+    services = require_mapping(
+        rep, section, "docker-compose.yml", "services", compose.get("services")
+    )
+    volumes = require_mapping(
+        rep, section, "docker-compose.yml", "volumes", compose.get("volumes")
+    )
     compose_lines = compose_text.splitlines()
 
-    annex_services = {k: (p, l) for k, p, l in b_rows if k in services}
-    annex_volumes = {k: (p, l) for k, p, l in b_rows if k in volumes}
+    service_names = (
+        mapping_names(rep, section, "docker-compose.yml", "services", services)
+        if services is not None
+        else None
+    )
+    volume_names = (
+        mapping_names(rep, section, "docker-compose.yml", "volumes", volumes)
+        if volumes is not None
+        else None
+    )
 
-    if set(annex_services) == set(services):
-        bad = [
-            k for k, (p, l) in annex_services.items() if k not in compose_lines[l - 1]
-        ]
-        if not bad:
+    annex_services = [
+        (k, p, l) for k, p, l in b_rows if service_names is not None and k in service_names
+    ]
+    annex_volumes = [
+        (k, p, l) for k, p, l in b_rows if volume_names is not None and k in volume_names
+    ]
+
+    if service_names is not None and {k for k, _p, _l in annex_services} == set(service_names):
+        hits, complete = annex_cited_lines(
+            rep, section, "docker-compose.yml", compose_lines, annex_services
+        )
+        bad = [k for k, text in hits.items() if k not in text]
+        if not complete:
+            # The out-of-range citation is already reported; no green summary.
+            pass
+        elif not bad:
             rep.ok(
                 section,
-                f"Annex B: {len(annex_services)} services match the compose (name+line)",
+                f"Annex B: {len(hits)} services match the compose (name+line)",
             )
         else:
             rep.bad(section, f"Annex B: line does not contain the service {bad}")
-    else:
-        missing = sorted(set(services) - set(annex_services))
-        extra = sorted(set(annex_services) - set(services))
+    elif service_names is not None:
+        missing = sorted(set(service_names) - {k for k, _p, _l in annex_services})
+        extra = sorted({k for k, _p, _l in annex_services} - set(service_names))
         rep.bad(section, f"Annex B services: missing={missing} extra={extra}")
 
-    if set(annex_volumes) == set(volumes):
-        bad = [
-            k for k, (p, l) in annex_volumes.items() if k not in compose_lines[l - 1]
-        ]
-        if not bad:
+    if volume_names is not None and {k for k, _p, _l in annex_volumes} == set(volume_names):
+        hits, complete = annex_cited_lines(
+            rep, section, "docker-compose.yml", compose_lines, annex_volumes
+        )
+        bad = [k for k, text in hits.items() if k not in text]
+        if not complete:
+            pass
+        elif not bad:
             rep.ok(
                 section,
-                f"Annex B: {len(annex_volumes)} volumes match the compose (name+line)",
+                f"Annex B: {len(hits)} volumes match the compose (name+line)",
             )
         else:
             rep.bad(section, f"Annex B: line does not contain the volume {bad}")
-    else:
-        missing = sorted(set(volumes) - set(annex_volumes))
-        extra = sorted(set(annex_volumes) - set(volumes))
+    elif volume_names is not None:
+        missing = sorted(set(volume_names) - {k for k, _p, _l in annex_volumes})
+        extra = sorted({k for k, _p, _l in annex_volumes} - set(volume_names))
         rep.bad(section, f"Annex B volumes: missing={missing} extra={extra}")
 
     # All the paths cited in the annexes must exist.
