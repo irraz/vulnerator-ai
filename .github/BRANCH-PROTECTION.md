@@ -37,6 +37,7 @@ main
   ☑️ 🐳 Trivy - Docker Image Scan (kali)
   ☑️ 🐳 Trivy - Docker Image Scan (mcp)
   ☑️ ✅ PR Validation
+  ☑️ 🔒 Sensitive Change Review
   ☑️ 🐳 Dockerfile Linting
   ```
 
@@ -94,6 +95,7 @@ If you prefer the GitHub API or Terraform, here is the configuration in JSON for
       "🐳 Trivy - Docker Image Scan (kali)",
       "🐳 Trivy - Docker Image Scan (mcp)",
       "✅ PR Validation",
+      "🔒 Sensitive Change Review",
       "🐳 Dockerfile Linting"
     ]
   },
