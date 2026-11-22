@@ -51,6 +51,12 @@ jobs:
         run: python scripts/smoke.py --static
 
       - name: Validate docker-compose
+        env:
+          # The compose file marks these two as required (:? syntax). CI has no
+          # .env, so supply inert placeholders: the check only validates that the
+          # file interpolates and parses, it does not start the stack.
+          HERMES_API_SERVER_KEY: ci-placeholder-hermes-key-000000000000
+          VULNERATOR_MCP_INBOUND_TOKEN: ci-placeholder-mcp-token-000000000000
         run: docker compose config --quiet
 
       - name: Quick-fix comment rule
