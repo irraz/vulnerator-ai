@@ -1,8 +1,8 @@
-"""Fixtures de los tests declarativos de agent-ooda (perfil Hermes OODA directo a Kali).
+"""Fixtures for the agent-ooda declarative tests (Hermes OODA direct-to-Kali profile).
 
-Resuelven las rutas de los ficheros a parsear RELATIVAS a la raíz del worktree (dos niveles
-por encima de este fichero: agent-ooda/tests/ -> raíz), para que `pytest agent-ooda/tests/`
-funcione desde la raíz del repo sin depender del cwd.
+Resolve the paths of the files to parse RELATIVE to the worktree root (two levels
+above this file: agent-ooda/tests/ -> root), so `pytest agent-ooda/tests/`
+works from the repo root without depending on the cwd.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-# agent-ooda/tests/conftest.py -> parents[2] = raíz del worktree.
+# agent-ooda/tests/conftest.py -> parents[2] = worktree root.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
