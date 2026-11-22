@@ -120,6 +120,33 @@ class Report:
         print(f"[{section}] {WARN} {msg}")
 
 
+def read_text_file(rep: Report, section: str, path: Path) -> str | None:
+    """Reads a required UTF-8 file, reporting failures instead of raising."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        rep.bad(section, f"cannot read {path.name}: {exc.__class__.__name__}")
+        return None
+
+
+def load_yaml_file(rep: Report, section: str, path: Path) -> dict | None:
+    """Loads a required YAML mapping, reporting parse errors instead of raising."""
+    text = read_text_file(rep, section, path)
+    if text is None:
+        return None
+    import yaml
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        rep.bad(section, f"{path.name}: invalid YAML ({exc.__class__.__name__})")
+        return None
+    if not isinstance(data, dict):
+        rep.bad(section, f"{path.name}: expected a mapping at the top level")
+        return None
+    return data
+
+
 # --------------------------------------------------------------------------- utils
 
 
@@ -193,8 +220,6 @@ def clean_env() -> dict[str, str]:
 
 
 def check_contracts(rep: Report) -> None:
-    import yaml
-
     section = "contracts"
 
     if not CONFIG.exists() or not COMPOSE.exists():
@@ -204,8 +229,10 @@ def check_contracts(rep: Report) -> None:
         )
         return
 
-    cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    cfg = load_yaml_file(rep, section, CONFIG)
+    compose = load_yaml_file(rep, section, COMPOSE)
+    if cfg is None or compose is None:
+        return
 
     # --- config.yaml: the only two MCPs and their URLs -------------------------
     servers = list((cfg.get("mcp_servers") or {}).keys())
@@ -258,7 +285,9 @@ def check_contracts(rep: Report) -> None:
             f"config.yaml model.default = {(cfg.get('model') or {}).get('default')!r}",
         )
 
-    config_raw = CONFIG.read_text(encoding="utf-8")
+    config_raw = read_text_file(rep, section, CONFIG)
+    if config_raw is None:
+        return
     if "--yolo" not in config_raw:
         rep.ok(section, "config.yaml without '--yolo'")
     else:
@@ -312,7 +341,9 @@ def check_contracts(rep: Report) -> None:
     else:
         rep.bad(section, f"compose ooda-agent does not publish 8642 ({ooda_ports})")
 
-    compose_raw = COMPOSE.read_text(encoding="utf-8")
+    compose_raw = read_text_file(rep, section, COMPOSE)
+    if compose_raw is None:
+        return
     if "--yolo" not in compose_raw:
         rep.ok(section, "compose without '--yolo'")
     else:
@@ -436,15 +467,15 @@ def _annex_tables(
 
 
 def check_map(rep: Report) -> None:
-    import yaml
-
     section = "map"
 
     if not MAP.exists():
         rep.bad(section, f"missing {MAP.relative_to(ROOT)}")
         return
 
-    text = MAP.read_text(encoding="utf-8")
+    text = read_text_file(rep, section, MAP)
+    if text is None:
+        return
     a_rows, b_rows, c_rows = _annex_tables(text)
 
     kali_ast = dict(ast_tool_decorations(KALI_SERVER))
@@ -490,10 +521,15 @@ def check_map(rep: Report) -> None:
         rep.bad(section, f"Annex A vulnerator-mcp: missing={missing} extra={extra}")
 
     # Annex B: services and volumes against the real compose.
-    compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    compose = load_yaml_file(rep, section, COMPOSE)
+    if compose is None:
+        return
+    compose_text = read_text_file(rep, section, COMPOSE)
+    if compose_text is None:
+        return
     services = compose.get("services") or {}
     volumes = list((compose.get("volumes") or {}).keys())
-    compose_lines = COMPOSE.read_text(encoding="utf-8").splitlines()
+    compose_lines = compose_text.splitlines()
 
     annex_services = {k: (p, l) for k, p, l in b_rows if k in services}
     annex_volumes = {k: (p, l) for k, p, l in b_rows if k in volumes}
@@ -678,7 +714,7 @@ def run_suite(
     return proc.returncode, _parse_pytest_summary(output), output
 
 
-def check_tests(rep: Report) -> None:
+def check_tests(rep: Report, strict_suites: bool = False) -> None:
     section = "tests"
     uv = find_uv()
     if uv is None:
@@ -694,7 +730,11 @@ def check_tests(rep: Report) -> None:
     for suite, deps in SUITES:
         if not (ROOT / suite).is_dir():
             absent += 1
-            rep.warn(section, f"{suite}: does not exist in this worktree")
+            if strict_suites:
+                any_failed = True
+                rep.bad(section, f"{suite}: missing suite directory")
+            else:
+                rep.warn(section, f"{suite}: does not exist in this worktree")
             continue
         ran += 1
         rc, counts, output = run_suite(suite, deps, uv)
@@ -713,7 +753,11 @@ def check_tests(rep: Report) -> None:
             any_failed = True
             rep.bad(section, f"{suite}: collection error ({summary}, exit 2)")
         elif rc == 5:
-            rep.warn(section, f"{suite}: no tests collected (exit 5)")
+            if strict_suites:
+                any_failed = True
+                rep.bad(section, f"{suite}: no tests collected (exit 5)")
+            else:
+                rep.warn(section, f"{suite}: no tests collected (exit 5)")
         else:
             any_failed = True
             rep.bad(section, f"{suite}: exit {rc} ({summary})")
@@ -752,6 +796,11 @@ def main() -> int:
     group.add_argument(
         "--quick", action="store_true", help="static + tests (fast gate)"
     )
+    parser.add_argument(
+        "--strict-suites",
+        action="store_true",
+        help="fail on missing or empty suites (used by the blocking CI gate)",
+    )
     args = parser.parse_args()
 
     # No flags = fast gate (static + tests).
@@ -782,7 +831,7 @@ def main() -> int:
 
     if do_tests:
         before = rep.failures
-        check_tests(rep)
+        check_tests(rep, args.strict_suites)
         print(
             f"[tests] result: {GREEN if rep.failures == before else RED} "
             f"accumulated failures={rep.failures} warnings={rep.warnings}"
