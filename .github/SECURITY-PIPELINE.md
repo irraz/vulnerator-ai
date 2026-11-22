@@ -1,247 +1,247 @@
-# 🔐 Pipeline de Seguridad - Vulnerator AI
+# 🔐 Security Pipeline - Vulnerator AI
 
-## Descripción General
+## Overview
 
-Este proyecto implementa una **pipeline de seguridad completa y gratuita** utilizando GitHub Actions, diseñada para ejecutarse automáticamente en cada PR antes de la aprobación.
+This project implements a **complete, free security pipeline** using GitHub Actions, designed to run automatically on every PR before approval.
 
-## 🛡️ Componentes de Seguridad
+## 🛡️ Security Components
 
-### 1. **TruffleHog** - Detección de Secretos
-- **Qué hace**: Escanea todo el historial de Git buscando secretos expuestos (API keys, tokens, passwords)
-- **Cuándo se ejecuta**: En cada PR y push a ramas principales
-- **Configuración**: `.github/workflows/security.yml` (job: `secrets-scan`)
-- **Gravedad**: ❌ **BLOQUEA el PR** si encuentra secretos verificados
+### 1. **TruffleHog** - Secret Detection
+- **What it does**: Scans the entire Git history for exposed secrets (API keys, tokens, passwords)
+- **When it runs**: On every PR and push to the main branches
+- **Configuration**: `.github/workflows/security.yml` (job: `secrets-scan`)
+- **Severity**: ❌ **BLOCKS the PR** if it finds verified secrets
 
-### 2. **CodeQL** - Análisis Estático de Código (SAST)
-- **Qué hace**: Análisis profundo de seguridad del código Python
-- **Detecta**: 
-  - Inyección SQL
+### 2. **CodeQL** - Static Code Analysis (SAST)
+- **What it does**: Deep security analysis of the Python code
+- **Detects**: 
+  - SQL injection
   - XSS (Cross-Site Scripting)
-  - Deserialización insegura
+  - Insecure deserialization
   - Path traversal
   - Command injection
-  - Vulnerabilidades CWE comunes
-- **Cuándo se ejecuta**: En cada PR, push y semanalmente
-- **Configuración**: `.github/workflows/security.yml` (job: `codeql-analysis`)
-- **Resultados**: Visibles en la pestaña "Security" → "Code scanning alerts"
+  - Common CWE vulnerabilities
+- **When it runs**: On every PR, push, and weekly
+- **Configuration**: `.github/workflows/security.yml` (job: `codeql-analysis`)
+- **Results**: Visible in the "Security" tab → "Code scanning alerts"
 
-### 3. **Linting Python** - Calidad y Seguridad de Código
-- **Herramientas**:
-  - **flake8**: Detección de errores de sintaxis y estilo
-  - **black**: Verificación de formato consistente
-  - **bandit**: Análisis de seguridad específico para Python
-- **Cuándo se ejecuta**: En cada PR
-- **Configuración**: `.github/workflows/security.yml` (job: `python-lint`)
-- **Gravedad**: ⚠️ **NO bloquea** pero genera reportes
+### 3. **Python Linting** - Code Quality and Security
+- **Tools**:
+  - **flake8**: Syntax and style error detection
+  - **black**: Consistent formatting verification
+  - **bandit**: Python-specific security analysis
+- **When it runs**: On every PR
+- **Configuration**: `.github/workflows/security.yml` (job: `python-lint`)
+- **Severity**: ⚠️ **Does not block** but generates reports
 
-### 4. **Safety** - Escaneo de Dependencias Vulnerables
-- **Qué hace**: Verifica vulnerabilidades conocidas en dependencias Python
-- **Escanea**: 
+### 4. **Safety** - Vulnerable Dependency Scan
+- **What it does**: Checks known vulnerabilities in Python dependencies
+- **Scans**: 
   - `docker/kali/requirements.txt`
   - `docker/mcp/requirements.txt`
-- **Base de datos**: CVE y advisories de seguridad
-- **Cuándo se ejecuta**: En cada PR
-- **Configuración**: `.github/workflows/security.yml` (job: `dependency-scan`)
+- **Database**: CVEs and security advisories
+- **When it runs**: On every PR
+- **Configuration**: `.github/workflows/security.yml` (job: `dependency-scan`)
 
-### 5. **Trivy** - Escaneo de Imágenes Docker
-- **Qué hace**: Escanea vulnerabilidades en las imágenes Docker
-- **Detecta**:
-  - CVEs en paquetes del sistema operativo
-  - Vulnerabilidades en dependencias
+### 5. **Trivy** - Docker Image Scan
+- **What it does**: Scans Docker images for vulnerabilities
+- **Detects**:
+  - CVEs in operating system packages
+  - Vulnerabilities in dependencies
   - Misconfigurations
-- **Imágenes escaneadas**:
+- **Scanned images**:
   - `vulnerator-kali`
   - `vulnerator-mcp`
-- **Cuándo se ejecuta**: En cada PR
-- **Configuración**: `.github/workflows/security.yml` (job: `docker-scan`)
-- **Gravedad**: Solo reporta CRITICAL y HIGH
+- **When it runs**: On every PR
+- **Configuration**: `.github/workflows/security.yml` (job: `docker-scan`)
+- **Severity**: Reports CRITICAL and HIGH only
 
-### 6. **Hadolint** - Linting de Dockerfiles
-- **Qué hace**: Valida best practices en Dockerfiles
-- **Detecta**:
-  - Uso de `latest` tag
-  - Capas innecesarias
-  - Secretos hardcodeados
-  - Problemas de caché
-- **Cuándo se ejecuta**: En cada PR
-- **Configuración**: `.github/workflows/pr-checks.yml` (job: `dockerfile-lint`)
+### 6. **Hadolint** - Dockerfile Linting
+- **What it does**: Validates best practices in Dockerfiles
+- **Detects**:
+  - Use of the `latest` tag
+  - Unnecessary layers
+  - Hardcoded secrets
+  - Cache problems
+- **When it runs**: On every PR
+- **Configuration**: `.github/workflows/pr-checks.yml` (job: `dockerfile-lint`)
 
-### 7. **Dependabot** - Actualizaciones Automáticas
-- **Qué hace**: Crea PRs automáticos para actualizar dependencias
-- **Monitorea**:
-  - Dependencias Python (pip)
-  - Imágenes base de Docker
+### 7. **Dependabot** - Automatic Updates
+- **What it does**: Opens automatic PRs to update dependencies
+- **Monitors**:
+  - Python dependencies (pip)
+  - Docker base images
   - GitHub Actions
-- **Frecuencia**: Semanal
-- **Configuración**: `.github/dependabot.yml`
-- **Alertas de seguridad**: Automáticas en la pestaña "Security" → "Dependabot alerts"
+- **Frequency**: Weekly
+- **Configuration**: `.github/dependabot.yml`
+- **Security alerts**: Automatic in the "Security" tab → "Dependabot alerts"
 
-## 🚀 Flujo de Trabajo
+## 🚀 Workflow
 
-### Cuando abres un PR:
+### When you open a PR:
 
 ```
-1. PR abierto
+1. PR opened
    ↓
-2. Se ejecutan automáticamente:
-   ├─ TruffleHog (secretos)
-   ├─ CodeQL (vulnerabilidades)
-   ├─ Python Lint (calidad)
-   ├─ Safety (deps vulnerables)
+2. The following run automatically:
+   ├─ TruffleHog (secrets)
+   ├─ CodeQL (vulnerabilities)
+   ├─ Python Lint (quality)
+   ├─ Safety (vulnerable deps)
    ├─ Trivy (Docker)
    ├─ Hadolint (Dockerfiles)
-   └─ Validaciones de PR
+   └─ PR validations
    ↓
-3. Resultados visibles en:
-   - Checks del PR
-   - Pestaña "Security"
-   - Comentarios automáticos
+3. Results visible in:
+   - PR checks
+   - "Security" tab
+   - Automatic comments
    ↓
-4. ✅ Si todos pasan → PR listo para revisar
-   ❌ Si fallan → Corregir antes de merge
+4. ✅ If all pass → PR ready for review
+   ❌ If any fail → fix before merging
 ```
 
-## 📊 Dónde Ver los Resultados
+## 📊 Where to See the Results
 
-### En el PR:
-- **Checks tab**: Estado de todos los workflows
-- **Files changed**: Anotaciones inline de CodeQL y linters
-- **Comentarios**: Resumen automático de quality checks
+### In the PR:
+- **Checks tab**: status of all workflows
+- **Files changed**: CodeQL and linter inline annotations
+- **Comments**: automatic summary of the quality checks
 
-### En el Repositorio:
+### In the Repository:
 - **Security tab**:
-  - `Code scanning alerts`: Vulnerabilidades de CodeQL y Trivy
-  - `Dependabot alerts`: Dependencias vulnerables
-  - `Secret scanning`: Secretos detectados (si está habilitado en el repo)
+  - `Code scanning alerts`: CodeQL and Trivy vulnerabilities
+  - `Dependabot alerts`: vulnerable dependencies
+  - `Secret scanning`: detected secrets (if enabled in the repo)
 
 ### Artifacts:
-- Reportes JSON de bandit: `bandit-security-report`
-- Reportes JSON de safety: `safety-reports`
+- bandit JSON reports: `bandit-security-report`
+- safety JSON reports: `safety-reports`
 
-## ⚙️ Configuración Inicial
+## ⚙️ Initial Setup
 
-### 1. Habilitar Funciones de Seguridad en GitHub
+### 1. Enable Security Features on GitHub
 
-En tu repositorio, ve a **Settings** → **Security**:
+In your repository, go to **Settings** → **Security**:
 
 ```
-☑️ Dependabot alerts (GRATIS)
-☑️ Dependabot security updates (GRATIS)
-☑️ Code scanning (GRATIS para repos públicos)
-☑️ Secret scanning (GRATIS para repos públicos)
+☑️ Dependabot alerts (FREE)
+☑️ Dependabot security updates (FREE)
+☑️ Code scanning (FREE for public repos)
+☑️ Secret scanning (FREE for public repos)
 ```
 
-### 2. Subir los Archivos
+### 2. Push the Files
 
 ```bash
 git add .github/
-git commit -m "feat: Agregar pipeline de seguridad completa"
+git commit -m "feat: add the complete security pipeline"
 git push origin main
 ```
 
-### 3. Verificar que Funciona
+### 3. Verify It Works
 
-1. Crea un PR de prueba
-2. Ve a la pestaña "Actions" del repositorio
-3. Deberías ver los workflows ejecutándose
+1. Open a test PR
+2. Go to the repository's "Actions" tab
+3. You should see the workflows running
 
-## 🔧 Personalización
+## 🔧 Customization
 
-### Ajustar Severidad de TruffleHog
+### Adjust TruffleHog Severity
 
-En `.github/workflows/security.yml`, línea del job `secrets-scan`:
+In `.github/workflows/security.yml`, in the `secrets-scan` job line:
 
 ```yaml
-extra_args: --debug --only-verified  # Solo secretos verificados
-# O para detectar todos:
-extra_args: --debug  # Detecta todos los potenciales secretos
+extra_args: --debug --only-verified  # Verified secrets only
+# Or to detect everything:
+extra_args: --debug  # Detects all potential secrets
 ```
 
-### Cambiar Reviewers de Dependabot
+### Change Dependabot Reviewers
 
-En `.github/dependabot.yml`:
+In `.github/dependabot.yml`:
 
 ```yaml
 reviewers:
-  - "tu-usuario-github"
-  - "otro-colaborador"
+  - "your-github-username"
+  - "another-collaborator"
 ```
 
-### Deshabilitar un Check
+### Disable a Check
 
-Comenta o elimina el job correspondiente en los archivos YAML.
+Comment out or delete the corresponding job in the YAML files.
 
-### Ajustar Frecuencia de Escaneos
+### Adjust Scan Frequency
 
-En `.github/workflows/security.yml`:
+In `.github/workflows/security.yml`:
 
 ```yaml
 schedule:
-  - cron: '0 2 * * 1'  # Lunes a las 2 AM
-  # Cambiar a diario: '0 2 * * *'
-  # Cambiar a mensual: '0 2 1 * *'
+  - cron: '0 2 * * 1'  # Mondays at 2 AM
+  # Change to daily: '0 2 * * *'
+  # Change to monthly: '0 2 1 * *'
 ```
 
 ## 🐛 Troubleshooting
 
-### TruffleHog encuentra falsos positivos
+### TruffleHog finds false positives
 
-Crea un archivo `.trufflehogignore` en la raíz:
+Create a `.trufflehogignore` file at the root:
 
 ```
-# Ejemplo de patrones a ignorar
+# Example patterns to ignore
 docker/kali/tests/*.py
 labs/**/*.py
 ```
 
-### Safety reporta vulnerabilidad no crítica
+### Safety reports a non-critical vulnerability
 
-Si necesitas ignorar temporalmente:
+If you need to ignore it temporarily:
 
 ```bash
-# En el job dependency-scan, agregar:
-safety check --ignore=51457  # Reemplaza con el CVE ID
+# In the dependency-scan job, add:
+safety check --ignore=51457  # Replace with the CVE ID
 ```
 
-### CodeQL tarda mucho
+### CodeQL takes a long time
 
-Es normal en la primera ejecución. Los escaneos posteriores son incrementales y más rápidos.
+Normal on the first run. Subsequent scans are incremental and faster.
 
-## 📈 Métricas y Reportes
+## 📈 Metrics and Reports
 
-### Ver Tendencias de Seguridad
+### View Security Trends
 
-1. Ve a **Insights** → **Security**
-2. Gráficos de:
-   - Alertas abiertas vs cerradas
-   - Tiempo de resolución
-   - Tipos de vulnerabilidades
+1. Go to **Insights** → **Security**
+2. Charts of:
+   - Open vs closed alerts
+   - Resolution time
+   - Vulnerability types
 
-### Exportar Reportes
+### Export Reports
 
-Los artifacts JSON están disponibles por 90 días y pueden descargarse desde la pestaña "Actions".
+The JSON artifacts are available for 90 days and can be downloaded from the "Actions" tab.
 
 ## 🎯 Best Practices
 
-1. **No ignores los warnings**: Revisa cada alerta aunque no bloquee el PR
-2. **Actualiza dependencias regularmente**: Aprueba los PRs de Dependabot
-3. **Revisa los escaneos semanales**: Aunque no haya PR, el scan semanal puede detectar nuevas vulnerabilidades
-4. **Mantén actualizado `.env.example`**: Nunca commites `.env` real
-5. **Usa GitHub Secrets**: Para CI/CD variables sensibles
+1. **Do not ignore warnings**: review every alert even if it does not block the PR
+2. **Update dependencies regularly**: approve the Dependabot PRs
+3. **Review the weekly scans**: even without a PR, the weekly scan can detect new vulnerabilities
+4. **Keep `.env.example` up to date**: never commit a real `.env`
+5. **Use GitHub Secrets**: for sensitive CI/CD variables
 
-## 🆓 Costos
+## 🆓 Costs
 
-**TODO ES GRATUITO** para repositorios públicos y privados (con límites generosos):
+**EVERYTHING IS FREE** for public and private repositories (with generous limits):
 
-- ✅ GitHub Actions: 2,000 minutos/mes gratis
-- ✅ Dependabot: Ilimitado
-- ✅ CodeQL: Gratis para repos públicos
-- ✅ TruffleHog: Open source, gratis
-- ✅ Trivy: Open source, gratis
+- ✅ GitHub Actions: 2,000 free minutes/month
+- ✅ Dependabot: unlimited
+- ✅ CodeQL: free for public repos
+- ✅ TruffleHog: open source, free
+- ✅ Trivy: open source, free
 
-Para repos privados, los minutos se consumen, pero la cuota gratuita suele ser suficiente.
+For private repos the minutes are consumed, but the free quota is usually enough.
 
-## 📚 Referencias
+## 📚 References
 
 - [TruffleHog Docs](https://github.com/trufflesecurity/trufflehog)
 - [CodeQL Docs](https://codeql.github.com/docs/)
@@ -251,5 +251,5 @@ Para repos privados, los minutos se consumen, pero la cuota gratuita suele ser s
 
 ---
 
-**Mantenido por**: [@irraz](https://github.com/irraz)  
-**Última actualización**: 2026-10-23
+**Maintained by**: [@irraz](https://github.com/irraz)  
+**Last updated**: 2026-10-23

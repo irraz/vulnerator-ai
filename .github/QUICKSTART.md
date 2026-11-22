@@ -1,38 +1,38 @@
-# 🚀 Inicio Rápido - Pipeline de Seguridad
+# 🚀 Quick Start - Security Pipeline
 
-## ⚡ Setup en 5 Minutos
+## ⚡ Setup in 5 Minutes
 
-### Paso 1: Habilitar Funciones de GitHub (30 segundos)
+### Step 1: Enable GitHub Features (30 seconds)
 
-Ve a tu repositorio en GitHub → **Settings** → **Security**:
+Go to your repository on GitHub → **Settings** → **Security**:
 
 ```
 ☑️ Dependabot alerts
 ☑️ Dependabot security updates  
 ☑️ Code scanning
-☑️ Secret scanning (solo repos públicos)
+☑️ Secret scanning (public repos only)
 ```
 
-### Paso 2: Subir la Pipeline (1 minuto)
+### Step 2: Push the Pipeline (1 minute)
 
 ```bash
-# Ya tienes los archivos, solo súbelos:
+# You already have the files, just push them:
 git add .github/
 git add .pre-commit-config.yaml
-git commit -m "feat: Agregar pipeline de seguridad completa con TruffleHog, CodeQL, Trivy"
+git commit -m "feat: add the complete security pipeline with TruffleHog, CodeQL, Trivy"
 git push origin main
 ```
 
-### Paso 3: Configurar Branch Protection (2 minutos)
+### Step 3: Configure Branch Protection (2 minutes)
 
-**Opción A - Interfaz Web:**
+**Option A - Web UI:**
 1. Settings → Branches → Add rule
 2. Branch name: `main`
-3. Habilita: ☑️ Require status checks (selecciona todos los checks de la pipeline)
-4. Habilita: ☑️ Require pull request reviews (mínimo 1)
+3. Enable: ☑️ Require status checks (select all the pipeline checks)
+4. Enable: ☑️ Require pull request reviews (minimum 1)
 5. Save changes
 
-**Opción B - GitHub CLI (más rápido):**
+**Option B - GitHub CLI (faster):**
 ```bash
 gh api repos/:owner/:repo/branches/main/protection \
   --method PUT \
@@ -54,179 +54,179 @@ gh api repos/:owner/:repo/branches/main/protection \
 EOF
 ```
 
-### Paso 4: (Opcional) Pre-commit Hooks Locales (1 minuto)
+### Step 4: (Optional) Local Pre-commit Hooks (1 minute)
 
 ```bash
-# Instalar pre-commit
+# Install pre-commit
 pip install pre-commit
 
-# Activar hooks
+# Activate the hooks
 pre-commit install
 
-# Ejecutar una vez para verificar
+# Run once to verify
 pre-commit run --all-files
 ```
 
 ---
 
-## ✅ ¡Listo!
+## ✅ Done!
 
-Ahora tu repositorio tiene:
+Your repository now has:
 
-- ✅ **TruffleHog** detectando secretos en cada PR
-- ✅ **CodeQL** analizando vulnerabilidades de seguridad
-- ✅ **Trivy** escaneando imágenes Docker
-- ✅ **Bandit** revisando código Python
-- ✅ **Safety** verificando dependencias vulnerables
-- ✅ **Dependabot** creando PRs automáticos de actualizaciones
-- ✅ **Hadolint** validando Dockerfiles
-- ✅ **Branch Protection** bloqueando merges inseguros
+- ✅ **TruffleHog** detecting secrets on every PR
+- ✅ **CodeQL** analyzing security vulnerabilities
+- ✅ **Trivy** scanning Docker images
+- ✅ **Bandit** reviewing Python code
+- ✅ **Safety** checking vulnerable dependencies
+- ✅ **Dependabot** opening automatic update PRs
+- ✅ **Hadolint** validating Dockerfiles
+- ✅ **Branch Protection** blocking unsafe merges
 
 ---
 
-## 🧪 Verificar que Funciona
+## 🧪 Verify It Works
 
-### Test 1: Crear un PR de Prueba
+### Test 1: Create a Test PR
 
 ```bash
 git checkout -b test/security-pipeline
 echo "# Test" >> TEST.md
 git add TEST.md
-git commit -m "test: Verificar pipeline de seguridad"
+git commit -m "test: verify the security pipeline"
 git push origin test/security-pipeline
 
-# Abrir PR
-gh pr create --title "Test: Security Pipeline" --body "Verificar que todos los checks se ejecuten"
+# Open the PR
+gh pr create --title "Test: Security Pipeline" --body "Verify that all checks run"
 ```
 
-### Test 2: Verificar los Checks
+### Test 2: Check the Checks
 
-1. Ve al PR en GitHub
-2. En la pestaña "Checks" deberías ver:
-   - 🔐 TruffleHog - Detección de Secretos
-   - 🔍 CodeQL - Análisis de Código
+1. Go to the PR on GitHub
+2. In the "Checks" tab you should see:
+   - 🔐 TruffleHog - Secret Detection
+   - 🔍 CodeQL - Code Analysis
    - 🐍 Python Linting
-   - 📦 Escaneo de Dependencias
-   - 🐳 Trivy - Escaneo Docker
-   - ✅ Validación de PR
+   - 📦 Dependency Scan
+   - 🐳 Trivy - Docker Image Scan
+   - ✅ PR Validation
    - 🐳 Dockerfile Linting
 
-3. ⚠️ El botón "Merge" debería estar **deshabilitado** hasta que:
-   - ✅ Todos los checks pasen
-   - ✅ Alguien apruebe el PR
+3. ⚠️ The "Merge" button should stay **disabled** until:
+   - ✅ All checks pass
+   - ✅ Someone approves the PR
 
-### Test 3: Probar Detección de Secretos (¡NO HAGAS ESTO EN MAIN!)
+### Test 3: Test Secret Detection (DO NOT DO THIS ON MAIN!)
 
 ```bash
-# EN UNA RAMA DE PRUEBA SOLAMENTE
+# ON A TEST BRANCH ONLY
 git checkout -b test/secret-detection
-echo "AWS_SECRET_KEY=AKIAIOSFODNN7EXAMPLE" > fake-secret.txt  # pragma: allowlist secret
+echo "AWS_SECRET_KEY=«redacted:AKIA…»" > fake-secret.txt  # pragma: allowlist secret
 git add fake-secret.txt
-git commit -m "test: Trigger secret detection"
+git commit -m "test: trigger secret detection"
 git push origin test/secret-detection
 
-# TruffleHog DEBERÍA detectarlo y FALLAR el check
+# TruffleHog SHOULD detect it and FAIL the check
 ```
 
 ---
 
-## 📊 Dónde Ver Resultados
+## 📊 Where to See Results
 
-### Durante el Desarrollo (Local)
+### During Development (Local)
 ```bash
-# Ejecutar checks localmente antes de push
+# Run the checks locally before pushing
 pre-commit run --all-files
 
-# Solo un check específico
+# A single check only
 pre-commit run bandit --all-files
 ```
 
-### En GitHub
+### On GitHub
 
-**Pestaña "Actions"**: Estado de todos los workflows
+**"Actions" tab**: status of all workflows
 - https://github.com/OWNER/REPO/actions
 
-**Pestaña "Security"**: Alertas consolidadas
+**"Security" tab**: consolidated alerts
 - Code scanning: https://github.com/OWNER/REPO/security/code-scanning
 - Dependabot: https://github.com/OWNER/REPO/security/dependabot
 
-**En cada PR**: 
-- Tab "Checks": Estado detallado
-- Tab "Files changed": Anotaciones inline de CodeQL
+**In each PR**: 
+- "Checks" tab: detailed status
+- "Files changed" tab: CodeQL inline annotations
 
 ---
 
-## 🔧 Personalización Rápida
+## 🔧 Quick Customization
 
-### Cambiar tu usuario en Dependabot
+### Change your user in Dependabot
 
 ```bash
-# Editar .github/dependabot.yml
-sed -i '' 's/irraz/TU-USUARIO/g' .github/dependabot.yml
+# Edit .github/dependabot.yml
+sed -i '' 's/irraz/YOUR-USERNAME/g' .github/dependabot.yml
 ```
 
-### Deshabilitar un check temporalmente
+### Temporarily disable a check
 
 ```bash
-# Comentar el job en el workflow
+# Comment out the job in the workflow
 sed -i '' 's/docker-scan:/# docker-scan:/g' .github/workflows/security.yml
 ```
 
-### Ajustar severidad de TruffleHog
+### Adjust TruffleHog severity
 
 ```yaml
-# En .github/workflows/security.yml
-# Cambiar:
+# In .github/workflows/security.yml
+# Change:
 extra_args: --only-verified
-# A:
-extra_args: --debug  # Detecta TODO
+# To:
+extra_args: --debug  # Detects EVERYTHING
 ```
 
 ---
 
-## 🆘 Solución de Problemas Comunes
+## 🆘 Common Troubleshooting
 
-### "El check no aparece en Branch Protection"
+### "The check does not appear in Branch Protection"
 
-**Causa**: Debe ejecutarse al menos una vez.
+**Cause**: It must run at least once.
 
-**Solución**: Abre un PR cualquiera, espera que se ejecute, vuelve a Settings.
+**Solution**: Open any PR, wait for it to run, go back to Settings.
 
-### "Pre-commit falla con 'command not found'"
+### "Pre-commit fails with 'command not found'"
 
 ```bash
-# Reinstalar
+# Reinstall
 pip install --upgrade pre-commit
 pre-commit clean
 pre-commit install
 ```
 
-### "CodeQL tarda mucho"
+### "CodeQL takes a long time"
 
-Normal en la primera vez. Cachea resultados y es más rápido después.
+Normal on the first run. It caches results and is faster afterwards.
 
-### "Dependabot crea demasiados PRs"
+### "Dependabot opens too many PRs"
 
 ```yaml
-# En .github/dependabot.yml
-open-pull-requests-limit: 2  # Reducir de 5 a 2
+# In .github/dependabot.yml
+open-pull-requests-limit: 2  # Reduce from 5 to 2
 ```
 
-### "False positivo en TruffleHog"
+### "False positive in TruffleHog"
 
 ```bash
-# Crear .trufflehogignore en la raíz
+# Create .trufflehogignore at the root
 echo "labs/**" >> .trufflehogignore
 echo "tests/**" >> .trufflehogignore
 ```
 
 ---
 
-## 📚 Siguiente Nivel
+## 📚 Next Level
 
-### 1. **Notificaciones Slack/Discord**
+### 1. **Slack/Discord Notifications**
 
-Agrega al final de `.github/workflows/security.yml`:
+Add at the end of `.github/workflows/security.yml`:
 
 ```yaml
 - name: Notify on Slack
@@ -237,14 +237,14 @@ Agrega al final de `.github/workflows/security.yml`:
     webhook_url: ${{ secrets.SLACK_WEBHOOK }}
 ```
 
-### 2. **Badges en README**
+### 2. **Badges in the README**
 
 ```markdown
 ![Security Pipeline](https://github.com/OWNER/REPO/workflows/Security%20Pipeline/badge.svg)
 ![CodeQL](https://github.com/OWNER/REPO/workflows/CodeQL/badge.svg)
 ```
 
-### 3. **SAST Adicional con Semgrep**
+### 3. **Additional SAST with Semgrep**
 
 ```yaml
 - name: Semgrep
@@ -253,7 +253,7 @@ Agrega al final de `.github/workflows/security.yml`:
     config: auto
 ```
 
-### 4. **Cobertura de Tests**
+### 4. **Test Coverage**
 
 ```yaml
 - name: Coverage
@@ -265,30 +265,30 @@ Agrega al final de `.github/workflows/security.yml`:
 
 ---
 
-## 🎯 Checklist Final
+## 🎯 Final Checklist
 
-- [ ] Pipeline subida a GitHub
-- [ ] Branch protection configurada en `main`
-- [ ] Dependabot habilitado
-- [ ] Code scanning habilitado
-- [ ] Pre-commit hooks instalados localmente
-- [ ] PR de prueba exitoso
-- [ ] Equipo notificado del nuevo proceso
-- [ ] Documentación SECURITY-PIPELINE.md revisada
+- [ ] Pipeline pushed to GitHub
+- [ ] Branch protection configured on `main`
+- [ ] Dependabot enabled
+- [ ] Code scanning enabled
+- [ ] Pre-commit hooks installed locally
+- [ ] Test PR succeeded
+- [ ] Team notified of the new process
+- [ ] SECURITY-PIPELINE.md documentation reviewed
 
 ---
 
 ## 💡 Pro Tips
 
-1. **Ejecuta los checks localmente** con pre-commit antes de push para iterar más rápido
-2. **Revisa Dependabot semanalmente** en lugar de ignorar sus PRs
-3. **No ignores warnings** de Bandit, aunque no bloqueen el PR
-4. **Mantén actualizado `.env.example`** para que nuevos devs sepan qué variables necesitan
-5. **Revisa la pestaña Security** al menos una vez al mes
+1. **Run the checks locally** with pre-commit before pushing to iterate faster
+2. **Review Dependabot weekly** instead of ignoring its PRs
+3. **Do not ignore Bandit warnings**, even if they do not block the PR
+4. **Keep `.env.example` up to date** so new devs know which variables they need
+5. **Review the Security tab** at least once a month
 
 ---
 
-**¿Problemas?** Abre un issue o revisa [SECURITY-PIPELINE.md](./SECURITY-PIPELINE.md) para más detalles.
+**Problems?** Open an issue or check [SECURITY-PIPELINE.md](./SECURITY-PIPELINE.md) for more details.
 
-**Tiempo total de setup**: ~5 minutos  
-**Beneficio**: Seguridad enterprise-grade **gratis** 🎉
+**Total setup time**: ~5 minutes  
+**Benefit**: enterprise-grade security **for free** 🎉

@@ -1,8 +1,8 @@
-# 🛡️ Branch Protection Configuration
+# 🛡️ Branch Protection Setup
 
-## Steps to Configure Branch Protection on GitHub
+## Steps to Set Up Branch Protection on GitHub
 
-To ensure the security pipeline runs **mandatory** before merging to `main`, follow these steps:
+To make sure the security pipeline runs **mandatorily** before merging into `main`, follow these steps:
 
 ### 1. Open Branch Protection Rules
 
@@ -27,7 +27,7 @@ main
 
 **Require status checks to pass before merging**
 - ☑️ Require branches to be up to date before merging
-- **Status checks that must pass** (search and select them):
+- **Status checks that must pass** (search for them and select them):
   ```
   ☑️ 🧱 Base scaffolding   <-- BLOCKING gate for the scaffolding (ci.yml)
   ☑️ TruffleHog - Secret Detection
@@ -45,27 +45,27 @@ main
   > informative (it does not block the merge).
 
 **Require conversation resolution before merging**
-- ☑️ All comments must be resolved before merge
+- ☑️ All comments must be resolved before merging
 
 **Require signed commits** (optional but recommended)
 - ☑️ Require signed commits
 
 **Require linear history** (optional)
-- ☑️ Prevents merge commits, allows only rebase and squash
+- ☑️ Prevents merge commits; only allows rebase and squash
 
 **Do not allow bypassing the above settings**
-- ☑️ Apply to administrators as well
-- ⚠️ Disable this only if you need to make emergency hotfixes
+- ☑️ Apply to administrators too
+- ⚠️ Turn this off only if you need to ship emergency hotfixes
 
-#### 🔒 Recommended Additional Protections:
+#### 🔒 Additional Recommended Protections:
 
 **Restrict who can push to matching branches**
 - Limit direct pushes to:
   - Administrators
-  - Service accounts for CI/CD
+  - CI/CD service accounts
 
 **Allow force pushes**
-- ❌ **Disabled** (NEVER allow force push to main)
+- ❌ **Disabled** (NEVER allow a force push to main)
 
 **Allow deletions**
 - ❌ **Disabled** (prevent accidental deletion of main)
@@ -78,7 +78,7 @@ Click **Create** or **Save changes**
 
 ## 📋 Complete Configuration (Copy/Paste Template)
 
-If you prefer to use the GitHub API or Terraform, here is the configuration in JSON format:
+If you prefer the GitHub API or Terraform, here is the configuration in JSON format:
 
 ```json
 {
@@ -114,7 +114,7 @@ If you prefer to use the GitHub API or Terraform, here is the configuration in J
 }
 ```
 
-### Apply with GitHub CLI:
+### Apply with the GitHub CLI:
 
 ```bash
 gh api repos/:owner/:repo/branches/main/protection \
@@ -157,7 +157,7 @@ requirements.txt @irraz @security-team
    - Open a retrospective PR with the checks
 
 2. **Security emergency**:
-   - Patch critical vulnerability
+   - Patch the critical vulnerability
    - Notify the team immediately
    - Run the pipeline manually afterwards
 
@@ -173,25 +173,25 @@ git push origin main
 # 3. Immediately afterwards, create a verification PR
 git checkout -b hotfix/verify-TICKET-123
 git push origin hotfix/verify-TICKET-123
-gh pr create --title "Post-hotfix verification TICKET-123" --body "Run the full pipeline on the hotfix"
+gh pr create --title "Post-hotfix verification TICKET-123" --body "Run the full pipeline over the hotfix"
 ```
 
 ---
 
 ## ✅ Verification
 
-After configuring, verify it works:
+After configuring, verify that it works:
 
 1. Create a test branch:
    ```bash
    git checkout -b test/branch-protection
    echo "test" >> README.md
    git add README.md
-   git commit -m "test: Verify branch protection"
+   git commit -m "test: verify branch protection"
    git push origin test/branch-protection
    ```
 
-2. Open a PR to `main`
+2. Open a PR into `main`
 
 3. Try to merge **without waiting for the checks to pass**:
    - ❌ It should be **disabled**
@@ -222,14 +222,14 @@ Settings → Security → Audit log → Filter by "protected branch"
 
 ## 🆘 Troubleshooting
 
-### "Status check does not appear in the list"
+### "The status check does not appear in the list"
 
-**Cause**: The check must run at least once to appear.
+**Cause**: The check must run at least once before it appears.
 
 **Solution**:
 1. Open any PR
 2. Wait for the pipeline to run
-3. Return to the protection configuration
+3. Go back to the protection configuration
 4. It should now appear in the list
 
 ### "I cannot merge even though the checks pass"
@@ -241,7 +241,7 @@ Settings → Security → Audit log → Filter by "protected branch"
 
 ### "Administrators can bypass the rules"
 
-**Solution**: Check "Do not allow bypassing the above settings" and apply it to administrators.
+**Solution**: Enable "Do not allow bypassing the above settings" and apply it to administrators.
 
 ---
 

@@ -1,10 +1,10 @@
-# Configuración de Dependabot para mantener las dependencias actualizadas
-# y recibir alertas de seguridad automáticas
+# Dependabot configuration to keep dependencies up to date
+# and to receive automatic security alerts
 
 version: 2
 updates:
   # ============================================================================
-  # DEPENDENCIAS PYTHON - KALI
+  # PYTHON DEPENDENCIES - KALI
   # ============================================================================
   - package-ecosystem: "pip"
     directory: "/docker/kali"
@@ -22,7 +22,7 @@ updates:
     commit-message:
       prefix: "deps(kali)"
       include: "scope"
-    # Agrupar actualizaciones menores y de parches
+    # Group minor and patch updates
     groups:
       python-minor-updates:
         patterns:
@@ -32,7 +32,7 @@ updates:
           - "patch"
 
   # ============================================================================
-  # DEPENDENCIAS PYTHON - MCP
+  # PYTHON DEPENDENCIES - MCP
   # ============================================================================
   - package-ecosystem: "pip"
     directory: "/docker/mcp"
@@ -59,7 +59,7 @@ updates:
           - "patch"
 
   # ============================================================================
-  # DEPENDENCIAS DOCKER
+  # DOCKER DEPENDENCIES
   # ============================================================================
   - package-ecosystem: "docker"
     directory: "/docker/kali"
