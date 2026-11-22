@@ -40,7 +40,7 @@ gh api repos/:owner/:repo/branches/main/protection \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["secrets-scan", "codeql-analysis", "python-lint", "dependency-scan", "docker-scan"]
+    "contexts": ["🔐 TruffleHog - Secret Detection", "🔍 CodeQL - Code Analysis (python)", "🐍 Python Linting", "📦 Dependency Scan", "🐳 Trivy - Docker Image Scan (kali)", "🐳 Trivy - Docker Image Scan (mcp)"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {

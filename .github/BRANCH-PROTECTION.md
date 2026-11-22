@@ -30,13 +30,14 @@ main
 - **Status checks that must pass** (search for them and select them):
   ```
   ☑️ 🧱 Base scaffolding   <-- BLOCKING gate for the scaffolding (ci.yml)
-  ☑️ TruffleHog - Secret Detection
-  ☑️ CodeQL - Code Analysis  
-  ☑️ Python Linting
-  ☑️ Dependency Scan
-  ☑️ Trivy - Docker Image Scan
-  ☑️ PR Validation
-  ☑️ Dockerfile Linting
+  ☑️ 🔐 TruffleHog - Secret Detection
+  ☑️ 🔍 CodeQL - Code Analysis (python)
+  ☑️ 🐍 Python Linting
+  ☑️ 📦 Dependency Scan
+  ☑️ 🐳 Trivy - Docker Image Scan (kali)
+  ☑️ 🐳 Trivy - Docker Image Scan (mcp)
+  ☑️ ✅ PR Validation
+  ☑️ 🐳 Dockerfile Linting
   ```
 
   > `🧱 Base scaffolding` (`.github/workflows/ci.yml`) is the blocking gate: static
@@ -86,13 +87,14 @@ If you prefer the GitHub API or Terraform, here is the configuration in JSON for
     "strict": true,
     "contexts": [
       "🧱 Base scaffolding",
-      "secrets-scan",
-      "codeql-analysis",
-      "python-lint",
-      "dependency-scan",
-      "docker-scan",
-      "pr-validation",
-      "dockerfile-lint"
+      "🔐 TruffleHog - Secret Detection",
+      "🔍 CodeQL - Code Analysis (python)",
+      "🐍 Python Linting",
+      "📦 Dependency Scan",
+      "🐳 Trivy - Docker Image Scan (kali)",
+      "🐳 Trivy - Docker Image Scan (mcp)",
+      "✅ PR Validation",
+      "🐳 Dockerfile Linting"
     ]
   },
   "enforce_admins": true,
