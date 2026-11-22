@@ -247,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    targets: list[Path] = []
     if args.all:
         targets = [root]
     elif args.paths:

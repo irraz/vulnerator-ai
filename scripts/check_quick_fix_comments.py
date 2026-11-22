@@ -175,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parent.parent
+    targets: list[str] = []
     if args.all:
         targets = [str(root)]
     elif args.paths:
