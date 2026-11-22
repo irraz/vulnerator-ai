@@ -1,28 +1,28 @@
 # ============================================================================
-# 🧱 Base scaffolding — GATE BLOQUEANTE del andamiaje.
+# 🧱 Base scaffolding — BLOCKING gate for the scaffolding.
 #
-# Este job es el gate que bloquea el merge de una PR: no lleva `continue-on-error`
-# y debe aparecer como check obligatorio (`🧱 Base scaffolding`) en la protección
-# de ramas (`.github/BRANCH-PROTECTION.md`).
+# This job is the gate that blocks a PR merge: it has no `continue-on-error`
+# and must appear as a required check (`🧱 Base scaffolding`) in branch
+# protection (`.github/BRANCH-PROTECTION.md`).
 #
-# Bloquea cinco cosas:
-#   1. contratos + tools por AST + anexos del mapa + imports SDK-free
+# It blocks five things:
+#   1. contracts + tools by AST + map annexes + SDK-free imports
 #      -> `python scripts/smoke.py --static`
-#   2. regla anti-comentarios de parche
+#   2. quick-fix comment rule
 #      -> `python scripts/check_quick_fix_comments.py --all`
-#   3. ruff de correctitud (E9,F63,F7,F82,F401,F811,F821)
+#   3. correctness ruff (E9,F63,F7,F82,F401,F811,F821)
 #      -> `python -m ruff check .`
-#   4. type-check de correctitud (mypy)
-#      -> el step dedicado (ficheros puros de logica)
-#   5. las 6 suites
+#   4. correctness type-check (mypy)
+#      -> the dedicated step (pure logic files)
+#   5. the 6 suites
 #      -> `python scripts/smoke.py --quick`
 #
-# El pipeline legacy (`security.yml`, `pr-checks.yml`) y `pre-commit run --all-files`
-# quedan INFORMATIVOS hasta el `chore(style)` que reateca los ficheros que
-# black/isort/prettier quieren reformatear (55/13/46): no bloquean el andamiaje.
+# The legacy pipeline (`security.yml`, `pr-checks.yml`) and `pre-commit run --all-files`
+# remain INFORMATIVE until the `chore(style)` that reformats the files black/isort/
+# prettier want to reformat (55/13/46): they do not block the scaffolding.
 #
-# Depende de la rama feat/base-linters: `requirements-dev.txt`, `pyproject.toml`
-# (config de mypy), `scripts/check_quick_fix_comments.py` y `scripts/tests/`.
+# Depends on branch feat/base-linters: `requirements-dev.txt`, `pyproject.toml`
+# (mypy config), `scripts/check_quick_fix_comments.py` and `scripts/tests/`.
 # ============================================================================
 name: 🧱 Base scaffolding
 
@@ -34,7 +34,7 @@ jobs:
   base-scaffolding:
     name: 🧱 Base scaffolding
     runs-on: ubuntu-latest
-    # BLOQUEANTE: sin `continue-on-error` — un fallo aquí no se puede ignorar.
+    # BLOCKING: no `continue-on-error` — a failure here cannot be ignored.
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -47,20 +47,20 @@ jobs:
       - name: Install dev requirements
         run: pip install -r requirements-dev.txt
 
-      - name: Smoke estático (contratos, tools por AST, anexos del mapa, imports SDK-free)
+      - name: Static smoke (contracts, tools by AST, map annexes, SDK-free imports)
         run: python scripts/smoke.py --static
 
-      - name: Validar docker-compose
+      - name: Validate docker-compose
         run: docker compose config --quiet
 
-      - name: Regla anti-comentarios de parche
+      - name: Quick-fix comment rule
         run: python scripts/check_quick_fix_comments.py --all
 
-      - name: Ruff (correctitud)
+      - name: Ruff (correctness)
         run: python -m ruff check .
 
-      - name: Type-check (correctitud)
+      - name: Type-check (correctness)
         run: python -m mypy --config-file pyproject.toml docker/kali/scope_guard.py docker/kali/finding_store.py docker/kali/session_log.py docker/kali/tool_streaming.py docker/kali/shell_exec.py docker/mcp/mcp_tool_logic.py docker/web/ooda_parse.py docker/web/event_model.py
 
-      - name: Suites de tests
+      - name: Test suites
         run: python scripts/smoke.py --quick

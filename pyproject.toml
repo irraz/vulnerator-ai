@@ -4,12 +4,12 @@ target-version = "py313"
 extend-exclude = [".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "labs", "media", "docs"]
 
 [tool.ruff.lint]
-# BLOQUEANTE: solo correctitud (sintaxis, flujo, imports y nombres).
-# B/UP/SIM/RUF quedan como DEUDA ASESORADA no bloqueante:
+# BLOCKING: correctness only (syntax, flow, imports and names).
+# B/UP/SIM/RUF remain as non-blocking ADVISORY DEBT:
 #   ruff check . --select B,UP,SIM,RUF
 select = ["E9", "F63", "F7", "F82", "F401", "F811", "F821"]
-# OJO: W503 no es un selector válido en ruff (ruff no implementa W503/W504; la
-# intención la cubre flake8 con --extend-ignore=E203,W503 en .pre-commit-config.yaml).
+# NOTE: W503 is not a valid ruff selector (ruff does not implement W503/W504; the
+# intent is covered by flake8 with --extend-ignore=E203,W503 in .pre-commit-config.yaml).
 ignore = ["E203"]
 per-file-ignores = { "*/tests/*" = ["E501"] }
 
@@ -20,7 +20,7 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
 check_untyped_defs = true
-disallow_untyped_defs = false          # módulos sin anotar: no imponer de golpe
+disallow_untyped_defs = false          # unannotated modules: do not enforce all at once
 exclude = "(^|/)tests/"
 
 [[tool.mypy.overrides]]

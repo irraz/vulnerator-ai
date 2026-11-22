@@ -1,24 +1,34 @@
 #!/usr/bin/env python3
-"""Bloquea comentarios de parche rapido / atajo / deuda en el arbol del repo.
+"""Blocks quick-fix / shortcut / debt comments in the repo tree.
 
-Regla determinista y sensata al separador: un marcador solo es de deuda si abre
-el comentario y va seguido de ``:`` o ``!``. El separador es lo que aparta los
-falsos positivos del espanol (``# todo el store``, ``# PARCHEADA``,
-``# temporary credentials``): sin el no, el regex suelto daba 19 falsos
-positivos en este repo; con el, 0.
+Deterministic rule, sensitive to the separator: a marker is debt only if it opens
+the comment and is followed by ``:`` or ``!``. The separator is what keeps the
+Spanish false positives out (``# todo el store``, ``# PARCHEADA``,
+``# temporary credentials``): without it, the loose regex gave 19 false
+positives in this repo; with it, 0.
 
-Ambito: ficheros de codigo y configuracion (``.py``, ``.sh``, ``.yaml``...).
-No excluye tests: un marcador inyectado en un test es tambien un hallazgo.
+Scope: code and configuration files (``.py``, ``.sh``, ``.yaml``...).
+Tests are not excluded: a marker injected into a test is also a finding.
 
-Salida: ``ruta:línea: | comentario`` por hallazgo y un resumen final.
-Exit: ``0`` limpio, ``1`` hallazgos, ``2`` error de uso.
+Mid-line detection scope: only in ``.py``, and only on real ``COMMENT``
+tokens (``tokenize``), which is the only deterministic way to avoid flagging a
+``#`` inside a literal (``s = "error # TODO: fix"``). In the rest of the
+files (``.sh``, ``.yaml``, ``.toml``) a mid-line marker is OUT OF SCOPE by
+explicit decision: without a parser there is no reliable way to tell a comment
+from a literal, and the gate is blocking. Markers that open the note
+(``# TODO:``, ``## FIXME:``, docstrings) are detected in all files.
+
+Output: ``path:line: | comment`` per finding and a final summary.
+Exit: ``0`` clean, ``1`` findings, ``2`` usage error.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 MARKERS = (
@@ -38,10 +48,12 @@ MARKERS = (
 
 _MARKER_ALT = "|".join(re.escape(m) for m in sorted(MARKERS, key=len, reverse=True))
 
-# El marcador abre el comentario (#, //, /*, *, <!--) y lleva ':' o '!' despues.
-COMMENT_RE = re.compile(r"^\s*(?:#|//|/\*|\*|<!--)\s*(?:" + _MARKER_ALT + r")\s*[:!]")
-# El marcador es el primer token de un docstring y lleva ':' o '!' despues.
+# The marker opens the comment (#, ##, //, /*, *, <!--) and is followed by ':' or '!'.
+COMMENT_RE = re.compile(r"^\s*(?:#+|//|/\*|\*|<!--)\s*(?:" + _MARKER_ALT + r")\s*[:!]")
+# The marker is the first token of a docstring and is followed by ':' or '!'.
 DOCSTRING_RE = re.compile(r"^\s*(?:\"\"\"|''')\s*(?:" + _MARKER_ALT + r")\s*[:!]")
+# Mid-line in .py: applied ONLY to the text of tokenize COMMENT tokens.
+TRAILING_MARKER_RE = re.compile(r"^\s*#+\s*(?:" + _MARKER_ALT + r")\s*[:!]")
 
 CODE_SUFFIXES = {
     ".py",
@@ -77,12 +89,12 @@ EXCLUDED_DIRS = {
 
 
 def is_code_file(path: Path) -> bool:
-    """True si el fichero entra en el ambito de la regla."""
+    """True if the file is in the rule's scope."""
     return path.name in CODE_NAMES or path.suffix.lower() in CODE_SUFFIXES
 
 
 def is_excluded(path: Path, root: Path) -> bool:
-    """True si el fichero cuelga de un directorio excluido."""
+    """True if the file hangs from an excluded directory."""
     try:
         rel = path.relative_to(root)
     except ValueError:
@@ -91,12 +103,12 @@ def is_excluded(path: Path, root: Path) -> bool:
 
 
 def collect_files(targets: list[str], root: Path) -> list[Path]:
-    """Resuelve las rutas pedidas a ficheros de codigo dentro del ambito."""
+    """Resolves the requested paths to in-scope code files."""
     files: list[Path] = []
     for target in targets:
         p = Path(target)
         if not p.exists():
-            raise SystemExit(f"error: la ruta no existe: {p}")
+            raise SystemExit(f"error: path does not exist: {p}")
         if p.is_dir():
             for f in sorted(p.rglob("*")):
                 if f.is_file() and is_code_file(f) and not is_excluded(f, p):
@@ -106,29 +118,59 @@ def collect_files(targets: list[str], root: Path) -> list[Path]:
     return files
 
 
+def _py_comment_tokens(text: str) -> list[tuple[int, str]]:
+    """Real comments of a .py: [(line, text)] only COMMENT tokens.
+
+    ``tokenize`` is the only deterministic source: a ``#`` inside a literal does
+    not produce a COMMENT token, so it is not flagged. If the file does not
+    tokenize (half-written syntax, truncated file), mid-line is not detected: the
+    gate still covers the markers that open the note.
+    """
+    tokens: list[tuple[int, str]] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                tokens.append((tok.start[0], tok.string))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return []
+    return tokens
+
+
 def scan_file(path: Path) -> list[tuple[int, str]]:
-    """Devuelve [(linea, comentario)] con marcadores de deuda."""
+    """Returns [(line, comment)] with debt markers."""
     found: list[tuple[int, str]] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        print(f"aviso: no se pudo leer {path}: {exc}", file=sys.stderr)
+        print(f"warning: could not read {path}: {exc}", file=sys.stderr)
         return found
-    for lineno, line in enumerate(lines, start=1):
+
+    flagged_lines: set[int] = set()
+    for lineno, line in enumerate(text.splitlines(), start=1):
         if COMMENT_RE.match(line) or DOCSTRING_RE.match(line):
             found.append((lineno, line.strip()))
+            flagged_lines.add(lineno)
+
+    if path.suffix.lower() == ".py":
+        lines = text.splitlines()
+        for lineno, comment in _py_comment_tokens(text):
+            if lineno in flagged_lines:
+                continue
+            if TRAILING_MARKER_RE.match(comment):
+                found.append((lineno, lines[lineno - 1].strip()))
+
     return found
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Bloquea comentarios de parche rapido/atajo/deuda."
+        description="Blocks quick-fix/shortcut/debt comments."
     )
-    parser.add_argument("paths", nargs="*", help="Ficheros o directorios a revisar.")
+    parser.add_argument("paths", nargs="*", help="Files or directories to review.")
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Revisa todo el repositorio (respeta los directorios excluidos).",
+        help="Reviews the whole repository (respects excluded directories).",
     )
     args = parser.parse_args(argv)
 
@@ -138,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.paths:
         targets = args.paths
     else:
-        parser.error("indica al menos una ruta o usa --all")
+        parser.error("provide at least one path or use --all")
 
     findings: list[tuple[str, int, str]] = []
     for f in collect_files(targets, root):
@@ -146,13 +188,13 @@ def main(argv: list[str] | None = None) -> int:
             findings.append((str(f), lineno, text))
     findings.sort(key=lambda item: (item[0], item[1]))
 
-    for ruta, lineno, text in findings:
-        print(f"{ruta}:{lineno}: | {text}")
+    for path, lineno, text in findings:
+        print(f"{path}:{lineno}: | {text}")
 
     if findings:
-        print(f"{len(findings)} comentario(s) de parche/atajo/deuda")
+        print(f"{len(findings)} quick-fix/shortcut/debt comment(s)")
         return 1
-    print("OK: 0 comentarios de parche/atajo/deuda")
+    print("OK: 0 quick-fix/shortcut/debt comments")
     return 0
 
 
