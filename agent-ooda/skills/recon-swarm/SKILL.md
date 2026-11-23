@@ -36,10 +36,10 @@ result.
 | Branch | Scope | Tools | Done criterion |
 |---|---|---|---|
 | Hosts and ports | the in-scope IP ranges / host list | `nmap` via `mcp_kali_kali_run` (`-sn`, then `-sT -sV` on live hosts) | every in-scope host has a live/dead verdict and its open ports + service versions recorded |
-| Web fingerprint | each in-scope URL/host | `whatweb`/`nuclei` via `kali_run`, or `mcp_kali_webtech_scan` per URL | each URL has technology/versions and template findings recorded |
-| Path discovery | each in-scope web root/path prefix | `ffuf`/crawlers via `kali_run` with a bounded wordlist and rate limit | the wordlist was exhausted per root and the discovered paths (status/size) were recorded |
+| Web fingerprint | each in-scope URL/host | `whatweb`/`nuclei` via `mcp_kali_kali_run`, or `mcp_kali_webtech_scan` per URL | each URL has technology/versions and template findings recorded |
+| Path discovery | each in-scope web root/path prefix | `ffuf`/crawlers via `mcp_kali_kali_run` with a bounded wordlist and rate limit | the wordlist was exhausted per root and the discovered paths (status/size) were recorded |
 | DNS / attack surface | the in-scope domains | `mcp_kali_dns_recon` | subdomains, unique IPs and ASN/PTR recorded; in-scope results feed the hosts branch in a later wave |
-| Cloud read-only | the in-scope AWS account | `mcp_kali_prowler_scan`, `mcp_kali_iam_enum` (+ `get_scan_status`/`read_tool_logs`) | the collection reached `done` and its findings were recorded; nothing mutated |
+| Cloud read-only | the in-scope AWS account | `mcp_kali_prowler_scan`, `mcp_kali_iam_enum` (+ `mcp_kali_get_scan_status`/`mcp_kali_read_tool_logs`) | the collection reached `done` and its findings were recorded; nothing mutated |
 | Code / web pre-recon (optional) | source or docs the operator provided | offline read only | architecture, sinks and auth boundaries mapped and recorded |
 
 Rules for the cut:
