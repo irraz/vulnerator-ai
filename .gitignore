@@ -57,6 +57,10 @@ backlog.md
 .agents/
 .worktrees/
 
+# --- Benchmark outputs (generated; the directory itself is versioned) ---
+scripts/benchmark/results/*
+!scripts/benchmark/results/.gitkeep
+
 # --- Labs: executable exploits are NEVER versioned (SECURITY) ---
 # The labs document vulnerabilities, but functional exploits must not be in the repo.
 labs/**/exploits/
