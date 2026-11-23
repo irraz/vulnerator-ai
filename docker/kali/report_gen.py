@@ -812,13 +812,11 @@ def render_html(engagement_id: str, findings: list[dict], generated_at: str | No
     counter = 1
     for state in _STATE_ORDER:
         for finding in by_state[state]:
-            terminals.extend(
-                _html_evidence_terminal(counter, finding, e, _terminal)
-            )
+            terminals.extend(_html_evidence_terminal(counter, finding))
             controls_rows.append(_controls_row(counter, finding, e))
             counter += 1
     for finding in extra:
-        terminals.extend(_html_evidence_terminal(counter, finding, e, _terminal))
+        terminals.extend(_html_evidence_terminal(counter, finding))
         controls_rows.append(_controls_row(counter, finding, e))
         counter += 1
     if not terminals:
@@ -952,7 +950,7 @@ def render_html(engagement_id: str, findings: list[dict], generated_at: str | No
     )
 
 
-def _html_evidence_terminal(index: int, finding: dict, e, terminal_factory) -> list[str]:
+def _html_evidence_terminal(index: int, finding: dict) -> list[str]:
     """Builds the terminal block(s) of one finding from its stored evidence."""
     evidence = finding.get("evidence")
     if not isinstance(evidence, dict) or not evidence:
@@ -963,13 +961,13 @@ def _html_evidence_terminal(index: int, finding: dict, e, terminal_factory) -> l
     if not command and not output and not ref:
         return []
     label = f"F{index} — {_excerpt(finding.get('title') or '(untitled)', 60)}"
-    blocks = [terminal_factory(label, str(command), str(output), evidence.get("returncode"))]
+    blocks = [_terminal(label, str(command), str(output), evidence.get("returncode"))]
     if isinstance(ref, dict) and ref:
         blocks.append(
             '<pre class="txt" style="background:#0a0000;color:#aa7777;border:1px solid #550000;'
             'border-radius:4px;padding:9px 11px;font-size:11px;margin:-8px 0 16px;">'
             "# evidence artifact: "
-            + e(f"{ref.get('execution_id', '')}/{ref.get('name', '')}")
+            + _escape(f"{ref.get('execution_id', '')}/{ref.get('name', '')}")
             + " (downloadable via the data channel)</pre>"
         )
     return blocks
@@ -983,7 +981,7 @@ def _controls_row(index: int, finding: dict, e) -> str:
     command = evidence.get("command") or ""
     output = evidence.get("output") or ""
     rc = _as_int(evidence.get("returncode"))
-    if not command and output is None and "returncode" not in evidence:
+    if not command and not output and "returncode" not in evidence:
         return ""
     test = _excerpt(command or finding.get("title") or "", 80)
     rc_text = str(rc) if rc is not None else "—"
@@ -1030,6 +1028,8 @@ def generate(engagement_id: str, fmt: str = "md", generated_at: str | None = Non
     fmt = (fmt or "md").lower()
     if fmt not in _FORMATS:
         raise ValueError(f"invalid format {fmt!r}: expected one of {_FORMATS}")
+    # Resolve the timestamp ONCE so both renderers of a single run share it.
+    generated_at = generated_at or _now_iso()
 
     page = finding_store.read(engagement_id, cursor=0, limit=None)
     findings = page.get("findings", [])
@@ -1096,9 +1096,18 @@ def main(argv: list[str] | None = None) -> int:
         help="fixed ISO-8601 generation timestamp (byte-deterministic output; defaults to now)",
     )
     args = parser.parse_args(argv)
+    if args.generated_at is not None:
+        try:
+            datetime.fromisoformat(args.generated_at.replace("Z", "+00:00"))
+        except ValueError:
+            print(
+                f"error: invalid --generated-at {args.generated_at!r}: expected ISO-8601 timestamp",
+                file=sys.stderr,
+            )
+            return 2
     try:
         result = generate(args.engagement, fmt=args.format, generated_at=args.generated_at)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     for entry in result["artifacts"]:
