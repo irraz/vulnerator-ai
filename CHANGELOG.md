@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-23
+
+Evidence and parallelism release (release candidate). Three additive features; the default stack, the OODA loop discipline and the existing report artefacts stay backward compatible.
+
+### Added
+
+- **Portable benchmark (`scripts/benchmark/`)** — a versioned `benchmark.json` manifest (prompt, target, criterion, timeout) plus `run_benchmark.py`, a stdlib-only runner that assumes the lab and the stack are already running, drives `POST /v1/runs`, polls to a terminal state, evidences each attempt from its own run, repeats N attempts and writes a fixed-schema JSON + Markdown result. Env: `BENCH_LAB`, `BENCH_RUNS`, `BENCH_RESET_LAB`, `HERMES_API_URL`, `HERMES_API_KEY`. The `php2shell-lab` task ships disabled pending its network join.
+- **Deterministic HTML report (`docker/kali/report_gen.py`)** — `render_html` and `--format md|html|both` stage `pentest-report.html` from the findings store with the Vulnerator theme, so the deliverable is reproducible (same store yields the same sha256) instead of hand-written by the model. The `pentest-report` skill now invokes the generator; `pentest-report.md` and `generate(engagement_id)` stay backward compatible.
+- **Parallel recon (`agent-ooda/skills/recon-swarm/SKILL.md`)** — procedural guidance to split OBSERVE into independent read-only branches (hosts/ports, web fingerprint, path discovery, cloud enumeration), launch them concurrently with `delegate_task`, persist every result with `record_finding` and fold only summaries into ORIENT. No engine, no new state, no scheduler.
+
+### Changed
+
+- Benchmark and report behaviour is covered by unit tests (`scripts/tests/test_benchmark.py`, `docker/kali/tests/test_report_gen.py`); the six-suite gate and the CI blocking gate stay green.
+
 ## [2.0.0] - 2026-11-11 — "fucking UI"
 
 The operator console release. Vulnerator-AI gains a live web GUI for the OODA loop
