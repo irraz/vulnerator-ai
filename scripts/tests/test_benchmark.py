@@ -12,7 +12,12 @@ import os
 import socket
 import subprocess
 import sys
+import threading
+import time
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -324,6 +329,163 @@ def test_build_result_and_write_results_fixed_schema(tmp_path):
     assert "run_1" in markdown
 
 
+def test_write_results_reports_oserror_without_raising(tmp_path, capsys):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    assert rb.write_results({"task_id": "t"}, blocker / "results") is None
+    err = capsys.readouterr().err
+    assert "error: cannot write results" in err
+    assert "Traceback" not in err
+
+
+# --------------------------------------------------------------------------- #
+# SSE event fetch (stub server: silent, trickle, multipage, partial failure)
+# --------------------------------------------------------------------------- #
+
+
+def _sse_frame(event: str, seq: int) -> bytes:
+    payload = {"event": event, "seq": seq}
+    return f"id: {seq}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
+class _SseStubHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        server = cast(_SseStubServer, self.server)
+        raw = self.headers.get("Last-Event-ID", "")
+        try:
+            last = int(raw)
+        except (TypeError, ValueError):
+            last = -1
+        server.cursors.append(last)
+        chunks = server.responder(last)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            for chunk in chunks:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+                if server.chunk_delay:
+                    time.sleep(server.chunk_delay)
+            if server.linger:
+                time.sleep(server.linger)
+        except OSError:
+            pass
+        finally:
+            self.close_connection = True
+
+
+class _SseStubServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, responder, *, linger=0.0, chunk_delay=0.0):
+        super().__init__(("127.0.0.1", 0), _SseStubHandler)
+        self.responder = responder
+        self.linger = linger
+        self.chunk_delay = chunk_delay
+        self.cursors: list[int] = []
+
+    def handle_error(self, request, client_address):
+        pass
+
+
+@contextmanager
+def _sse_server(responder, **kwargs):
+    server = _SseStubServer(responder, **kwargs)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_fetch_events_silent_stream_returns_empty_within_deadline(monkeypatch):
+    monkeypatch.setattr(rb, "EVENTS_DEADLINE_S", 0.4)
+    monkeypatch.setattr(rb, "EVENTS_TIMEOUT_S", 0.4)
+
+    def responder(_last):
+        return [b": open\n\n"]
+
+    started = time.monotonic()
+    with _sse_server(responder, linger=10.0) as (base, _server):
+        events = rb.fetch_events(base, "k", "run_silent")
+    assert events == []
+    assert time.monotonic() - started < 3.0
+
+
+def test_fetch_events_trickle_collects_every_event(monkeypatch):
+    monkeypatch.setattr(rb, "EVENTS_DEADLINE_S", 5.0)
+    frames = [
+        _sse_frame("ooda.observe", 0),
+        _sse_frame("tool.started", 1),
+        _sse_frame("tool.completed", 2),
+        _sse_frame("run.completed", 3),
+    ]
+
+    def responder(last):
+        return [frame for index, frame in enumerate(frames) if index > last]
+
+    with _sse_server(responder) as (base, server):
+        events = rb.fetch_events(base, "k", "run_trickle")
+    assert [event["seq"] for event in events] == [0, 1, 2, 3]
+    assert server.cursors == [-1]
+
+
+def test_fetch_events_paginates_with_cursor_until_terminal(monkeypatch):
+    monkeypatch.setattr(rb, "EVENTS_DEADLINE_S", 5.0)
+    frames = [_sse_frame("tool.started", seq) for seq in range(4)]
+    frames.append(_sse_frame("run.completed", 4))
+
+    def responder(last):
+        return [frame for index, frame in enumerate(frames) if index > last][:2]
+
+    with _sse_server(responder) as (base, server):
+        events = rb.fetch_events(base, "k", "run_pages")
+    assert [event["seq"] for event in events] == [0, 1, 2, 3, 4]
+    assert server.cursors == [-1, 1, 3]
+
+
+def test_fetch_events_keeps_collected_events_when_a_page_fails(monkeypatch):
+    monkeypatch.setattr(rb, "EVENTS_DEADLINE_S", 5.0)
+    page = [_sse_frame("tool.started", 0), _sse_frame("tool.completed", 1)]
+    calls = {"count": 0}
+
+    def responder(_last):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return page
+        raise RuntimeError("upstream went away")
+
+    with _sse_server(responder) as (base, _server):
+        events = rb.fetch_events(base, "k", "run_partial")
+    assert [event["seq"] for event in events] == [0, 1]
+
+
+def test_fetch_events_deadline_keeps_events_already_collected(monkeypatch):
+    monkeypatch.setattr(rb, "EVENTS_DEADLINE_S", 0.6)
+    monkeypatch.setattr(rb, "EVENTS_TIMEOUT_S", 0.6)
+
+    def responder(_last):
+        return [_sse_frame("tool.started", 0)]
+
+    started = time.monotonic()
+    with _sse_server(responder, linger=10.0) as (base, _server):
+        events = rb.fetch_events(base, "k", "run_quiet")
+    assert [event["seq"] for event in events] == [0]
+    assert time.monotonic() - started < 3.0
+
+
 def test_run_attempt_records_error_without_raising(monkeypatch):
     def boom(*args, **kwargs):
         raise rb.ApiError("connection refused")
@@ -393,3 +555,33 @@ def test_cli_fails_cleanly_without_api_key(tmp_path):
     assert proc.returncode != 0
     assert "Traceback" not in combined
     assert "HERMES_API_KEY" in combined
+
+
+def test_cli_write_failure_is_clean_and_exits_1(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HERMES_API_KEY", "dummy")
+    monkeypatch.setattr(rb, "health_check", lambda *args, **kwargs: {"status": "ok"})
+    monkeypatch.setattr(rb, "preflight_lab", lambda *args, **kwargs: (True, "lab present"))
+    monkeypatch.setattr(
+        rb,
+        "run_attempt",
+        lambda *args, **kwargs: {
+            "attempt": 1,
+            "run_id": "run_1",
+            "status": "completed",
+            "success": False,
+            "criterion_ok": False,
+            "criterion_detail": "no flag",
+            "steps": 0,
+            "wall_time_s": 0.0,
+            "tokens": None,
+            "timed_out": False,
+            "error": None,
+        },
+    )
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    rc = rb.main(["--runs", "1", "--results-dir", str(blocker / "results")])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "error: cannot write results" in captured.err
+    assert "Traceback" not in captured.out + captured.err

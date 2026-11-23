@@ -39,6 +39,7 @@ DEFAULT_RUNS = 3
 POLL_INTERVAL_S = 5.0
 HTTP_TIMEOUT_S = 30.0
 EVENTS_TIMEOUT_S = 30.0
+EVENTS_DEADLINE_S = 60.0
 FLAG_TIMEOUT_S = 180
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
@@ -396,31 +397,93 @@ def poll_run(url: str, key: str, run_id: str, timeout: float) -> dict[str, Any]:
         time.sleep(min(POLL_INTERVAL_S, remaining))
 
 
-def fetch_events(url: str, key: str, run_id: str) -> list[dict[str, Any]]:
-    """Reads the SSE event backlog of a run; returns the parsed events (best effort)."""
-    target = _join(url, "/v1/runs/" + urllib.parse.quote(run_id, safe="") + "/events")
-    headers = {"Accept": "text/event-stream"}
-    if key:
-        headers["Authorization"] = "Bearer " + key
-    request = urllib.request.Request(target, headers=headers, method="GET")
+def _read_event_page(response: Any, after_seq: int) -> tuple[list[dict[str, Any]], int, bool]:
+    """Reads ONE SSE connection into (new events, next cursor, saw terminal).
+
+    The cursor is the SSE ``id:`` wire field or the JSON ``seq`` field, whichever
+    is larger; events already delivered (``seq <= after_seq``) are skipped so a
+    reconnect cannot duplicate them. Malformed frames are ignored, best effort.
+    """
     events: list[dict[str, Any]] = []
+    cursor = after_seq
+    data_lines: list[str] = []
+    terminal = False
+
+    def consume() -> None:
+        nonlocal cursor, terminal
+        if not data_lines:
+            return
+        raw = "\n".join(data_lines)
+        data_lines.clear()
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(event, dict):
+            return
+        seq = event.get("seq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            if seq <= after_seq:
+                return
+            cursor = max(cursor, seq)
+        events.append(event)
+        if event.get("event") == "run.completed":
+            terminal = True
+
     try:
-        with urllib.request.urlopen(request, timeout=EVENTS_TIMEOUT_S) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
-                if not line.startswith("data:"):
-                    continue
-                payload = line[len("data:"):].lstrip()
-                if not payload:
-                    continue
-                try:
-                    event = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(event, dict):
-                    events.append(event)
+        for raw_line in response:
+            line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
+            if line.startswith("data:"):
+                data_lines.append(line[len("data:"):].lstrip())
+            elif line.startswith("id:"):
+                value = line[len("id:"):].strip()
+                if value.lstrip("+-").isdigit():
+                    cursor = max(cursor, int(value))
+            elif not line.strip():
+                consume()
+        consume()
     except (urllib.error.URLError, OSError):
-        return []
+        # A stream cut mid-page keeps the frames already decoded; the caller
+        # decides whether to reconnect with the advanced cursor.
+        consume()
+    return events, cursor, terminal
+
+
+def fetch_events(url: str, key: str, run_id: str) -> list[dict[str, Any]]:
+    """Reads the SSE event backlog of a run; returns the parsed events (best effort).
+
+    Paginates with the ``seq`` cursor sent back as ``Last-Event-ID`` until a
+    terminal event arrives or the upstream closes without progress. The whole
+    call is bounded by the wall-clock deadline ``EVENTS_DEADLINE_S``, and a
+    failure mid-stream keeps the events already collected instead of dropping
+    them.
+    """
+    target = _join(url, "/v1/runs/" + urllib.parse.quote(run_id, safe="") + "/events")
+    deadline = time.monotonic() + EVENTS_DEADLINE_S
+    events: list[dict[str, Any]] = []
+    cursor = -1
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        headers = {"Accept": "text/event-stream", "Last-Event-ID": str(cursor)}
+        if key:
+            headers["Authorization"] = "Bearer " + key
+        request = urllib.request.Request(target, headers=headers, method="GET")
+        before = cursor
+        try:
+            with urllib.request.urlopen(
+                request, timeout=min(remaining, EVENTS_TIMEOUT_S)
+            ) as response:
+                page, page_cursor, terminal = _read_event_page(response, cursor)
+        except (urllib.error.URLError, OSError):
+            break
+        events.extend(page)
+        cursor = page_cursor
+        if terminal:
+            break
+        if cursor == before:
+            break
     return events
 
 
@@ -788,17 +851,27 @@ def render_markdown(result: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_results(result: dict[str, Any], results_dir: Path) -> tuple[Path, Path]:
-    """Writes the JSON result and the Markdown summary; returns their paths."""
-    results_dir.mkdir(parents=True, exist_ok=True)
+def write_results(
+    result: dict[str, Any], results_dir: Path
+) -> Optional[tuple[Path, Path]]:
+    """Writes the JSON result and the Markdown summary; returns their paths.
+
+    Returns None (and reports on stderr) when the files cannot be written, so a
+    broken output directory never escapes as a traceback.
+    """
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     base = f"{result['task_id']}-{stamp}"
     json_path = results_dir / f"{base}.json"
     markdown_path = results_dir / f"{base}.md"
-    json_path.write_text(
-        json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    markdown_path.write_text(render_markdown(result), encoding="utf-8")
+    try:
+        results_dir.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        markdown_path.write_text(render_markdown(result), encoding="utf-8")
+    except OSError as exc:
+        print(f"error: cannot write results under {results_dir}: {exc}", file=sys.stderr)
+        return None
     return json_path, markdown_path
 
 
@@ -957,7 +1030,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         benchmark_version=manifest["benchmark_version"],
         started_at=started_at,
     )
-    json_path, markdown_path = write_results(result, results_dir)
+    written = write_results(result, results_dir)
+    if written is None:
+        return 1
+    json_path, markdown_path = written
     stats = aggregate(records)
     print(
         f"success_rate={stats['success_rate']:.3f} "
