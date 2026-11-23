@@ -244,8 +244,10 @@ ATT&CK is the **language of Orient** and the taxonomy of findings; it does not r
   classifies, it does not proceduralize (`agent-ooda/skills/attack-navigation/SKILL.md:92`).
 - In SOUL: `agent-ooda/profile/SOUL.md:272` and `agent-ooda/profile/SOUL.md:274`.
 - Each finding can carry `technique_id` (`docker/kali/kali_mcp_server.py:873`).
-- The report shows it in the table (`docker/kali/report_gen.py:98`) and in the methodology
-  (`docker/kali/report_gen.py:204`).
+- The report shows it in the Markdown finding metadata table (`report_gen.py`,
+  `_finding_section` meta rows) and in the HTML main-finding table (`render_html`,
+  "ATT&CK technique" row); the Markdown methodology text (`render_markdown`, "Methodology"
+  section) names MITRE ATT&CK as the Orient taxonomy.
 - Cloud variant: `agent-ooda/skills/aws-pacu-privesc/SKILL.md:90`.
 - The findings registry and the report consume it: `agent-ooda/skills/pentest-report/SKILL.md:19`.
 
