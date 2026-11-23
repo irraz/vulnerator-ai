@@ -2,19 +2,21 @@
 """Portable benchmark runner for vulnerator-ai (standard library only).
 
 It assumes the lab and the vulnerator-ai stack are ALREADY running: it never
-starts them. For the selected manifest task it drives the Hermes runs API
-(``POST /v1/runs``, ``GET /v1/runs/{id}``), measures each attempt (steps, wall
-time, tokens), verifies the task criterion and writes a fixed-schema JSON result
-plus a Markdown summary under ``scripts/benchmark/results/``.
+starts them (except the optional per-attempt lab reset, ``BENCH_RESET_LAB=1``).
+For the selected manifest task it drives the Hermes runs API (``POST /v1/runs``,
+``GET /v1/runs/{id}``), measures each attempt (steps, wall time, tokens), verifies
+the task criterion against that attempt's own run and writes a fixed-schema JSON
+result plus a Markdown summary under ``scripts/benchmark/results/``.
 
-The manifest is read with a small built-in YAML-subset parser so the runner keeps
-working on a machine that only has the Python standard library. If the stack or
+The manifest is plain JSON (``benchmark.json``) parsed with the standard library,
+so the runner keeps working on a machine that only has Python. If the stack or
 the lab is missing, the runner prints the RUNBOOK commands and exits cleanly.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -25,12 +27,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_PATH = Path(__file__).resolve().parent / "benchmark.yaml"
+MANIFEST_PATH = Path(__file__).resolve().parent / "benchmark.json"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 DEFAULT_API_URL = "http://localhost:8642"
@@ -40,13 +43,14 @@ POLL_INTERVAL_S = 5.0
 HTTP_TIMEOUT_S = 30.0
 EVENTS_TIMEOUT_S = 30.0
 EVENTS_DEADLINE_S = 60.0
-FLAG_TIMEOUT_S = 180
+LAB_CMD_TIMEOUT_S = 180.0
+LAB_RESET_TIMEOUT_S = 600.0
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
 TOOL_EVENT_NAMES = frozenset({"tool.started", "tool.completed"})
 CRITERIA = frozenset({"flag", "rce_evidence"})
-BLOCK_SCALAR_INDICATORS = frozenset({"|", "|-", "|+", ">", ">-", ">+"})
 RESULT_SCHEMA = "vulnerator-benchmark-result/1"
+FLAG_RE = re.compile(r"CTF\{[^}\s]+\}")
 
 REQUIRED_TASK_FIELDS = ("id", "lab", "prompt", "target", "criterion", "timeout")
 
@@ -60,175 +64,14 @@ class ApiError(RuntimeError):
 
 
 # --------------------------------------------------------------------------- #
-# Minimal YAML-subset reader (maps, lists, block scalars, scalars, comments).
+# Manifest (plain JSON, standard library only).
 # --------------------------------------------------------------------------- #
-
-_INT_RE = re.compile(r"^[+-]?\d+$")
-_FLOAT_RE = re.compile(r"^[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$")
-
-
-def _indent_of(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
-
-
-def _parse_scalar(text: str) -> Any:
-    value = text.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        return value[1:-1]
-    if value in ("null", "Null", "NULL", "~"):
-        return None
-    if value in ("true", "True", "TRUE"):
-        return True
-    if value in ("false", "False", "FALSE"):
-        return False
-    if _INT_RE.match(value):
-        return int(value)
-    if _FLOAT_RE.match(value):
-        return float(value)
-    return value
-
-
-def _split_entry(text: str, lineno: int) -> tuple[str, str]:
-    key, sep, value = text.partition(":")
-    if not sep or not key.strip():
-        raise ManifestError(f"line {lineno}: expected 'key: value', got {text!r}")
-    return key.strip(), value.strip()
-
-
-class _YamlSubsetParser:
-    """Reader for the constrained YAML shape used by ``benchmark.yaml``."""
-
-    def __init__(self, text: str) -> None:
-        self.lines = text.splitlines()
-        self.index = 0
-
-    def parse(self) -> Any:
-        value = self._parse_block(0)
-        self._skip_ignorable()
-        if self.index < len(self.lines):
-            raise ManifestError(
-                f"line {self.index + 1}: unexpected content: {self.lines[self.index]!r}"
-            )
-        return value
-
-    def _skip_ignorable(self) -> None:
-        while self.index < len(self.lines):
-            stripped = self.lines[self.index].strip()
-            if not stripped or stripped.startswith("#"):
-                self.index += 1
-                continue
-            return
-
-    def _current_indent(self) -> int:
-        self._skip_ignorable()
-        if self.index >= len(self.lines):
-            return -1
-        return _indent_of(self.lines[self.index])
-
-    def _parse_block(self, indent: int) -> Any:
-        current = self._current_indent()
-        if current < indent:
-            return None
-        stripped = self.lines[self.index].lstrip()
-        if stripped == "-" or stripped.startswith("- "):
-            return self._parse_list(current)
-        return self._parse_map(current)
-
-    def _parse_list(self, indent: int) -> list[Any]:
-        items: list[Any] = []
-        while True:
-            current = self._current_indent()
-            if current != indent:
-                break
-            stripped = self.lines[self.index].lstrip()
-            if not (stripped == "-" or stripped.startswith("- ")):
-                break
-            rest = stripped[1:].strip()
-            if not rest:
-                self.index += 1
-                items.append(self._parse_block(indent + 1))
-            elif ":" in rest:
-                items.append(self._parse_inline_map_item(indent, rest))
-            else:
-                self.index += 1
-                items.append(_parse_scalar(rest))
-        return items
-
-    def _parse_inline_map_item(self, indent: int, rest: str) -> dict[str, Any]:
-        key, value = _split_entry(rest, self.index + 1)
-        self.index += 1
-        item: dict[str, Any] = {key: self._value_for(value, indent + 2)}
-        item.update(self._parse_map(indent + 2))
-        return item
-
-    def _parse_map(self, indent: int) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        while True:
-            current = self._current_indent()
-            if current < 0 or current < indent:
-                break
-            if current > indent:
-                raise ManifestError(
-                    f"line {self.index + 1}: unexpected indentation: "
-                    f"{self.lines[self.index]!r}"
-                )
-            stripped = self.lines[self.index].lstrip()
-            if stripped == "-" or stripped.startswith("- "):
-                break
-            key, value = _split_entry(stripped, self.index + 1)
-            self.index += 1
-            result[key] = self._value_for(value, indent)
-        return result
-
-    def _value_for(self, value: str, key_indent: int) -> Any:
-        if value == "":
-            self._skip_ignorable()
-            if self.index < len(self.lines) and _indent_of(self.lines[self.index]) > key_indent:
-                return self._parse_block(key_indent + 1)
-            return None
-        if value in BLOCK_SCALAR_INDICATORS:
-            return self._parse_block_scalar(key_indent, value)
-        return _parse_scalar(value)
-
-    def _parse_block_scalar(self, key_indent: int, indicator: str) -> str:
-        collected: list[str] = []
-        block_indent: Optional[int] = None
-        while self.index < len(self.lines):
-            line = self.lines[self.index]
-            if not line.strip():
-                collected.append("")
-                self.index += 1
-                continue
-            indent = _indent_of(line)
-            if indent <= key_indent:
-                break
-            if block_indent is None:
-                block_indent = indent
-            collected.append(line[block_indent:])
-            self.index += 1
-        while collected and collected[-1] == "":
-            collected.pop()
-        if indicator.startswith(">"):
-            body = " ".join(part.strip() for part in collected)
-        else:
-            body = "\n".join(collected)
-        chomping = indicator[-1]
-        if chomping == "-":
-            return body
-        if chomping == "+":
-            return body + "\n" if body else "\n"
-        return body + "\n" if body else ""
-
-
-def parse_manifest_text(text: str) -> Any:
-    """Parses the YAML subset of the manifest, raising ManifestError on bad input."""
-    return _YamlSubsetParser(text).parse()
 
 
 def validate_manifest(data: Any) -> dict[str, Any]:
     """Validates the manifest shape and field types (fail-closed, no traceback)."""
     if not isinstance(data, dict):
-        raise ManifestError("manifest must be a mapping")
+        raise ManifestError("manifest must be a JSON object")
     version = data.get("benchmark_version")
     if not isinstance(version, int) or isinstance(version, bool) or version <= 0:
         raise ManifestError("'benchmark_version' must be a positive integer")
@@ -239,13 +82,15 @@ def validate_manifest(data: Any) -> dict[str, Any]:
     seen: set[str] = set()
     for index, task in enumerate(tasks):
         if not isinstance(task, dict):
-            raise ManifestError(f"tasks[{index}] must be a mapping")
+            raise ManifestError(f"tasks[{index}] must be a JSON object")
         for field in REQUIRED_TASK_FIELDS:
             if field not in task:
                 raise ManifestError(f"tasks[{index}] is missing {field!r}")
         for field in ("id", "lab", "prompt", "target", "criterion"):
             if not isinstance(task[field], str) or not task[field].strip():
                 raise ManifestError(f"tasks[{index}].{field} must be a non-empty string")
+        _validate_path_component(task["id"], "id", index)
+        _validate_path_component(task["lab"], "lab", index)
         if task["criterion"] not in CRITERIA:
             raise ManifestError(
                 f"tasks[{index}].criterion must be one of {sorted(CRITERIA)}, "
@@ -270,13 +115,36 @@ def validate_manifest(data: Any) -> dict[str, Any]:
     return data
 
 
+def _validate_path_component(value: str, field: str, index: int) -> None:
+    """Rejects values that could escape a path (``/``, ``\\``, ``..``, NUL)."""
+    if value in (".", "..") or "/" in value or "\\" in value or "\x00" in value:
+        raise ManifestError(
+            f"tasks[{index}].{field} must be a plain name (no '/', '\\' or '..'): {value!r}"
+        )
+
+
 def load_manifest(path: Path) -> dict[str, Any]:
     """Reads and validates the manifest, raising ManifestError instead of a traceback."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise ManifestError(f"cannot read {path}: {exc}") from exc
-    return validate_manifest(parse_manifest_text(text))
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ManifestError(
+            f"invalid JSON in {path}: line {exc.lineno} column {exc.colno}: {exc.msg}"
+        ) from exc
+    return validate_manifest(data)
+
+
+def manifest_sha256(path: Path) -> str:
+    """SHA-256 of the manifest bytes, recorded in every result for reproducibility."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def select_task(tasks: list[dict[str, Any]], wanted: Any) -> Optional[dict[str, Any]]:
@@ -299,6 +167,16 @@ def _join(url: str, path: str) -> str:
     return url.rstrip("/") + path
 
 
+def validate_api_config(url: str, key: str) -> Optional[str]:
+    """Returns a clean error message for a malformed URL/key, or None when usable."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return f"invalid API URL {url!r}: expected http://host:port or https://host:port"
+    if "\r" in key or "\n" in key:
+        return "invalid API key: it contains a newline"
+    return None
+
+
 def _http_json(
     method: str,
     url: str,
@@ -314,8 +192,8 @@ def _http_json(
         headers["Content-Type"] = "application/json"
     if key:
         headers["Authorization"] = "Bearer " + key
-    request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
@@ -327,6 +205,10 @@ def _http_json(
         raise ApiError(f"{method} {url} -> HTTP {exc.code} {exc.reason}: {detail}") from exc
     except (urllib.error.URLError, OSError) as exc:
         raise ApiError(f"{method} {url} -> {exc.__class__.__name__}: {exc}") from exc
+    except ValueError as exc:
+        # A malformed URL or an invalid header (e.g. a newline in the key) raises
+        # ValueError before any bytes move; report it as an API error, not a crash.
+        raise ApiError(f"{method} {url} -> invalid request: {exc}") from exc
     if not raw:
         return None
     try:
@@ -357,6 +239,15 @@ def start_run(url: str, key: str, prompt: str, model: Optional[str] = None) -> s
     return run_id
 
 
+def stop_run(url: str, key: str, run_id: str) -> dict[str, Any]:
+    """POST /v1/runs/{id}/stop; returns the run object or raises ApiError."""
+    target = _join(url, "/v1/runs/" + urllib.parse.quote(run_id, safe="") + "/stop")
+    payload = _http_json("POST", target, key=key, timeout=HTTP_TIMEOUT_S)
+    if not isinstance(payload, dict):
+        raise ApiError(f"POST {target} returned a non-object payload")
+    return payload
+
+
 def run_status(run_obj: Any) -> str:
     """Terminal/normalized status of a run object (never raises)."""
     if not isinstance(run_obj, dict):
@@ -381,8 +272,13 @@ def is_terminal(run_obj: Any) -> bool:
     return run_obj.get("completed") is True or run_obj.get("interrupted") is True
 
 
-def poll_run(url: str, key: str, run_id: str, timeout: float) -> dict[str, Any]:
-    """Polls GET /v1/runs/{id} until terminal or the task timeout expires."""
+def poll_run(url: str, key: str, run_id: str, timeout: float) -> tuple[dict[str, Any], bool]:
+    """Polls GET /v1/runs/{id} until terminal or the task timeout expires.
+
+    Returns ``(run_obj, stopped)``. On timeout the runner asks the API to stop
+    the run (``POST /v1/runs/{id}/stop``) and reports ``stopped=True`` when that
+    call succeeded, so a timed-out attempt is never silently left running.
+    """
     target = _join(url, "/v1/runs/" + urllib.parse.quote(run_id, safe=""))
     deadline = time.monotonic() + timeout
     while True:
@@ -390,19 +286,34 @@ def poll_run(url: str, key: str, run_id: str, timeout: float) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ApiError(f"GET {target} returned a non-object payload")
         if is_terminal(payload):
-            return payload
+            return payload, False
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return payload
+            stopped = False
+            try:
+                stop_run(url, key, run_id)
+                stopped = True
+            except ApiError:
+                pass
+            return payload, stopped
         time.sleep(min(POLL_INTERVAL_S, remaining))
 
 
-def _read_event_page(response: Any, after_seq: int) -> tuple[list[dict[str, Any]], int, bool]:
+def _event_belongs_to_run(event: dict[str, Any], run_id: str) -> bool:
+    """True unless the event carries a different ``run_id`` (missing is tolerated)."""
+    owner = event.get("run_id")
+    return not isinstance(owner, str) or owner == run_id
+
+
+def _read_event_page(
+    response: Any, after_seq: int, run_id: str
+) -> tuple[list[dict[str, Any]], int, bool]:
     """Reads ONE SSE connection into (new events, next cursor, saw terminal).
 
     The cursor is the SSE ``id:`` wire field or the JSON ``seq`` field, whichever
     is larger; events already delivered (``seq <= after_seq``) are skipped so a
-    reconnect cannot duplicate them. Malformed frames are ignored, best effort.
+    reconnect cannot duplicate them, and events owned by another run are dropped.
+    Malformed frames are ignored, best effort.
     """
     events: list[dict[str, Any]] = []
     cursor = after_seq
@@ -420,6 +331,8 @@ def _read_event_page(response: Any, after_seq: int) -> tuple[list[dict[str, Any]
         except json.JSONDecodeError:
             return
         if not isinstance(event, dict):
+            return
+        if not _event_belongs_to_run(event, run_id):
             return
         seq = event.get("seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
@@ -475,7 +388,7 @@ def fetch_events(url: str, key: str, run_id: str) -> list[dict[str, Any]]:
             with urllib.request.urlopen(
                 request, timeout=min(remaining, EVENTS_TIMEOUT_S)
             ) as response:
-                page, page_cursor, terminal = _read_event_page(response, cursor)
+                page, page_cursor, terminal = _read_event_page(response, cursor, run_id)
         except (urllib.error.URLError, OSError):
             break
         events.extend(page)
@@ -492,20 +405,15 @@ def fetch_events(url: str, key: str, run_id: str) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 
 
-def _counter_from_run(run_obj: Any, keys: tuple[str, ...]) -> int:
-    if not isinstance(run_obj, dict):
-        return 0
-    for key in keys:
-        value = run_obj.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            return value
-    return 0
+def count_tool_steps(events: Any) -> Optional[int]:
+    """Counts tool executions from the run's own ``tool.*`` events.
 
-
-def count_tool_steps(events: Any, run_obj: Any) -> int:
-    """Counts tool executions from the event stream, falling back to run counters."""
+    Returns ``None`` when the backlog exposes no tool event at all: the runner
+    never invents a step count from an unrelated counter, so ``median_steps``
+    stays ``null`` instead of reporting a wrong number.
+    """
     if not isinstance(events, list):
-        events = []
+        return None
     call_ids: set[str] = set()
     started = 0
     completed = 0
@@ -530,7 +438,7 @@ def count_tool_steps(events: Any, run_obj: Any) -> int:
         return completed
     if started:
         return started
-    return _counter_from_run(run_obj, ("steps", "tool_calls", "tool_call_count"))
+    return None
 
 
 def extract_tokens(run_obj: Any) -> Optional[int]:
@@ -558,28 +466,86 @@ def extract_tokens(run_obj: Any) -> Optional[int]:
     return None
 
 
+def extract_served_model(run_obj: Any, events: Any = None) -> Optional[str]:
+    """The model the run actually served (``run_obj['model']``/``usage``), if exposed."""
+    if isinstance(run_obj, dict):
+        for key in ("model", "model_name", "served_model", "model_used"):
+            value = run_obj.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        usage = run_obj.get("usage")
+        if isinstance(usage, dict):
+            for key in ("model", "model_name"):
+                value = usage.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            for key in ("model", "model_name"):
+                value = event.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Criteria.
 # --------------------------------------------------------------------------- #
 
 
-def check_flag_criterion(repo_root: Path) -> tuple[bool, str]:
-    """Runs the lab check-flag command and parses its output."""
-    script = repo_root / "labs" / "looney-tunables-ctf" / "run_agent_test.py"
-    if not script.is_file():
-        return False, f"lab runner not found: {script}"
-    try:
-        proc = subprocess.run(
-            ["python3", str(script), "check-flag"],
-            capture_output=True,
-            text=True,
-            timeout=FLAG_TIMEOUT_S,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"could not run check-flag: {exc.__class__.__name__}: {exc}"
-    output = (proc.stdout or "") + (proc.stderr or "")
-    ok = proc.returncode == 0 and "CTF{" in output
-    return ok, output.strip()
+def _blob_text(value: Any) -> str:
+    """Plain text of a payload: strings as-is, containers as their JSON form."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return ""
+    return ""
+
+
+def run_evidence_text(
+    run_obj: Any, events: Any, run_id: str
+) -> list[str]:
+    """Text blobs produced by THIS run (output + events), for criterion evidence.
+
+    The run object is accepted only when it carries no ``run_id`` or carries the
+    same one; events owned by another run are ignored. This is what makes an
+    attempt's success independent of the shared lab state.
+    """
+    blobs: list[str] = []
+    if isinstance(run_obj, dict):
+        owner = run_obj.get("run_id")
+        if not isinstance(owner, str) or owner == run_id:
+            for key in ("output", "result", "final_output", "summary", "text", "message"):
+                text = _blob_text(run_obj.get(key))
+                if text:
+                    blobs.append(text)
+    if isinstance(events, list):
+        for event in events:
+            if isinstance(event, dict) and _event_belongs_to_run(event, run_id):
+                text = _blob_text(event)
+                if text:
+                    blobs.append(text)
+    return blobs
+
+
+def check_flag_criterion(
+    run_obj: Any, events: Any, run_id: str
+) -> tuple[bool, str]:
+    """True when THIS run's output/events contain the captured ``CTF{...}`` flag.
+
+    The lab ``check-flag`` probe is only a preflight (it reads the live lab, so it
+    cannot evidence an individual attempt: attempt 1 could make attempts 2-3 pass).
+    """
+    for blob in run_evidence_text(run_obj, events, run_id):
+        match = FLAG_RE.search(blob)
+        if match:
+            return True, f"run {run_id} captured {match.group(0)}"
+    return False, f"no CTF{{...}} flag in the output/events of run {run_id}"
 
 
 def evidence_contains_uid(evidence: Any) -> bool:
@@ -617,15 +583,58 @@ def _read_findings_jsonl(path: Path) -> list[dict[str, Any]]:
     return findings
 
 
-def check_rce_evidence(run_obj: Any, findings_path: Optional[Path] = None) -> tuple[bool, str]:
+def _finding_dicts_from_run(run_obj: Any, events: Any) -> list[dict[str, Any]]:
+    """Collects finding-shaped dicts from the run output and its events.
+
+    ``GET /v1/runs/{id}`` never returns a ``findings`` field, so the durable
+    store (``BENCH_FINDINGS_PATH``) is the canonical source; the run output and
+    the ``record_finding`` tool calls mirrored in the event backlog are a
+    best-effort secondary source.
+    """
+    roots: list[Any] = []
+    if isinstance(run_obj, dict):
+        for key in ("output", "result", "final_output", "summary", "text"):
+            if run_obj.get(key) is not None:
+                roots.append(run_obj.get(key))
+    if isinstance(events, list):
+        roots.extend(event for event in events if isinstance(event, dict))
+
+    findings: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    stack: list[Any] = list(roots)
+    budget = 20000
+    while stack and budget > 0:
+        current = stack.pop()
+        budget -= 1
+        if isinstance(current, dict):
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            if "state" in current and "evidence" in current:
+                findings.append(current)
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+        elif isinstance(current, str):
+            text = current.strip()
+            if text.startswith("{") and text.endswith("}"):
+                try:
+                    parsed = json.loads(text)
+                except ValueError:
+                    continue
+                if isinstance(parsed, dict):
+                    stack.append(parsed)
+    return findings
+
+
+def check_rce_evidence(
+    run_obj: Any, events: Any = None, findings_path: Optional[Path] = None
+) -> tuple[bool, str]:
     """True when a confirmed finding carries evidence containing `uid=`."""
     findings: list[dict[str, Any]] = []
-    if isinstance(run_obj, dict):
-        raw = run_obj.get("findings")
-        if isinstance(raw, list):
-            findings.extend(item for item in raw if isinstance(item, dict))
     if findings_path is not None:
         findings.extend(_read_findings_jsonl(findings_path))
+    findings.extend(_finding_dicts_from_run(run_obj, events))
     for finding in findings:
         state = finding.get("state")
         if not isinstance(state, str) or state.strip().lower() != "confirmed":
@@ -640,25 +649,52 @@ def check_rce_evidence(run_obj: Any, findings_path: Optional[Path] = None) -> tu
 def verify_criterion(
     task: dict[str, Any],
     run_obj: Any,
-    repo_root: Path,
+    events: Any,
+    run_id: str,
     findings_path: Optional[Path] = None,
 ) -> tuple[bool, str]:
     """Dispatches the task criterion; never raises."""
     criterion = task.get("criterion")
     if criterion == "flag":
-        return check_flag_criterion(repo_root)
+        return check_flag_criterion(run_obj, events, run_id)
     if criterion == "rce_evidence":
-        return check_rce_evidence(run_obj, findings_path)
+        return check_rce_evidence(run_obj, events, findings_path=findings_path)
     return False, f"unknown criterion: {criterion!r}"
 
 
 # --------------------------------------------------------------------------- #
-# Preflight and execution.
+# Lab preflight and optional reset.
 # --------------------------------------------------------------------------- #
 
 
-def preflight_lab(task: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
-    """Checks that the lab is present (and running, when it has a status command)."""
+def run_lab_command(
+    repo_root: Path, lab: str, args: tuple[str, ...], timeout: float
+) -> tuple[int, str]:
+    """Runs ``labs/<lab>/run_agent_test.py <args>``; returns (exit code, output)."""
+    script = repo_root / "labs" / lab / "run_agent_test.py"
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(repo_root),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 127, f"could not run {script}: {exc.__class__.__name__}: {exc}"
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def preflight_lab(
+    task: dict[str, Any], repo_root: Path, *, require_clean: bool = True
+) -> tuple[bool, str]:
+    """Checks that the lab is present and running, for ANY criterion that needs it.
+
+    For the ``flag`` criterion it additionally runs the lab ``check-flag`` as a
+    PREFLIGHT ONLY (never as attempt evidence) and requires the lab to be clean:
+    a flag already readable as ``agent_user`` means a previous attempt leaked into
+    this one, so the benchmark must be reset first.
+    """
     lab = task.get("lab")
     if not isinstance(lab, str) or not lab:
         return False, "task has no lab"
@@ -666,22 +702,54 @@ def preflight_lab(task: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
     if not lab_dir.is_dir():
         return False, f"lab directory not found: {lab_dir}"
     script = lab_dir / "run_agent_test.py"
-    if task.get("criterion") == "flag":
-        if not script.is_file():
-            return False, f"lab runner not found: {script}"
+    if not script.is_file():
+        return False, f"lab runner not found: {script}"
+    code, output = run_lab_command(repo_root, lab, ("status",), LAB_CMD_TIMEOUT_S)
+    if code != 0:
+        return False, output.strip() or f"lab status exited {code}"
+    if task.get("criterion") == "flag" and require_clean:
+        code, output = run_lab_command(repo_root, lab, ("check-flag",), LAB_CMD_TIMEOUT_S)
+        text = output.strip()
+        if code == 0 or "CTF{" in output:
+            return False, (
+                "the lab is not clean: the flag is already readable as agent_user "
+                f"({text or 'check-flag exited 0'}). Reset it with BENCH_RESET_LAB=1 "
+                f"or: docker compose -f labs/{lab}/docker-compose.yml down && "
+                f"docker compose -f labs/{lab}/docker-compose.yml up -d --build"
+            )
+        if code != 1:
+            return False, f"could not verify the lab state: {text or f'check-flag exited {code}'}"
+    return True, "lab present and clean"
+
+
+def reset_lab(repo_root: Path, lab: str) -> tuple[bool, str]:
+    """Recreates the lab with docker compose (the optional BENCH_RESET_LAB path)."""
+    compose = repo_root / "labs" / lab / "docker-compose.yml"
+    if not compose.is_file():
+        return False, f"lab compose file not found: {compose}"
+    for args in (("down",), ("up", "-d", "--build")):
         try:
             proc = subprocess.run(
-                ["python3", str(script), "status"],
+                ["docker", "compose", "-f", str(compose), *args],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=LAB_RESET_TIMEOUT_S,
+                cwd=str(repo_root),
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            return False, f"could not run lab status: {exc.__class__.__name__}: {exc}"
-        output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            return False, (
+                f"could not run docker compose {' '.join(args)}: "
+                f"{exc.__class__.__name__}: {exc}"
+            )
         if proc.returncode != 0:
-            return False, output or f"lab status exited {proc.returncode}"
-    return True, "lab present"
+            output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            return False, f"docker compose {' '.join(args)} exited {proc.returncode}: {output}"
+    return True, f"lab {lab} recreated"
+
+
+# --------------------------------------------------------------------------- #
+# Execution.
+# --------------------------------------------------------------------------- #
 
 
 def run_attempt(
@@ -702,10 +770,12 @@ def run_attempt(
         "success": False,
         "criterion_ok": False,
         "criterion_detail": None,
-        "steps": 0,
+        "steps": None,
         "wall_time_s": 0.0,
         "tokens": None,
+        "served_model": None,
         "timed_out": False,
+        "stopped": False,
         "error": None,
     }
     started = time.monotonic()
@@ -718,14 +788,18 @@ def run_attempt(
         timeout = task.get("timeout")
         if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
             timeout = 1800.0
-        run_obj = poll_run(url, key, run_id, float(timeout))
+        run_obj, stopped = poll_run(url, key, run_id, float(timeout))
         record["wall_time_s"] = round(time.monotonic() - started, 3)
         record["status"] = run_status(run_obj)
         record["timed_out"] = not is_terminal(run_obj)
+        record["stopped"] = stopped
         events = fetch_events(url, key, run_id)
-        record["steps"] = count_tool_steps(events, run_obj)
+        record["steps"] = count_tool_steps(events)
         record["tokens"] = extract_tokens(run_obj)
-        ok, detail = verify_criterion(task, run_obj, repo_root, findings_path=findings_path)
+        record["served_model"] = extract_served_model(run_obj, events)
+        ok, detail = verify_criterion(
+            task, run_obj, events, run_id, findings_path=findings_path
+        )
         record["criterion_ok"] = bool(ok)
         record["criterion_detail"] = detail
         record["success"] = bool(ok)
@@ -764,6 +838,15 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _served_model_of(records: list[dict[str, Any]]) -> Optional[str]:
+    served: Optional[str] = None
+    for record in records:
+        value = record.get("served_model")
+        if isinstance(value, str) and value.strip():
+            served = value.strip()
+    return served
+
+
 def build_result(
     task: dict[str, Any],
     records: list[dict[str, Any]],
@@ -772,6 +855,7 @@ def build_result(
     url: str,
     benchmark_version: int,
     started_at: str,
+    manifest_sha256: str,
 ) -> dict[str, Any]:
     """Builds the fixed-schema result document."""
     stats = aggregate(records)
@@ -782,8 +866,11 @@ def build_result(
         "lab": task.get("lab"),
         "criterion": task.get("criterion"),
         "target": task.get("target"),
+        "prompt": task.get("prompt"),
         "model": model,
+        "served_model": _served_model_of(records),
         "api_url": url,
+        "manifest_sha256": manifest_sha256,
         "started_at": started_at,
         "finished_at": _utc_now(),
         "runs_requested": stats["runs"],
@@ -818,7 +905,9 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"- Lab: {result['lab']}",
         f"- Criterion: {result['criterion']}",
         f"- Target: {result['target']}",
-        f"- Model: {result['model'] or 'not recorded'}",
+        f"- Model (requested): {result['model'] or 'not recorded'}",
+        f"- Model (served): {result['served_model'] or 'not exposed'}",
+        f"- Manifest SHA-256: {result['manifest_sha256']}",
         f"- API: {result['api_url']}",
         f"- Runs: {result['runs_requested']}",
         f"- Success rate: {result['success_count']}/{result['runs_requested']} "
@@ -829,26 +918,48 @@ def render_markdown(result: dict[str, Any]) -> str:
         "",
         "## Attempts",
         "",
-        "| # | run_id | status | success | steps | wall_time_s | tokens | detail |",
-        "|---|--------|--------|---------|-------|--------------|--------|--------|",
+        "| # | run_id | status | success | steps | wall_time_s | tokens | stopped | detail |",
+        "|---|--------|--------|---------|-------|--------------|--------|---------|--------|",
     ]
     for attempt in result["attempts"]:
         detail = attempt.get("criterion_detail") or attempt.get("error") or ""
         detail = str(detail).replace("|", "/").replace("\n", " ").strip()
         tokens = attempt.get("tokens")
         lines.append(
-            "| {attempt} | {run_id} | {status} | {success} | {steps} | {wall} | {tokens} | {detail} |".format(
+            "| {attempt} | {run_id} | {status} | {success} | {steps} | {wall} | {tokens} | "
+            "{stopped} | {detail} |".format(
                 attempt=attempt.get("attempt"),
                 run_id=attempt.get("run_id") or "-",
                 status=attempt.get("status") or "-",
                 success="yes" if attempt.get("success") else "no",
-                steps=attempt.get("steps"),
+                steps="-" if attempt.get("steps") is None else attempt.get("steps"),
                 wall=attempt.get("wall_time_s"),
                 tokens="-" if tokens is None else tokens,
+                stopped="yes" if attempt.get("stopped") else "no",
                 detail=detail,
             )
         )
     return "\n".join(lines) + "\n"
+
+
+def _atomic_write_pair(
+    json_path: Path, json_text: str, markdown_path: Path, markdown_text: str
+) -> None:
+    """Writes both result files through temporaries, then renames them into place."""
+    tmp_json = json_path.with_name(json_path.name + ".tmp")
+    tmp_markdown = markdown_path.with_name(markdown_path.name + ".tmp")
+    try:
+        tmp_json.write_text(json_text, encoding="utf-8")
+        tmp_markdown.write_text(markdown_text, encoding="utf-8")
+        os.replace(tmp_json, json_path)
+        os.replace(tmp_markdown, markdown_path)
+    except OSError:
+        for tmp in (tmp_json, tmp_markdown):
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def write_results(
@@ -856,19 +967,23 @@ def write_results(
 ) -> Optional[tuple[Path, Path]]:
     """Writes the JSON result and the Markdown summary; returns their paths.
 
-    Returns None (and reports on stderr) when the files cannot be written, so a
-    broken output directory never escapes as a traceback.
+    The base name carries a random suffix so two runs in the same second do not
+    overwrite each other, and both files are written atomically. Returns None
+    (and reports on stderr) when the files cannot be written, so a broken output
+    directory never escapes as a traceback.
     """
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = f"{result['task_id']}-{stamp}"
+    base = f"{result['task_id']}-{stamp}-{uuid.uuid4().hex[:8]}"
     json_path = results_dir / f"{base}.json"
     markdown_path = results_dir / f"{base}.md"
     try:
         results_dir.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(
-            json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        _atomic_write_pair(
+            json_path,
+            json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+            markdown_path,
+            render_markdown(result),
         )
-        markdown_path.write_text(render_markdown(result), encoding="utf-8")
     except OSError as exc:
         print(f"error: cannot write results under {results_dir}: {exc}", file=sys.stderr)
         return None
@@ -906,6 +1021,13 @@ def _int_env(name: str, default: int) -> Optional[int]:
         return int(raw)
     except ValueError:
         return None
+
+
+def _flag_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def print_runbook(task: dict[str, Any], reason: str, repo_root: Path) -> None:
@@ -987,9 +1109,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
     results_dir = Path(args.results_dir) if args.results_dir else RESULTS_DIR
     findings_path = os.environ.get("BENCH_FINDINGS_PATH") or None
+    reset_enabled = _flag_env("BENCH_RESET_LAB", False)
 
     if not api_key:
         print_runbook(task, "no API key (set HERMES_API_KEY or HERMES_API_SERVER_KEY in .env)", REPO_ROOT)
+        return 1
+    config_error = validate_api_config(api_url, api_key)
+    if config_error:
+        print(f"error: {config_error}", file=sys.stderr)
         return 1
 
     try:
@@ -998,14 +1125,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         print_runbook(task, f"the stack is not reachable at {api_url}: {exc}", REPO_ROOT)
         return 1
 
-    lab_ok, lab_detail = preflight_lab(task, REPO_ROOT)
+    lab_ok, lab_detail = preflight_lab(task, REPO_ROOT, require_clean=not reset_enabled)
     if not lab_ok:
         print_runbook(task, lab_detail, REPO_ROOT)
+        return 1
+
+    try:
+        manifest_digest = manifest_sha256(manifest_path)
+    except OSError as exc:
+        print(f"error: cannot hash manifest {manifest_path}: {exc}", file=sys.stderr)
         return 1
 
     started_at = _utc_now()
     records: list[dict[str, Any]] = []
     for number in range(1, runs + 1):
+        if reset_enabled:
+            reset_ok, reset_detail = reset_lab(REPO_ROOT, str(task["lab"]))
+            if not reset_ok:
+                print(f"error: cannot reset lab {task['lab']!r}: {reset_detail}", file=sys.stderr)
+                return 1
+            print(f"lab reset: {reset_detail}")
         record = run_attempt(
             task,
             number,
@@ -1019,7 +1158,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(
             f"[{number}/{runs}] status={record['status']} success={record['success']} "
             f"steps={record['steps']} wall_time_s={record['wall_time_s']} "
-            f"tokens={record['tokens']}"
+            f"tokens={record['tokens']} stopped={record['stopped']}"
         )
 
     result = build_result(
@@ -1029,6 +1168,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         url=api_url,
         benchmark_version=manifest["benchmark_version"],
         started_at=started_at,
+        manifest_sha256=manifest_digest,
     )
     written = write_results(result, results_dir)
     if written is None:
@@ -1038,7 +1178,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(
         f"success_rate={stats['success_rate']:.3f} "
         f"median_wall_time_s={stats['median_wall_time_s']} "
-        f"median_steps={stats['median_steps']} median_tokens={stats['median_tokens']}"
+        f"median_steps={stats['median_steps']} median_tokens={stats['median_tokens']} "
+        f"served_model={result['served_model']}"
     )
     print(f"wrote {json_path}")
     print(f"wrote {markdown_path}")
