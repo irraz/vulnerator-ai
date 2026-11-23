@@ -11,6 +11,8 @@ They do not import `mcp`/`anyio`: only standard library + pytest. They verify:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -138,3 +140,153 @@ def test_main_prints_line_and_returns_zero(staging, capsys):
     out = capsys.readouterr().out
     assert "report generated: eng-main/pentest-report.md" in out
     assert "1 findings" in out
+
+
+# ------------------------------------------------------------------ render_html / determinism
+
+_EXAMPLE_FINDINGS_PATH = Path(__file__).resolve().parents[3] / "docs" / "example-findings.jsonl"
+_FIXED_TIME = "2026-11-23T00:00:00Z"
+
+
+def _example_findings() -> list[dict]:
+    """Synthetic engagement built from the documented findings-store sample."""
+    lines = _EXAMPLE_FINDINGS_PATH.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def test_render_html_is_byte_deterministic():
+    findings = _example_findings()
+    first = report_gen.render_html("eng-det", findings, generated_at=_FIXED_TIME)
+    second = report_gen.render_html("eng-det", findings, generated_at=_FIXED_TIME)
+    assert first == second
+    assert hashlib.sha256(first.encode("utf-8")).hexdigest() == hashlib.sha256(
+        second.encode("utf-8")
+    ).hexdigest()
+
+
+def test_render_html_has_all_required_sections():
+    document = report_gen.render_html("eng-x", _example_findings(), generated_at=_FIXED_TIME)
+    assert document.lstrip().lower().startswith("<!doctype html>")
+    for needle in (
+        "<header",
+        'class="report-meta"',
+        'class="cvss-hero"',
+        "01 /",
+        "Executive Summary",
+        "02 /",
+        "Main Finding",
+        "03 /",
+        "Exploitability Evidence",
+        "04 /",
+        "Evaluated &amp; Discarded Vectors",
+        "05 /",
+        "Remediation",
+        "06 /",
+        "Scope Compliance",
+        "<footer",
+    ):
+        assert needle in document, needle
+
+
+def test_render_html_empty_store_keeps_sections_without_secure_claim():
+    document = report_gen.render_html("eng-empty", [], generated_at=_FIXED_TIME)
+    assert 'class="cvss-hero"' in document
+    assert "No exploitable finding was confirmed" in document
+    assert "secure system" in document  # only to deny that verdict
+
+
+def test_render_html_escapes_untrusted_evidence():
+    finding = {
+        "title": "<script>alert('title')</script>",
+        "state": "confirmed",
+        "evidence": {
+            "command": "echo '<img src=x onerror=alert(1)>'",
+            "output": "<script>alert('output')</script>",
+            "returncode": 0,
+        },
+    }
+    document = report_gen.render_html("eng-esc", [finding], generated_at=_FIXED_TIME)
+    assert "&lt;script&gt;" in document
+    assert "<script>alert" not in document
+
+
+def test_render_html_evaluated_and_discarded_rows():
+    findings = [
+        {"title": "discarded vector", "state": "discarded"},
+        {"title": "open hypothesis", "state": "hypothesis"},
+    ]
+    document = report_gen.render_html("eng-vectors", findings, generated_at=_FIXED_TIME)
+    assert 'class="discarded-row"' in document
+    assert "discarded vector" in document
+    assert "open hypothesis" in document
+
+
+# ------------------------------------------------------------------ staged artifact names
+
+
+def _append_example_finding(engagement_id: str) -> None:
+    finding_store.append(
+        engagement_id,
+        {
+            "title": "Reproducible finding",
+            "state": "confirmed",
+            "phase": "observe",
+            "evidence": {
+                "command": "curl -sS http://192.0.2.1/",
+                "output": "HTTP/1.1 200 OK Server: lighttpd/1.4.39",
+                "returncode": 0,
+            },
+            "remediation": "Patch the service.",
+        },
+    )
+    finding_store.append(engagement_id, {"title": "Discarded vector", "state": "discarded"})
+
+
+def test_generate_html_stages_stable_name(staging):
+    _append_example_finding("eng-html")
+    result = report_gen.generate("eng-html", fmt="html", generated_at=_FIXED_TIME)
+    assert report_gen.REPORT_HTML_NAME == "pentest-report.html"
+    assert result["artifact"]["name"] == report_gen.REPORT_HTML_NAME
+    staged = artifact_store.resolve("eng-html", report_gen.REPORT_HTML_NAME)
+    assert staged.read_text(encoding="utf-8").startswith("<!doctype html>")
+    assert not artifact_store.resolve("eng-html", report_gen.REPORT_NAME).exists()
+
+
+def test_generate_both_stages_md_then_html(staging):
+    _append_example_finding("eng-both")
+    result = report_gen.generate("eng-both", fmt="both", generated_at=_FIXED_TIME)
+    assert [entry["name"] for entry in result["artifacts"]] == [
+        report_gen.REPORT_NAME,
+        report_gen.REPORT_HTML_NAME,
+    ]
+    assert result["artifact"]["name"] == report_gen.REPORT_NAME
+    assert artifact_store.resolve("eng-both", report_gen.REPORT_NAME).is_file()
+    assert artifact_store.resolve("eng-both", report_gen.REPORT_HTML_NAME).is_file()
+
+
+def test_generate_default_stays_markdown_only(staging):
+    _append_example_finding("eng-default")
+    result = report_gen.generate("eng-default", generated_at=_FIXED_TIME)
+    assert result["artifact"]["name"] == report_gen.REPORT_NAME
+    assert result["format"] == "md"
+    assert artifact_store.resolve("eng-default", report_gen.REPORT_NAME).is_file()
+    assert not artifact_store.resolve("eng-default", report_gen.REPORT_HTML_NAME).exists()
+
+
+def test_main_html_format_is_deterministic_with_fixed_timestamp(staging, capsys):
+    _append_example_finding("eng-cli")
+    argv = ["--engagement", "eng-cli", "--format", "html", "--generated-at", _FIXED_TIME]
+    assert report_gen.main(argv) == 0
+    first_out = capsys.readouterr().out
+    assert report_gen.main(argv) == 0
+    second_out = capsys.readouterr().out
+    assert "report generated: eng-cli/pentest-report.html" in first_out
+    assert first_out.split("sha256=")[-1] == second_out.split("sha256=")[-1]
+
+
+def test_main_both_prints_both_artifact_lines(staging, capsys):
+    _append_example_finding("eng-cli-both")
+    assert report_gen.main(["--engagement", "eng-cli-both", "--format", "both"]) == 0
+    out = capsys.readouterr().out
+    assert "eng-cli-both/pentest-report.md" in out
+    assert "eng-cli-both/pentest-report.html" in out
