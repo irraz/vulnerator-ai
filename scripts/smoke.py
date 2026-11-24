@@ -3,8 +3,8 @@
 
 It is a homegrown checker, not a product test: it validates that the declarative
 wiring (config.yaml + docker-compose.yml), the real tool surface (by AST, WITHOUT
-importing the servers), the annexes of ARCHITECTURE_MAP.md and the SDK-free purity
-of the logic modules still match what the map says.
+importing the servers), the annexes of ARCHITECTURE_MAP.md, the SDK-free purity
+of the logic modules and the labs documentation index still match what the map says.
 
 Usage:
     python3 scripts/smoke.py            # --quick (static + tests)
@@ -39,6 +39,7 @@ KALI_SERVER = ROOT / "docker" / "kali" / "kali_mcp_server.py"
 VULN_SERVER = ROOT / "docker" / "mcp" / "vulnerator_mcp_server.py"
 MAP = ROOT / "ARCHITECTURE_MAP.md"
 RUN_TESTS = ROOT / "scripts" / "run_tests.sh"
+LABS_INDEX = ROOT / "labs" / "README.md"
 
 GREEN, RED, WARN = "✅", "❌", "⚠️"
 
@@ -1044,6 +1045,66 @@ def run_suite(
     return proc.returncode, _parse_pytest_summary(output), output
 
 
+def lab_dirs(labs_dir: Path) -> list[str]:
+    """Immediate lab directories: the ones carrying a `docker-compose.yml`.
+
+    Build noise (`__pycache__`) and other side directories are not labs.
+    """
+    return sorted(p.name for p in labs_dir.iterdir() if p.is_dir() and (p / "docker-compose.yml").exists())
+
+
+def labs_index_issues(text: str, labs_dir: Path) -> tuple[list[str], list[str]]:
+    """Returns (undocumented labs, broken relative links) for a labs index text."""
+    names = lab_dirs(labs_dir)
+    undocumented = [name for name in names if f"`{name}/`" not in text]
+
+    broken: list[str] = []
+    for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):
+        if "://" in target or target.startswith("#"):
+            continue
+        path = (labs_dir / target.split("#")[0]).resolve()
+        try:
+            path.relative_to(labs_dir.resolve())
+        except ValueError:
+            continue
+        if not path.exists():
+            broken.append(target)
+
+    return undocumented, sorted(set(broken))
+
+
+def check_labs_index(rep: Report) -> None:
+    """Every lab must be documented in `labs/README.md`, and its links must resolve."""
+    section = "labs"
+
+    try:
+        label = str(LABS_INDEX.relative_to(ROOT))
+    except ValueError:  # a test or an out-of-tree checkout pointed LABS_INDEX elsewhere
+        label = str(LABS_INDEX)
+
+    if not LABS_INDEX.exists():
+        rep.bad(section, f"missing {label}")
+        return
+
+    text = read_text_file(rep, section, LABS_INDEX)
+    if text is None:
+        return
+
+    undocumented, broken = labs_index_issues(text, LABS_INDEX.parent)
+    if undocumented:
+        rep.bad(section, f"labs/README.md does not document: {undocumented}")
+    else:
+        rep.ok(
+            section,
+            f"labs/README.md documents all {len(lab_dirs(LABS_INDEX.parent))} labs",
+        )
+
+    if broken:
+        rep.bad(section, f"labs/README.md has unresolved links: {broken}")
+    else:
+        rep.ok(section, "labs/README.md relative links resolve")
+
+
 def check_tests(rep: Report, strict_suites: bool = False) -> None:
     section = "tests"
     uv = find_uv()
@@ -1150,6 +1211,7 @@ def main() -> int:
         check_tools(rep)
         check_map(rep)
         check_imports(rep)
+        check_labs_index(rep)
         print(
             f"[check] result: {GREEN if rep.failures == 0 else RED} "
             f"failures={rep.failures} warnings={rep.warnings}"
