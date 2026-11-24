@@ -1,5 +1,5 @@
 # pinguinazo-ssti — SSTI lab for Vulnerator-AI
-# Inspired by the "Pinguinazo" machine from dockerlabs.es (© El Pingüino de Mario).
+# Inspired by the "Pinguinazo" machine from dockerlabs.es (© Mario's Penguin).
 # Reimplemented as a standalone lab integrated into the vulnerator-ai network.
 #
 # Vulnerability: Flask/Jinja2 SSTI via render_template_string() with unsanitised input.

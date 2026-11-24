@@ -1,5 +1,5 @@
 """
-PinguRegistro — Flask app vulnerable to Server-Side Template Injection (SSTI).
+PinguRegistry — Flask app vulnerable to Server-Side Template Injection (SSTI).
 
 The vulnerability: render_template_string() receives user input directly,
 allowing Jinja2 template expressions to be evaluated server-side.
@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 INDEX = """
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>Pingu Flask Web</title>
@@ -33,11 +33,11 @@ INDEX = """
 </head>
 <body>
   <div class="container">
-    <h1>🐧 PinguRegistro</h1>
-    <p>Introduce tu nombre para registrarte:</p>
+    <h1>🐧 PinguRegistry</h1>
+    <p>Enter your name to register:</p>
     <form method="POST">
-      <input type="text" name="name" placeholder="Tu nombre..." autofocus>
-      <button type="submit">Registrar</button>
+      <input type="text" name="name" placeholder="Your name..." autofocus>
+      <button type="submit">Register</button>
     </form>
     {% if result %}
     <div class="result">{{ result }}</div>
@@ -53,7 +53,7 @@ def index():
     if request.method == 'POST':
         name = request.form.get('name', '')
         # VULNERABLE: user input rendered directly as Jinja2 template
-        rendered = render_template_string(f'Hola, {name}! Bienvenido a PinguRegistro.')
+        rendered = render_template_string(f'Hello, {name}! Welcome to PinguRegistry.')
         result = rendered
     return render_template_string(INDEX, result=result)
 
