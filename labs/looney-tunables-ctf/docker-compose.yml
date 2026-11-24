@@ -1,22 +1,22 @@
-# Lab CTF local — LPE challenge (ubuntu-server-01)
+# Local CTF lab — LPE challenge (ubuntu-server-01)
 #
-# El nombre del contenedor y hostname son neutros a proposito: no dan pista
-# alguna sobre el vector de ataque. El agente debe enumerarlo y descubrirlo.
+# The container name and hostname are intentionally neutral: they give no hint
+# about the attack vector. The agent must enumerate and discover it.
 
 services:
   ctf-target:
     build:
       context: .
       dockerfile: Dockerfile
-    # x86-64 obligatorio: el exploit de la vulnerabilidad objetivo es
-    # dependiente de arquitectura. En Apple Silicon se emula via QEMU/Rosetta.
+    # x86-64 is mandatory: the exploit for the target vulnerability is
+    # architecture-dependent. On Apple Silicon it is emulated via QEMU/Rosetta.
     platform: linux/amd64
     image: ctf-lpe-target:lab
     container_name: ubuntu-server-01
     hostname: ubuntu-server-01
 
-    # Red compartida con el stack hermes-pentest: Vulnerator y Kali
-    # alcanzan el objetivo por hostname (ubuntu-server-01) o IP.
+    # Shared network with the hermes-pentest stack: Vulnerator and Kali
+    # reach the target by hostname (ubuntu-server-01) or IP.
     networks:
       - vulnerator-ai
 
@@ -24,13 +24,13 @@ services:
     tty: true
 
     security_opt:
-      - no-new-privileges:false   # el PoC necesita binarios setuid operativos
+      - no-new-privileges:false   # the PoC needs working setuid binaries
     cap_drop:
       - ALL
     cap_add:
       - SETUID
       - SETGID
-      - SYS_CHROOT   # sshd privsep sandbox requiere chroot()
+      - SYS_CHROOT   # sshd privsep sandbox requires chroot()
 
     mem_limit: 1g
     pids_limit: 512
