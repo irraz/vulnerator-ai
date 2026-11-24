@@ -231,6 +231,7 @@ The README is intentionally short. The detail lives under [`docs/`](docs/):
 | Architecture, OODA design, findings-store schema | [`docs/design.md`](docs/design.md) |
 | **Verifiable architecture map** (components, 21+6 MCP tools, compose, tests — every claim with `file:line`) | [`ARCHITECTURE_MAP.md`](ARCHITECTURE_MAP.md) |
 | Sample redacted deliverable | [`docs/example-report.md`](docs/example-report.md) |
+| Index of local security labs (PHP2Shell, Looney Tunables, Pinguinazo SSTI) | [`labs/README.md`](labs/README.md) |
 
 Worktree smoke test (YAML contracts, tools by AST, map annexes and SDK-free imports):
 

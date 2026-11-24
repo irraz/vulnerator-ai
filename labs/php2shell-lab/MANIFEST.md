@@ -1,57 +1,57 @@
 # Manifest — PHP2Shell Lab
 
-Inventario completo de ficheros y configuraciones del lab.
+Complete inventory of the lab's files and configurations.
 
 ---
 
-## Ficheros de documentación
+## Documentation files
 
-| Fichero         | Propósito                                                                 |
-|-----------------|---------------------------------------------------------------------------|
-| `README.md`     | Descripción general, versión vulnerable, arranque/parada, endpoints       |
-| `CHAINS.md`     | Detalle técnico de las 5 cadenas de ataque (A, B, C, D, E)               |
-| `TESTING.md`    | Guías de verificación paso a paso con scripts de prueba                   |
-| `MANIFEST.md`   | Este archivo — inventario completo del lab                                |
-| `.gitignore`    | Excluir ficheros temporales, logs y sesiones de control de versiones     |
+| File             | Purpose                                                                 |
+|------------------|-------------------------------------------------------------------------|
+| `README.md`     | Overview, vulnerable version, start/stop, endpoints                     |
+| `CHAINS.md`     | Technical detail of the five attack chains (A, B, C, D, E)              |
+| `TESTING.md`    | Step-by-step verification guides with test scripts                      |
+| `MANIFEST.md`   | This file — complete lab inventory                                      |
+| `.gitignore`    | Exclude temporary files, logs and sessions from version control         |
 
 ---
 
-## Ficheros de infraestructura
+## Infrastructure files
 
-| Fichero              | Propósito                                                             |
+| File                 | Purpose                                                             |
 |----------------------|-----------------------------------------------------------------------|
-| `docker-compose.yml` | Orquestación de 3 contenedores: nginx, php-fpm, apache mod_php       |
-| `nginx.conf`         | Configuración de nginx como proxy reverso hacia php-fpm               |
-| `php.ini`            | Configuración PHP-FPM vulnerable (`upload_progress=On`, `cleanup=Off`)|
-| `php-apache.ini`     | Configuración Apache mod_php (`memory_limit=32M` para Chain D)        |
+| `docker-compose.yml` | Orchestration of 3 containers: nginx, php-fpm, apache mod_php        |
+| `nginx.conf`         | nginx reverse-proxy configuration to php-fpm                         |
+| `php.ini`            | Vulnerable PHP-FPM configuration (`upload_progress=On`, `cleanup=Off`) |
+| `php-apache.ini`     | Apache mod_php configuration (`memory_limit=32M` for Chain D)        |
 
 ---
 
-## Aplicación web vulnerable (`webroot/`)
+## Vulnerable web application (`webroot/`)
 
-| Fichero / Directorio    | Propósito                                                                |
-|-------------------------|--------------------------------------------------------------------------|
-| `index.php`             | Endpoint principal con `session_start()`, informa versión/SAPI          |
-| `nosession.php`         | Variante sin `session_start()`, informa versión                          |
-| `vuln.php`              | **LFI simulado** para Chain A (`include($_GET['page'])` sin sanitizar) |
-| `app/.user.ini`         | Handler `php_serialize` (Chain C escritura)                              |
-| `app/upload.php`        | Copia de `nosession.php` con handler `php_serialize`                     |
-| `api/.user.ini`         | Handler `php` (Chain C lectura/deserialización)                          |
-| `api/endpoint.php`      | Copia de `nosession.php` con handler `php`                               |
-
----
-
-## Contenedores Docker
-
-| Nombre              | Imagen                | Binding                | SAPI            | Propósito                           |
-|---------------------|-----------------------|------------------------|-----------------|-------------------------------------|
-| `php2shell-nginx`   | `nginx:alpine`        | `127.0.0.1:18080→80`   | (proxy)         | Front nginx hacia php-fpm           |
-| `php2shell-fpm`     | `php:8.2.34-fpm`      | `127.0.0.1:9000→9000`  | `fpm-fcgi`      | PHP-FPM vulnerable (Chains A, C, E) |
-| `php2shell-apache`  | `php:8.2.34-apache`   | `127.0.0.1:18081→80`   | `apache2handler`| Apache mod_php vulnerable (Chain D) |
+| File / Directory     | Purpose                                                                |
+|----------------------|--------------------------------------------------------------------------|
+| `index.php`          | Main endpoint with `session_start()`, reports version/SAPI              |
+| `nosession.php`      | Variant without `session_start()`, reports version                      |
+| `vuln.php`           | **Simulated LFI** for Chain A (`include($_GET['page'])` unsanitized)   |
+| `app/.user.ini`      | `php_serialize` handler (Chain C write)                                 |
+| `app/upload.php`     | Copy of `nosession.php` with the `php_serialize` handler                |
+| `api/.user.ini`      | `php` handler (Chain C read/deserialization)                           |
+| `api/endpoint.php`   | Copy of `nosession.php` with the `php` handler                          |
 
 ---
 
-## Configuración vulnerable clave
+## Docker containers
+
+| Name               | Image               | Binding               | SAPI             | Purpose                            |
+|--------------------|---------------------|-----------------------|------------------|------------------------------------|
+| `php2shell-nginx`  | `nginx:alpine`      | `127.0.0.1:18080→80`  | (proxy)          | nginx front end to php-fpm         |
+| `php2shell-fpm`    | `php:8.2.34-fpm`    | `127.0.0.1:9000→9000` | `fpm-fcgi`       | Vulnerable PHP-FPM (Chains A, C, E) |
+| `php2shell-apache` | `php:8.2.34-apache` | `127.0.0.1:18081→80`  | `apache2handler` | Vulnerable Apache mod_php (Chain D)|
+
+---
+
+## Key vulnerable configuration
 
 ### PHP-FPM (`php.ini`)
 
@@ -68,7 +68,7 @@ error_reporting = E_ALL
 ### Apache mod_php (`php-apache.ini`)
 
 ```ini
-memory_limit = 32M           # Bajo para facilitar OOM en Chain D
+memory_limit = 32M           # Low to facilitate OOM in Chain D
 post_max_size = 256M
 upload_max_filesize = 256M
 session.upload_progress.enabled = On
@@ -78,61 +78,59 @@ display_errors = On
 
 ---
 
-## Superficie de ataque por chain
+## Attack surface by chain
 
-| Chain | Endpoint(s)                           | Config clave                                  | Severidad |
-|-------|---------------------------------------|-----------------------------------------------|-----------|
-| A     | `:18080/vuln.php` + `:18080/index.php`| `upload_progress=On`, `cleanup=Off`, LFI     | Alta      |
-| B     | (no implementado)                     | Requiere `unserialize()` endpoint + gadget    | Alta      |
-| C     | `:18080/app/` + `:18080/api/`         | Handler mismatch vía `.user.ini`              | Alta      |
-| D     | `:18081/` (Apache mod_php)            | `memory_limit=32M`, OOM en startup            | Crítica   |
-| E     | `:18080/` (PHP-FPM)                   | Requiere sesión grande pre-poblada            | Alta      |
+| Chain | Endpoint(s)                          | Key config                                   | Severity  |
+|-------|--------------------------------------|----------------------------------------------|-----------|
+| A     | `:18080/vuln.php` + `:18080/index.php`| `upload_progress=On`, `cleanup=Off`, LFI    | High      |
+| B     | (not implemented)                    | Requires `unserialize()` endpoint + gadget   | High      |
+| C     | `:18080/app/` + `:18080/api/`        | Handler mismatch via `.user.ini`             | High      |
+| D     | `:18081/` (Apache mod_php)           | `memory_limit=32M`, OOM at startup           | Critical  |
+| E     | `:18080/` (PHP-FPM)                  | Requires a large pre-populated session       | High      |
 
 ---
 
-## Verificación rápida
+## Quick verification
 
 ```bash
-# 1. Arrancar el lab
+# 1. Start the lab
 docker compose up -d
 
-# 2. Verificar versión vulnerable
+# 2. Verify the vulnerable version
 curl -s http://127.0.0.1:18080/index.php
-# Salida esperada: PHP 8.2.34, SAPI fpm-fcgi, upload_progress 1
+# Expected output: PHP 8.2.34, SAPI fpm-fcgi, upload_progress 1
 
-# 3. Confirmar contenedores arriba
+# 3. Confirm the containers are up
 docker ps --filter "name=php2shell"
 
-# 4. Ejecutar tests (ver TESTING.md)
-python3 test_chain_a.py
-./test_chain_c.sh
-python3 test_chain_d.py
-
-# 5. Parar el lab
+# 4. Stop the lab
 docker compose down
 ```
 
----
-
-## Tamaños aproximados
-
-- **Imágenes Docker:** ~150MB (`nginx:alpine`) + ~500MB (`php:8.2.34-fpm`) + ~500MB (`php:8.2.34-apache`) = ~1.15GB total
-- **Webroot:** <10KB (ficheros PHP mínimos)
-- **Configuración:** <5KB (`.ini` y `nginx.conf`)
+For deeper chain-by-chain verification (multipart injection and LFI checks with curl), see **[TESTING.md](TESTING.md)**.
 
 ---
 
-## Referencias técnicas
+## Approximate sizes
+
+- **Docker images:** ~150MB (`nginx:alpine`) + ~500MB (`php:8.2.34-fpm`) + ~500MB (`php:8.2.34-apache`) = ~1.15GB total
+- **Webroot:** <10KB (minimal PHP files)
+- **Configuration:** <5KB (`.ini` and `nginx.conf`)
+
+---
+
+## Technical references
 
 - **CVE-2026-109618:** RCE via OOM corruption — `longjmp()` leaves request state invalid
 - **CVE-2026-109619:** RCE via stale global state — worker retains freed request memory
-- **Patch oficial:** [Commit 3584a98](https://github.com/php/php-src/commit/3584a98bda) — 300 files changed, replaces `longjmp()` with delayed soft OOM + hard `_exit()`
-- **Investigación original:** [ikow/php2shell-poc](https://github.com/ikow/php2shell-poc)
-- **Templates de detección:** [Ademking/php2shell-nuclei-templates](https://github.com/Ademking/php2shell-nuclei-templates)
+- **Official patch:** [Commit 3584a98](https://github.com/php/php-src/commit/3584a98bda) — 300 files changed, replaces `longjmp()` with delayed soft OOM + hard `_exit()`
+- **Original research:** [ikow/php2shell-poc](https://github.com/ikow/php2shell-poc)
+- **Detection templates:** [Ademking/php2shell-nuclei-templates](https://github.com/Ademking/php2shell-nuclei-templates)
+- **Patched versions:** PHP 8.2.35, 8.3.36, 8.4.27, 8.5.12 (canonical list from `README.md`)
 
 ---
 
-**Lab creado:** 21 octubre 2026  
-**Versión vulnerable fijada:** PHP 8.2.34  
-**Uso autorizado:** CTF local, pentesting autorizado, desarrollo de herramientas de seguridad  
-**Prohibido:** uso contra sistemas externos sin autorización explícita
+**Lab created:** 21 October 2026
+**Pinned vulnerable version:** PHP 8.2.34
+**Authorized use:** local CTF, authorized pentesting, security tool development
+**Prohibited:** use against external systems without explicit authorization

