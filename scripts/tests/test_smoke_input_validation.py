@@ -301,6 +301,7 @@ def _labs_sandbox(tmp_path: Path) -> Path:
     for name in ("alpha-lab", "__pycache__", "notes"):
         (labs / name).mkdir(parents=True)
     (labs / "alpha-lab" / "docker-compose.yml").write_text(LABS_COMPOSE, encoding="utf-8")
+    (labs / "alpha-lab" / "README.md").write_text("# Alpha\n", encoding="utf-8")
     return labs
 
 
@@ -319,6 +320,9 @@ def test_undocumented_lab_and_broken_link_are_detected(tmp_path):
 
     documented = "# Labs\n\n`alpha-lab/` [ok](alpha-lab/docker-compose.yml)\n"
     assert smoke.labs_index_issues(documented, labs) == ([], [])
+
+    linked_only = "# Labs\n\n[the lab](alpha-lab/README.md)\n"
+    assert smoke.labs_index_issues(linked_only, labs) == ([], [])
 
 
 def test_check_labs_index_fails_on_missing_coverage(tmp_path, monkeypatch, capsys):

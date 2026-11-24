@@ -75,8 +75,8 @@ RUN sed -i \
 # returns the Ubuntu 23.04 kernel version that would correspond on bare metal.
 # The real /bin/uname binary is untouched; interception happens only via PATH.
 RUN printf '#!/bin/sh\n\
-# uname wrapper: devuelve kernel Ubuntu 23.04 realista en vez del kernel\n\
-# linuxkit de Docker Desktop para evitar falsos positivos en LinPEAS / LES.\n\
+# uname wrapper: reports a realistic Ubuntu 23.04 kernel instead of the\n\
+# linuxkit kernel of Docker Desktop, avoiding false positives in LinPEAS / LES.\n\
 FAKE_RELEASE="6.2.0-39-generic"\n\
 /bin/uname "$@" | sed "s/[0-9][0-9]*\\.[0-9][0-9]*\\.[0-9][0-9]*-linuxkit/${FAKE_RELEASE}/g"\n\
 ' > /usr/local/bin/uname && chmod +x /usr/local/bin/uname

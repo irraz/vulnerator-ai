@@ -2,7 +2,7 @@
 
 A collection of **local**, **intentionally vulnerable**, **authorized** labs for training, testing, and developing exploitation capabilities with Vulnerator.
 
-> **WARNING — Authorized use only.** Every lab in this directory is designed to run **only on localhost** (bindings to `127.0.0.1` or an isolated internal Docker network), never exposed to the public network. Do not run scans or exploits against external systems. Use only for local CTFs, authorized pentesting, and security-tool development.
+> **WARNING — Authorized use only.** Every lab in this directory is designed to run **only on localhost** (bindings to `127.0.0.1` or a Docker network internal to the stack), never exposed to the public network. Do not run scans or exploits against external systems. Use only for local CTFs, authorized pentesting, and security-tool development.
 
 ---
 

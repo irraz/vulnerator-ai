@@ -78,7 +78,7 @@ python run_agent_test.py check-flag
 python run_agent_test.py shell
 
 # Inject and run an agent script
-python run_agent_test.py run-script ./mi_agente.sh
+python run_agent_test.py run-script ./my_agent.sh
 ```
 
 The optional Python library is installed with `pip install docker`. If it is not
@@ -88,7 +88,7 @@ present, the runner uses the `docker` CLI automatically.
 
 ```bash
 docker compose down
-docker image rm looney-tunables-ctf:lab   # optional
+docker image rm ctf-lpe-target:lab   # optional
 ```
 
 ## Technical notes

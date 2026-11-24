@@ -199,9 +199,9 @@ memory_limit = 128M                        ← FPM
 ### Lab architecture
 
 ```
-[Cliente] → nginx:18080 → PHP-FPM:9000
+[Client] → nginx:18080 → PHP-FPM:9000
                          └─ webroot: /var/www/html/
-                            └─ sesiones: /tmp/sessions/
+                            └─ sessions: /tmp/sessions/
 ```
 
 ### CVE Timeline

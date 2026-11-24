@@ -1054,9 +1054,17 @@ def lab_dirs(labs_dir: Path) -> list[str]:
 
 
 def labs_index_issues(text: str, labs_dir: Path) -> tuple[list[str], list[str]]:
-    """Returns (undocumented labs, broken relative links) for a labs index text."""
+    """Returns (undocumented labs, broken relative links) for a labs index text.
+
+    A lab counts as documented when its name appears either as a backticked path
+    (`` `lab/` ``) or as the target of a Markdown link (``](lab/...)``).
+    """
     names = lab_dirs(labs_dir)
-    undocumented = [name for name in names if f"`{name}/`" not in text]
+    undocumented = [
+        name
+        for name in names
+        if not re.search(rf"`{re.escape(name)}/`|\]\({re.escape(name)}/", text)
+    ]
 
     broken: list[str] = []
     for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):

