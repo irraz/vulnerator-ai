@@ -19,7 +19,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Browser + virtual display + VNC/noVNC + lightweight WM + fonts + tini (init). Pinned versions
 # (repo discipline). Cleanup of apt lists in the same layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      chromium=156.0.8078.79-1~deb12u1 \
+      chromium \
       xvfb=2:21.1.7-3+deb12u13 \
       x11vnc=0.9.16-9 \
       novnc=1:1.3.0-1 \

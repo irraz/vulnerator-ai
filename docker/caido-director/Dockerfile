@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      chromium=156.0.8078.79-1~deb12u1 \
+      chromium \
       xvfb=2:21.1.7-3+deb12u13 \
       x11vnc=0.9.16-9 \
       novnc=1:1.3.0-1 \
